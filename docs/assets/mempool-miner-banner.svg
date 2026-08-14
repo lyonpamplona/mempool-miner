@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" role="img" aria-labelledby="title desc">
+  <title id="title">Mempool Miner</title>
+  <desc id="desc">Fluxo animado entre Bitcoin, backend, Redis e uma grade de palavras.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1">
+      <stop offset="0" stop-color="#050505"/>
+      <stop offset="0.55" stop-color="#111827"/>
+      <stop offset="1" stop-color="#020617"/>
+    </linearGradient>
+    <linearGradient id="signal" x1="0" x2="1">
+      <stop stop-color="#f7931a"/>
+      <stop offset="0.55" stop-color="#22c55e"/>
+      <stop offset="1" stop-color="#0ea5e9"/>
+    </linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <style>
+    .packet { animation: travel 3.2s linear infinite; }
+    .packet.two { animation-delay: -1.6s; }
+    .cell { animation: pulse 2.4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+    .cell:nth-of-type(2n) { animation-delay: -.8s; }
+    .cursor { animation: blink 1s steps(2, end) infinite; }
+    @keyframes travel { from { offset-distance: 0%; } to { offset-distance: 100%; } }
+    @keyframes pulse { 50% { opacity: .45; transform: scale(.88); } }
+    @keyframes blink { 50% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+  </style>
+  <rect width="1200" height="320" rx="28" fill="url(#bg)"/>
+  <path d="M170 215 C360 120 570 250 810 155 S1030 105 1085 155" fill="none" stroke="url(#signal)" stroke-width="4" opacity=".48"/>
+  <circle class="packet" cx="0" cy="0" r="8" fill="#f7931a" filter="url(#glow)" style="offset-path:path('M170 215 C360 120 570 250 810 155 S1030 105 1085 155')"/>
+  <circle class="packet two" cx="0" cy="0" r="6" fill="#0ea5e9" filter="url(#glow)" style="offset-path:path('M170 215 C360 120 570 250 810 155 S1030 105 1085 155')"/>
+  <g transform="translate(78 142)">
+    <circle cx="64" cy="64" r="58" fill="#f7931a" opacity=".12" stroke="#f7931a" stroke-width="3"/>
+    <path d="M52 29v70M76 29v70M38 43h45c22 0 22 27 2 27H38m0 0h50c23 0 23 29-2 29H38" fill="none" stroke="#f7931a" stroke-width="8" stroke-linecap="round"/>
+  </g>
+  <g transform="translate(895 92)">
+    <rect class="cell" x="0" y="0" width="42" height="42" rx="7" fill="#f7931a" opacity=".9"/>
+    <rect class="cell" x="50" y="0" width="42" height="42" rx="7" fill="#22c55e"/>
+    <rect class="cell" x="100" y="0" width="42" height="42" rx="7" fill="#0ea5e9"/>
+    <rect class="cell" x="0" y="50" width="42" height="42" rx="7" fill="#0ea5e9"/>
+    <rect class="cell" x="50" y="50" width="42" height="42" rx="7" fill="#f7931a"/>
+    <rect class="cell" x="100" y="50" width="42" height="42" rx="7" fill="#22c55e"/>
+    <rect class="cell" x="0" y="100" width="42" height="42" rx="7" fill="#22c55e"/>
+    <rect class="cell" x="50" y="100" width="42" height="42" rx="7" fill="#0ea5e9"/>
+    <rect class="cell" x="100" y="100" width="42" height="42" rx="7" fill="#f7931a"/>
+  </g>
+  <text x="280" y="105" fill="#f8fafc" font-family="JetBrains Mono, monospace" font-size="53" font-weight="800">MEMPOOL MINER</text>
+  <text x="283" y="148" fill="#94a3b8" font-family="JetBrains Mono, monospace" font-size="21">BITCOIN EVENTS → PROOF OF SEARCH<tspan class="cursor">_</tspan></text>
+  <text x="283" y="246" fill="#e2e8f0" font-family="JetBrains Mono, monospace" font-size="18">FastAPI · ZMQ · Redis · WebSocket · Vanilla JS</text>
+</svg>

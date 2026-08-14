@@ -1,0 +1,42 @@
+name: Relatar bug
+description: Registre um comportamento reproduzível do Mempool Miner.
+title: "[Bug]: "
+labels: [bug, triage]
+body:
+  - type: markdown
+    attributes:
+      value: Não inclua senhas RPC, conteúdo do arquivo .env ou outros segredos.
+  - type: textarea
+    id: description
+    attributes:
+      label: O que aconteceu?
+      description: Descreva o resultado observado e o esperado.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Como reproduzir?
+      placeholder: |
+        1. Inicie...
+        2. Abra...
+        3. Observe...
+    validations:
+      required: true
+  - type: dropdown
+    id: network
+    attributes:
+      label: Rede Bitcoin
+      options: [regtest, signet, mainnet, não se aplica]
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Ambiente
+      placeholder: Windows 11, Docker Desktop, Chrome
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs sanitizados
+      render: shell

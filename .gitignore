@@ -1,0 +1,38 @@
+# Segredos e configuração local
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+.audit-venv/
+
+# JavaScript e ferramentas
+node_modules/
+npm-debug.log*
+
+# IDE e sistema operacional
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build, logs e dados locais
+dist/
+build/
+*.log
+data/
+bitcoin-data/
+redis-data/

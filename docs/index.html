@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Documentação técnica e arquitetura do Mempool Miner.">
+  <meta name="theme-color" content="#050505">
+  <title>Mempool Miner — Documentação técnica</title>
+  <link rel="stylesheet" href="site.css">
+</head>
+<body>
+  <a class="skip-link" href="#conteudo">Pular para o conteúdo</a>
+  <header class="site-header">
+    <nav class="nav" aria-label="Navegação principal">
+      <a class="brand" href="index.html"><span class="brand-mark">₿</span> MEMPOOL.MINER</a>
+      <div class="nav-links">
+        <a href="ARQUITETURA.md">Arquitetura</a>
+        <a href="FLUXOS.md">Fluxos</a>
+        <a href="api.html">API</a>
+        <a href="AUDITORIA.md">Auditoria</a>
+        <a href="ROADMAP.md">Roadmap</a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="conteudo">
+    <section class="container hero">
+      <div>
+        <p class="eyebrow">Documentação técnica · 2026</p>
+        <h1>Do evento Bitcoin à grade.</h1>
+        <p class="lead">Arquitetura, contratos, fluxos, operação e riscos do
+          Mempool Miner em uma base única, versionável e transparente.</p>
+        <div class="actions">
+          <a class="button primary" href="TUTORIAL.md">Executar o projeto</a>
+          <a class="button" href="ARQUITETURA.md">Explorar arquitetura</a>
+          <a class="button" href="api.html">Abrir API técnica</a>
+        </div>
+      </div>
+      <div class="hero-visual">
+        <img src="assets/mempool-miner-banner.svg" alt="Fluxo visual do Mempool Miner">
+      </div>
+    </section>
+
+    <section class="container" aria-label="Indicadores do projeto">
+      <div class="metrics">
+        <div class="metric"><strong>4</strong><span>serviços no Compose</span></div>
+        <div class="metric"><strong>6</strong><span>palavras por rodada</span></div>
+        <div class="metric"><strong>3</strong><span>tamanhos de matriz</span></div>
+        <div class="metric"><strong>1</strong><span>origem HTTP/WS</span></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <div class="section-intro">
+          <p class="eyebrow">Mapa do sistema</p>
+          <h2>Uma pipeline orientada a eventos</h2>
+          <p class="muted">Bitcoin Core publica, FastAPI transforma, Redis
+            distribui e o navegador converte seis transações em uma partida.</p>
+        </div>
+        <div class="flow" aria-label="Bitcoin Core para navegador">
+          <div class="flow-node">Bitcoin Core</div><div class="flow-arrow">→</div>
+          <div class="flow-node">ZMQ + Engine</div><div class="flow-arrow">→</div>
+          <div class="flow-node">Redis + API</div><div class="flow-arrow">→</div>
+          <div class="flow-node">Navegador</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt">
+      <div class="container">
+        <div class="section-intro">
+          <p class="eyebrow">Componentes</p>
+          <h2>Responsabilidades explícitas</h2>
+        </div>
+        <div class="grid four">
+          <article class="card">
+            <img class="icon" src="assets/bitcoin.svg" alt="">
+            <h3>Bitcoin Core</h3>
+            <p>rawtx, hashblock, getmempoolentry e getmempoolinfo.</p>
+          </article>
+          <article class="card">
+            <img class="icon" src="assets/backend.svg" alt="">
+            <h3>FastAPI</h3>
+            <p>BIP39, taxa, lifecycle, REST e gateway WebSocket.</p>
+          </article>
+          <article class="card">
+            <img class="icon" src="assets/redis.svg" alt="">
+            <h3>Redis</h3>
+            <p>Fan-out, contador observado, recordes e persistência AOF.</p>
+          </article>
+          <article class="card">
+            <img class="icon" src="assets/frontend.svg" alt="">
+            <h3>Frontend</h3>
+            <p>Grade responsiva, corrida, loja e feedback acessível.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <div class="section-intro">
+          <p class="eyebrow">Leitura orientada</p>
+          <h2>Comece pelo seu objetivo</h2>
+        </div>
+        <div class="grid three">
+          <article class="card">
+            <span class="tag ok">Operar</span>
+            <h3>Do zero à primeira rodada</h3>
+            <p>Ambiente, regtest, carteira, transações, logs e comandos.</p>
+            <div class="actions"><a class="button" href="TUTORIAL.md">Tutorial</a><a class="button" href="COMANDOS.md">Runbook</a></div>
+          </article>
+          <article class="card">
+            <span class="tag">Desenvolver</span>
+            <h3>Contratos e módulos</h3>
+            <p>Funções, dados, sequências, REST, WebSocket e decisões.</p>
+            <div class="actions"><a class="button" href="MODULOS.md">Módulos</a><a class="button" href="API.md">Contratos</a></div>
+          </article>
+          <article class="card">
+            <span class="tag warn">Evoluir</span>
+            <h3>Riscos e prioridades</h3>
+            <p>Achados corrigidos, pendências, critérios de aceite e fases.</p>
+            <div class="actions"><a class="button" href="AUDITORIA.md">Auditoria</a><a class="button" href="ROADMAP.md">Roadmap</a></div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt">
+      <div class="container">
+        <div class="section-intro">
+          <p class="eyebrow">Transparência</p>
+          <h2>Integração real, economia simulada</h2>
+        </div>
+        <div class="grid two">
+          <article class="card">
+            <span class="tag ok">Real</span>
+            <h3>Dados e transporte</h3>
+            <p>ZMQ, TXID, RPC, vsize, taxa, hash de bloco, Redis, HTTP e
+              WebSocket são componentes executáveis da stack.</p>
+          </article>
+          <article class="card">
+            <span class="tag warn">Simulado</span>
+            <h3>Narrativa do jogo</h3>
+            <p>Saldo, carteira, hashrate, recompensa, mineração e Lightning não
+              representam ativos ou operações financeiras.</p>
+          </article>
+        </div>
+        <p class="callout danger" style="margin-top:18px">O score ainda é
+          calculado pelo browser. Até o motor autoritativo do roadmap, o
+          leaderboard não é competitivo nem resistente a fraude.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-row">
+      <span>Mempool Miner · documentação versionada</span>
+      <span><a href="README.md">README</a> · <a href="SEGURANCA.md">Segurança</a> · <a href="DEPENDENCIAS.md">Dependências</a></span>
+    </div>
+  </footer>
+</body>
+</html>

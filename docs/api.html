@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Referência visual dos endpoints REST e eventos WebSocket do Mempool Miner.">
+  <meta name="theme-color" content="#050505">
+  <title>Mempool Miner — API técnica</title>
+  <link rel="stylesheet" href="site.css">
+</head>
+<body>
+  <a class="skip-link" href="#conteudo">Pular para a API</a>
+  <header class="site-header">
+    <nav class="nav" aria-label="Navegação principal">
+      <a class="brand" href="index.html"><span class="brand-mark">{ }</span> API.MINER</a>
+      <div class="nav-links">
+        <a href="index.html">Documentação</a>
+        <a href="ARQUITETURA.md">Arquitetura</a>
+        <a href="API.md">Contrato Markdown</a>
+        <a href="api.html" aria-current="page">API visual</a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="conteudo">
+    <section class="container hero">
+      <div>
+        <p class="eyebrow">REST + WebSocket · v1.0.0</p>
+        <h1>Contrato técnico da API.</h1>
+        <p class="lead">Endpoints, validações, mensagens em tempo real, exemplos
+          e limites de segurança da interface pública do Mempool Miner.</p>
+        <div class="actions">
+          <a class="button primary" href="http://localhost:8010/backend-docs">Abrir Swagger local</a>
+          <a class="button" href="API.md">Especificação completa</a>
+          <a class="button" href="http://localhost:8010/openapi.json">OpenAPI JSON local</a>
+        </div>
+      </div>
+      <div class="hero-visual">
+        <img src="assets/websocket.svg" alt="Setas bidirecionais representando WebSocket" style="display:block;width:190px;margin:auto">
+        <p class="callout" style="margin:22px 0 0">Base local:
+          <strong>http://localhost:8010</strong><br>REST em /api e tempo real em /ws.</p>
+      </div>
+    </section>
+
+    <section class="container" aria-labelledby="console-title">
+      <div class="card">
+        <span class="tag">Smoke test</span>
+        <h2 id="console-title" style="font-size:1.55rem">Testar healthcheck</h2>
+        <p>Informe a origem do Nginx. A resposta é mostrada apenas como texto.</p>
+        <div class="api-console">
+          <label>
+            <span class="eyebrow" style="display:block;margin-bottom:8px">Base URL</span>
+            <input id="api-base" type="url" value="http://localhost:8010" aria-label="URL base da API">
+          </label>
+          <button class="button primary" id="test-health" type="button">Executar GET</button>
+        </div>
+        <pre id="api-output" aria-live="polite">Aguardando teste…</pre>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <div class="section-intro">
+          <p class="eyebrow">REST</p>
+          <h2>Operação e leaderboard</h2>
+        </div>
+        <div class="grid two">
+          <article class="card endpoint">
+            <header class="endpoint-head"><span class="method">GET</span><span class="path">/api/health</span></header>
+            <div class="endpoint-body">
+              <p>Verifica API e Redis.</p>
+              <pre>{
+  "status": "ok"
+}</pre>
+            </div>
+          </article>
+          <article class="card endpoint">
+            <header class="endpoint-head"><span class="method">GET</span><span class="path">/api/leaderboard</span></header>
+            <div class="endpoint-body">
+              <p>Top 10 por recorde decrescente.</p>
+              <pre>{
+  "leaderboard": [
+    {"username": "Miner_42", "score": 12500}
+  ]
+}</pre>
+            </div>
+          </article>
+          <article class="card endpoint">
+            <header class="endpoint-head"><span class="method post">POST</span><span class="path">/api/leaderboard</span></header>
+            <div class="endpoint-body">
+              <p>Atualiza somente se score superar o recorde.</p>
+              <pre>{
+  "username": "Miner_42",
+  "score": 12500
+}</pre>
+            </div>
+          </article>
+          <article class="card">
+            <span class="tag warn">Validação</span>
+            <h3>ScoreSubmit</h3>
+            <p>username: 1–12, letras/números Unicode, hífen e sublinhado.
+              score: inteiro de 0 a 2.147.483.647. Erros retornam HTTP 422.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt">
+      <div class="container">
+        <div class="section-intro">
+          <p class="eyebrow">Tempo real</p>
+          <h2>WebSocket /ws/game</h2>
+          <p class="muted">O servidor envia game_start e depois faz fan-out do
+            canal Redis. O cliente não envia comandos nesta versão.</p>
+        </div>
+        <div class="grid three">
+          <article class="card endpoint">
+            <header class="endpoint-head"><span class="method ws">WS</span><span class="path">game_start</span></header>
+            <div class="endpoint-body"><pre>{
+  "action": "game_start",
+  "network": "regtest",
+  "game_mode": "mempool",
+  "mempool_count": 0
+}</pre></div>
+          </article>
+          <article class="card endpoint">
+            <header class="endpoint-head"><span class="method ws">WS</span><span class="path">transaction_received</span></header>
+            <div class="endpoint-body"><pre>{
+  "action": "transaction_received",
+  "word": "ABANDON",
+  "tx_stub": "4a5e1e4b",
+  "is_golden": false,
+  "is_high_fee": true,
+  "vsize": 250,
+  "fee_rate_sat_vb": 24.5
+}</pre></div>
+          </article>
+          <article class="card endpoint">
+            <header class="endpoint-head"><span class="method ws">WS</span><span class="path">block_mined</span></header>
+            <div class="endpoint-body"><pre>{
+  "action": "block_mined",
+  "block_hash": "000000…",
+  "mempool_count": 3
+}</pre></div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container grid two">
+        <article class="card">
+          <span class="tag open">Risco aberto</span>
+          <h2 style="font-size:1.55rem">Sem autoridade de score</h2>
+          <p>Validação limita formato e tamanho, mas não prova que o jogador
+            ganhou a pontuação. Não exponha o ranking como competição ou ativo.</p>
+        </article>
+        <article class="card">
+          <span class="tag warn">Compatibilidade</span>
+          <h2 style="font-size:1.55rem">Evolução aditiva</h2>
+          <p>Novos campos podem ser adicionados. Renomear action ou remover
+            campos exige versão de protocolo, atualização do cliente e testes.</p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-row">
+      <span>Mempool Miner API v1.0.0</span>
+      <span><a href="TROUBLESHOOTING.md">Troubleshooting</a> · <a href="AUDITORIA.md">Auditoria</a> · <a href="SEGURANCA.md">Segurança</a></span>
+    </div>
+  </footer>
+  <script src="api-page.js"></script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-labelledby="t d">
+  <title id="t">Redis</title><desc id="d">Camadas de dados com movimento vertical.</desc>
+  <style>.top{animation:f 1.8s ease-in-out infinite}@keyframes f{50%{transform:translateY(-5px)}}@media(prefers-reduced-motion:reduce){*{animation:none!important}}</style>
+  <rect width="96" height="96" rx="20" fill="#111827"/>
+  <path d="M18 58l30 15 30-15-30-15z" fill="#ef4444" opacity=".45"/>
+  <path d="M18 47l30 15 30-15-30-15z" fill="#ef4444" opacity=".72"/>
+  <path class="top" d="M18 35l30 15 30-15-30-15z" fill="#ef4444"/>
+  <circle cx="48" cy="35" r="4" fill="#fff"/>
+</svg>

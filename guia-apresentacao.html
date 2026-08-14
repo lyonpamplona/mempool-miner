@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Apresentação completa do Mempool Miner, da proposta à arquitetura e ao roadmap.">
+  <meta name="theme-color" content="#050505">
+  <title>Mempool Miner — Apresentação do projeto</title>
+  <link rel="stylesheet" href="docs/site.css">
+</head>
+<body>
+  <a class="skip-link" href="#conteudo">Pular para a apresentação</a>
+  <header class="site-header">
+    <nav class="nav" aria-label="Navegação principal">
+      <a class="brand" href="/"><span class="brand-mark">₿</span> MEMPOOL.MINER</a>
+      <div class="nav-links">
+        <a href="#produto">Produto</a>
+        <a href="#arquitetura">Arquitetura</a>
+        <a href="#seguranca">Segurança</a>
+        <a href="docs/index.html">Documentação</a>
+        <a href="docs/api.html">API</a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="conteudo">
+    <section class="container hero">
+      <div>
+        <p class="eyebrow">Bitcoin events · playable data</p>
+        <h1>A mempool vira uma corrida de palavras.</h1>
+        <p class="lead">Mempool Miner transforma notificações de um nó Bitcoin
+          em desafios BIP39 ao vivo, conectando infraestrutura real a uma
+          experiência educacional transparente.</p>
+        <div class="actions">
+          <a class="button primary" href="/">Abrir o jogo</a>
+          <a class="button" href="docs/TUTORIAL.md">Executar localmente</a>
+          <a class="button" href="docs/api.html">Explorar API</a>
+        </div>
+      </div>
+      <div class="hero-visual">
+        <img src="docs/assets/mempool-miner-banner.svg" alt="Fluxo animado entre Bitcoin e caça-palavras">
+      </div>
+    </section>
+
+    <section class="container" aria-label="Resumo numérico">
+      <div class="metrics">
+        <div class="metric"><strong>ZMQ</strong><span>eventos de transação e bloco</span></div>
+        <div class="metric"><strong>BIP39</strong><span>TXID convertido em palavra</span></div>
+        <div class="metric"><strong>6 TX</strong><span>formam uma rodada</span></div>
+        <div class="metric"><strong>20–75s</strong><span>corrida local contra o tempo</span></div>
+      </div>
+    </section>
+
+    <section class="section" id="produto">
+      <div class="container">
+        <div class="section-intro">
+          <p class="eyebrow">Proposta</p>
+          <h2>Observar infraestrutura jogando</h2>
+          <p class="muted">Conceitos abstratos — mempool, TXID, taxa, vsize,
+            bloco e WebSocket — tornam-se sinais visuais dentro de uma mecânica
+            simples de caça-palavras.</p>
+        </div>
+        <div class="grid three">
+          <article class="card">
+            <span class="tag ok">Entrada real</span>
+            <h3>Eventos do Bitcoin Core</h3>
+            <p>rawtx e hashblock chegam por ZMQ; metadados vêm de JSON-RPC.</p>
+          </article>
+          <article class="card">
+            <span class="tag">Transformação</span>
+            <h3>Proof of Search</h3>
+            <p>O TXID gera uma palavra BIP39 e vsize ajusta a dificuldade visual.</p>
+          </article>
+          <article class="card">
+            <span class="tag warn">Narrativa simulada</span>
+            <h3>Economia do jogo</h3>
+            <p>Sats, hardware, hashrate e Lightning são progressão fictícia.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt">
+      <div class="container">
+        <div class="section-intro">
+          <p class="eyebrow">Experiência</p>
+          <h2>Uma rodada, passo a passo</h2>
+        </div>
+        <div class="grid four">
+          <article class="card"><span class="tag">01</span><h3>Conectar</h3><p>O browser abre /ws/game pelo proxy Nginx.</p></article>
+          <article class="card"><span class="tag">02</span><h3>Coletar</h3><p>Seis palavras únicas preenchem o buffer da rodada.</p></article>
+          <article class="card"><span class="tag">03</span><h3>Buscar</h3><p>Arraste em linha reta antes de expirar o cronômetro.</p></article>
+          <article class="card"><span class="tag">04</span><h3>Evoluir</h3><p>Use score fictício em dicas e upgrades simulados.</p></article>
+        </div>
+        <p class="callout" style="margin-top:18px">Um hashblock recebido durante
+          a partida encerra a rodada como bloco órfão. Em regtest, isso pode ser
+          demonstrado gerando um bloco pelo bitcoin-cli.</p>
+      </div>
+    </section>
+
+    <section class="section" id="arquitetura">
+      <div class="container">
+        <div class="section-intro">
+          <p class="eyebrow">Arquitetura</p>
+          <h2>Quatro serviços, uma origem pública</h2>
+        </div>
+        <div class="grid four">
+          <article class="card">
+            <img class="icon" src="docs/assets/bitcoin.svg" alt="">
+            <h3>Bitcoin Core</h3><p>Fonte de verdade para eventos e metadados.</p>
+          </article>
+          <article class="card">
+            <img class="icon" src="docs/assets/backend.svg" alt="">
+            <h3>FastAPI</h3><p>Ingestão singleton, domínio, REST e WebSocket.</p>
+          </article>
+          <article class="card">
+            <img class="icon" src="docs/assets/redis.svg" alt="">
+            <h3>Redis</h3><p>Pub/Sub, contador observado e recordes com AOF.</p>
+          </article>
+          <article class="card">
+            <img class="icon" src="docs/assets/frontend.svg" alt="">
+            <h3>Nginx + JS</h3><p>Interface, proxy same-origin e documentação.</p>
+          </article>
+        </div>
+        <div class="flow" aria-label="Fluxo técnico" style="margin-top:28px">
+          <div class="flow-node">rawtx</div><div class="flow-arrow">→</div>
+          <div class="flow-node">BIP39 + sats/vB</div><div class="flow-arrow">→</div>
+          <div class="flow-node">Redis Pub/Sub</div><div class="flow-arrow">→</div>
+          <div class="flow-node">WebSocket</div>
+        </div>
+        <div class="actions">
+          <a class="button" href="docs/ARQUITETURA.md">Arquitetura completa</a>
+          <a class="button" href="docs/FLUXOS.md">Todos os fluxos</a>
+          <a class="button" href="docs/MODULOS.md">Módulos e funções</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt" id="seguranca">
+      <div class="container">
+        <div class="section-intro">
+          <p class="eyebrow">Auditoria</p>
+          <h2>Problemas encontrados e tratados</h2>
+        </div>
+        <div class="grid three">
+          <article class="card"><span class="tag ok">Corrigido</span><h3>XSS no ranking</h3><p>Dados do servidor agora são inseridos com textContent.</p></article>
+          <article class="card"><span class="tag ok">Corrigido</span><h3>Eventos ×4</h3><p>A ingestão roda em um worker, sem subscribers duplicados.</p></article>
+          <article class="card"><span class="tag ok">Mitigado</span><h3>Portas e segredos</h3><p>RPC/Redis são internos e bitcoin.conf não contém senha.</p></article>
+          <article class="card"><span class="tag ok">Corrigido</span><h3>Grade insolúvel</h3><p>Palavras não sobrepõem; touch e direção foram corrigidos.</p></article>
+          <article class="card"><span class="tag ok">Corrigido</span><h3>Taxa e concorrência</h3><p>sats/vB correto e recorde atômico com ZADD GT.</p></article>
+          <article class="card"><span class="tag open">Aberto</span><h3>Score client-side</h3><p>Motor autoritativo é a prioridade principal do roadmap.</p></article>
+        </div>
+        <div class="actions">
+          <a class="button primary" href="docs/AUDITORIA.md">Ler auditoria</a>
+          <a class="button" href="docs/ROADMAP.md">Ver roadmap</a>
+          <a class="button" href="docs/SEGURANCA.md">Segurança técnica</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <div class="section-intro">
+          <p class="eyebrow">Próximos marcos</p>
+          <h2>De demo confiável a produto escalável</h2>
+        </div>
+        <div class="grid three">
+          <article class="card"><span class="tag open">P1</span><h3>Servidor autoritativo</h3><p>Sessão, ações idempotentes e score validado.</p></article>
+          <article class="card"><span class="tag warn">P1</span><h3>Ingestor dedicado</h3><p>Sequence, deduplicação, epoch e stream durável.</p></article>
+          <article class="card"><span class="tag">P2</span><h3>Produção</h3><p>rpcauth, TLS, SBOM, E2E, métricas e WCAG AA.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt">
+      <div class="container grid two">
+        <div>
+          <p class="eyebrow">Rodar agora</p>
+          <h2>Um Compose, quatro serviços.</h2>
+          <p class="muted">Copie o ambiente, use uma senha exclusiva, valide e
+            suba. O tutorial inclui a geração de transações regtest.</p>
+          <div class="actions"><a class="button primary" href="docs/TUTORIAL.md">Abrir tutorial</a><a class="button" href="docs/COMANDOS.md">Comandos</a></div>
+        </div>
+        <pre>Copy-Item .env.example .env
+docker compose config --quiet
+docker compose up -d --build
+
+# Interface
+http://localhost:8010</pre>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-row">
+      <span>Mempool Miner · Proof of Search</span>
+      <span>Integração Bitcoin real · economia de jogo simulada</span>
+    </div>
+  </footer>
+</body>
+</html>

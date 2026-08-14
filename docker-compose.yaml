@@ -1,0 +1,132 @@
+name: mempool-miner
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  bitcoind:
+    image: bitcoin/bitcoin:31.1
+    env_file:
+      - .env
+    command:
+      - -chain=${BITCOIN_NETWORK:-regtest}
+      - -rpcuser=${RPC_USER:?RPC_USER não definido}
+      - -rpcpassword=${RPC_PASSWORD:?RPC_PASSWORD não definido}
+      - -printtoconsole=1
+    restart: unless-stopped
+    volumes:
+      - ./bitcoin/bitcoin.conf:/home/bitcoin/.bitcoin/bitcoin.conf:ro
+      - bitcoin_data:/home/bitcoin/.bitcoin
+    networks:
+      - data
+      - p2p
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - bitcoin-cli -chain="$${BITCOIN_NETWORK:-regtest}" -rpcuser="$${RPC_USER}" -rpcpassword="$${RPC_PASSWORD}" getblockchaininfo > /dev/null 2>&1
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  backend:
+    build:
+      context: ./backend
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379
+      ZMQ_HOST: bitcoind
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      bitcoind:
+        condition: service_healthy
+    expose:
+      - "8000"
+    networks:
+      - edge
+      - data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=2)
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8010:80"
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/ > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 128M
+
+volumes:
+  bitcoin_data:
+  redis_data:
+
+networks:
+  edge:
+  data:
+    internal: true
+  p2p:

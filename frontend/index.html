@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Jogo educacional que transforma eventos da mempool Bitcoin em uma corrida de caça-palavras.">
+    <meta name="theme-color" content="#050505">
+    <meta name="api-base-url" content="/">
+    <title>Mempool Miner: Proof-of-Search</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <a class="skip-link" href="#word-grid">Pular para a grade</a>
+    <header class="dashboard glass-panel">
+        <div class="wallet-info">
+            <span class="wallet-label">Nome do minerador</span>
+            <span class="wallet-balance" id="ui-miner-name" style="font-size: 18px;">Anônimo</span>
+        </div>
+        <div class="wallet-info">
+            <span class="wallet-label">Saldo da carteira (sats)</span>
+            <span class="wallet-balance" id="ui-balance">0</span>
+        </div>
+        <div class="mining-stats">
+            <div class="stat-box">
+                <span class="wallet-label">Rodada local</span>
+                <span class="stat-val" id="ui-block">#1</span>
+            </div>
+            <div class="stat-box">
+                <span class="wallet-label">Nível de hardware</span>
+                <span class="stat-val halving" id="ui-hardware">CPU Miner</span>
+            </div>
+            <div class="stat-box">
+                <span class="wallet-label">Combo simulado</span>
+                <span class="stat-val" style="color: var(--success-green);" id="ui-combo">1.0×</span>
+            </div>
+        </div>
+    </header>
+
+    <div class="race-track">
+        <div class="race-bar-network" id="ui-network-progress" role="progressbar" aria-label="Tempo restante da rodada" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+    </div>
+
+    <main class="main-layout">
+        <!-- GLOBAL LEADERBOARD -->
+        <div class="side-panel glass-panel">
+            <div class="panel-header">Top 10 de recordes</div>
+            <div id="leaderboard-list" class="leaderboard-list" aria-live="polite">
+                <div class="loading-state">Carregando rankings...</div>
+            </div>
+        </div>
+
+        <!-- ÁREA CENTRAL -->
+        <div class="game-area">
+            <div class="word-bank glass-panel">
+                <div class="panel-header">Transações pendentes</div>
+                <div id="word-bank-list" class="word-bank-list" aria-live="polite">
+                    <div class="loading-state" id="tx-loading">Aguardando transações (0/6)...</div>
+                </div>
+            </div>
+
+            <div class="grid-wrapper glass-panel" id="grid-wrapper">
+                <svg id="lines-svg" class="svg-lines" aria-hidden="true"></svg>
+                <div id="word-grid" class="word-grid" role="grid" aria-label="Caça-palavras da rodada" tabindex="-1"></div>
+                
+                <div id="grid-overlay" class="grid-overlay">
+                    <div class="loader-spinner"></div>
+                    <div class="loader-text">Coletando Hashes da Mempool...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- MARKETPLACE INTERNO -->
+        <div class="side-panel glass-panel store-panel">
+            <div class="panel-header">Loja de upgrades</div>
+            
+            <div class="store-item">
+                <div class="store-info">
+                    <span class="store-title">Revelar dica</span>
+                    <span class="store-desc">Revela a 1ª letra de uma TX pendente.</span>
+                </div>
+                <button type="button" class="btn-store" id="btn-buy-hint" onclick="buyHint()">5,000 SATS</button>
+            </div>
+
+            <div class="store-item">
+                <div class="store-info">
+                    <span class="store-title" id="hw-title">Upgrade: ASIC Miner</span>
+                    <span class="store-desc">+10s de tempo contra a rede.</span>
+                </div>
+                <button type="button" class="btn-store btn-hardware" id="btn-buy-hw" onclick="buyHardware()">100,000 SATS</button>
+            </div>
+
+            <div class="store-item mt-auto lightning-item">
+                <div class="store-info">
+                    <span class="store-title">Modo Lightning (simulado)</span>
+                    <span class="store-desc">Ativa um upgrade L2 simulado: recompensas 10× e matriz condensada.</span>
+                </div>
+                <button type="button" class="btn-store btn-lightning" id="btn-buy-lightning" onclick="buyLightning()">1,000,000 SATS</button>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modais -->
+    <div class="modal-overlay active" id="tutorial-modal" role="dialog" aria-modal="true" aria-labelledby="tutorial-title" tabindex="-1">
+        <div class="modal-content glass-panel">
+            <h2 class="modal-title" id="tutorial-title">Proof of Search</h2>
+            <p class="modal-text">Você participa de uma simulação educacional alimentada por eventos do Bitcoin Core.<br><br>O tamanho da matriz adapta-se ao peso virtual (vsize) das transações. Transações grandes expandem o desafio para 15×15.<br><br>Ao atingir 1 milhão de sats fictícios, ative o upgrade Lightning. Ele é uma mecânica do jogo e não abre um canal nem movimenta fundos reais.</p>
+            <form onsubmit="event.preventDefault(); startSession();">
+                <label for="miner-input" class="visually-hidden">Nickname do minerador</label>
+                <input type="text" id="miner-input" class="miner-input" placeholder="Digite seu nickname" maxlength="12" autocomplete="nickname">
+                <button type="submit" class="btn" style="width:100%; margin-top: 15px;">Conectar ao backend</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="result-modal" role="dialog" aria-modal="true" aria-labelledby="result-title" aria-hidden="true" tabindex="-1">
+        <div class="modal-content glass-panel">
+            <h2 class="modal-title" id="result-title">Resultado da rodada</h2>
+            <p class="modal-text" id="result-text">Aguardando resultado.</p>
+            <button type="button" class="btn" id="next-btn" onclick="prepareNextBlock()">Próxima rodada</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="lightning-modal" role="dialog" aria-modal="true" aria-label="Ativação do modo Lightning" aria-hidden="true" tabindex="-1">
+        <div class="modal-content glass-panel" style="text-align: left; font-family: var(--font-mono); color: var(--success-green); background: #000; border-color: var(--lightning-blue);">
+            <div id="lightning-text" style="font-size: 13px; line-height: 1.8;"></div>
+        </div>
+    </div>
+
+    <footer class="project-links" aria-label="Documentação do projeto">
+        <a href="/apresentacao.html">Apresentação</a>
+        <a href="/docs/">Documentação</a>
+        <a href="/docs/api.html">API técnica</a>
+    </footer>
+
+    <script src="game.js"></script>
+</body>
+</html>
