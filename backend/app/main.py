@@ -1834,6 +1834,7 @@ class EventRelay:
             if message["type"] == "message":
                 try:
                     self.queue.put_nowait(message["data"])
+                    logger.debug("Relay %s: evento recebido (fila=%d)", self.realm_id, self.queue.qsize())
                 except asyncio.QueueFull:
                     logger.warning(
                         "Fila do relay cheia para %s; evento descartado",
@@ -1968,16 +1969,19 @@ async def serve_websocket(websocket: WebSocket, realm_id: str) -> None:
         realm_id: Realm solicitado pelo cliente.
     """
     if not websocket_origin_allowed(websocket):
+        logger.warning("WebSocket rejeitado: origem não permitida %s", websocket.headers.get("origin"))
         await websocket.close(code=1008, reason="Origem não permitida")
         return
 
     try:
         definition = get_network_definition(realm_id)
     except HTTPException:
+        logger.warning("WebSocket rejeitado: rede não encontrada %s", realm_id)
         await websocket.close(code=1008, reason="Rede não encontrada")
         return
 
     await websocket.accept()
+    logger.info("WebSocket aceito para %s (origin=%s)", realm_id, websocket.headers.get("origin"))
     sender_task: asyncio.Task[None] | None = None
     receiver_task: asyncio.Task[None] | None = None
 
@@ -2007,8 +2011,9 @@ async def serve_websocket(websocket: WebSocket, realm_id: str) -> None:
             raise RuntimeError("Falha ao montar evento inicial")
         try:
             await websocket.send_text(json.dumps(public_event, separators=(",", ":")))
+            logger.info("game_start enviado para %s", realm_id)
         except Exception as exc:
-            logger.debug("Cliente desconectou durante o handshake WebSocket: %s", exc)
+            logger.warning("Cliente desconectou durante o handshake WebSocket: %s", exc)
             return
 
         sender_task = asyncio.create_task(
