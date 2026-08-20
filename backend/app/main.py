@@ -1889,6 +1889,7 @@ async def ws_sender(
         relay: Relay persistente que fornece eventos do PubSub.
         heartbeat_interval: Intervalo em segundos para enviar heartbeat.
     """
+    logger.info("ws_sender iniciado para %s", realm_id)
     last_activity = asyncio.get_event_loop().time()
     while True:
         try:
@@ -1898,12 +1899,14 @@ async def ws_sender(
             except asyncio.TimeoutError:
                 # Heartbeat: se não houve atividade há mais que o intervalo,
                 # envia ping para manter a conexão viva.
+                logger.info("ws_sender heartbeat para %s", realm_id)
                 try:
                     await websocket.send_text(
                         json.dumps({"action": "heartbeat"}, separators=(",", ":"))
                     )
                 except RuntimeError:
                     # WebSocket já fechado — encerra o sender.
+                    logger.info("ws_sender WebSocket fechado para %s", realm_id)
                     return
                 last_activity = asyncio.get_event_loop().time()
                 continue
@@ -1913,9 +1916,11 @@ async def ws_sender(
             if serialized is None:
                 logger.debug("Evento Redis fora do contrato público foi ignorado")
                 continue
+            logger.info("ws_sender enviando evento para %s: %s", realm_id, raw_event[:100] if isinstance(raw_event, str) else str(raw_event)[:100])
             await websocket.send_text(serialized)
         except RuntimeError:
             # WebSocket já fechado — encerra o sender.
+            logger.info("ws_sender RuntimeError para %s", realm_id)
             return
 
 
