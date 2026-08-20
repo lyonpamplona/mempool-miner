@@ -903,6 +903,8 @@ function configureGridSize(size) {
  * Confirma o contrato mínimo de uma transação recebida pelo WebSocket.
  */
 function isValidTransactionEvent(data) {
+    // Valida campos obrigatorios: word, is_high_fee, is_golden, vsize
+    // Campos opcionais: is_mev, expand_grid, base_reward, multiplier, fee_rate_sat_vb
     return Boolean(
         data
         && typeof data === 'object'
