@@ -77,3 +77,28 @@ redis-data/
 *.internal.md
 *.private.md
 *.local.md
+
+# Auditoria e análise (arquivos temporários de trabalho)
+audit-*.md
+audit-*.py
+audit_*.py
+audit_*.json
+audit_*.html
+analysis-*.md
+visual_audit.py
+research-*.md
+PLANO-ACAO-*.md
+ROADMAP-REDESIGN-*.md
+
+# Hermes Agent (dados de sessão)
+.hermes/plans/
+.hermes/reports/
+
+# Zone.Identifier (Windows)
+:Zone.Identifier
+
+# Protótipos e designs locais
+new-design.html
+gemini-code-*.html
+prototype-*.html
+prototype-pixel-*.html
