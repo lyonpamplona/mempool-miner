@@ -887,8 +887,9 @@ function configureGridSize(size) {
     const compactLayout = window.matchMedia('(max-width: 559px)').matches;
     const gap = compactLayout ? 2 : 4;
     const wrapperWidth = gridWrapperEl.clientWidth || window.innerWidth;
-    const horizontalPadding = compactLayout ? 20 : 36;
-    const availableWidth = Math.max(220, Math.min(620, wrapperWidth - horizontalPadding));
+    // Subtrai padding (6px*2) + border (2px*2) do .grid-hull
+    const hullOverhead = 16;
+    const availableWidth = Math.max(220, Math.min(620, wrapperWidth - hullOverhead));
     const responsiveSize = Math.floor((availableWidth - ((size - 1) * gap)) / size);
     const cellSize = Math.max(13, Math.min(preferredSize, responsiveSize));
     gridEl.style.setProperty('--grid-gap', `${gap}px`);
