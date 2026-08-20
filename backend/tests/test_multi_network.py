@@ -239,7 +239,7 @@ async def test_old_transaction_cannot_publish_after_new_block() -> None:
     metadata_started = asyncio.Event()
     release_metadata = asyncio.Event()
 
-    async def delayed_metadata(_txid: str) -> dict[str, object]:
+    async def delayed_metadata(_txid: str, _tx_hex: str | None = None) -> dict[str, object]:
         metadata_started.set()
         await release_metadata.wait()
         return {
