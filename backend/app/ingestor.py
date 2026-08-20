@@ -479,6 +479,9 @@ class NodeIngestor:
                     "fee_rate_sat_vb": metadata["fee_rate_sat_vb"],
                     # Fase 6: MEV Secreto — palavra oculta na grade
                     "is_mev": metadata.get("is_mev", False),
+                    # Fase 3: Recompensa calculada no backend
+                    "base_reward": metadata.get("base_reward", 500),
+                    "multiplier": metadata.get("multiplier", 1),
                 }
             )
             committed, _ = await self.redis.eval(
