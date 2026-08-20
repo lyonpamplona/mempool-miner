@@ -1830,16 +1830,23 @@ class EventRelay:
 
     async def _listen(self) -> None:
         """Escuta o canal PubSub e armazena eventos na fila interna."""
-        async for message in self.pubsub.listen():
-            if message["type"] == "message":
-                try:
-                    self.queue.put_nowait(message["data"])
-                    logger.debug("Relay %s: evento recebido (fila=%d)", self.realm_id, self.queue.qsize())
-                except asyncio.QueueFull:
-                    logger.warning(
-                        "Fila do relay cheia para %s; evento descartado",
-                        self.realm_id,
-                    )
+        while True:
+            try:
+                message = await self.pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if message and message["type"] == "message":
+                    try:
+                        self.queue.put_nowait(message["data"])
+                        logger.debug("Relay %s: evento recebido (fila=%d)", self.realm_id, self.queue.qsize())
+                    except asyncio.QueueFull:
+                        logger.warning(
+                            "Fila do relay cheia para %s; evento descartado",
+                            self.realm_id,
+                        )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.error("Relay %s: erro ao ler do PubSub: %s", self.realm_id, exc)
+                await asyncio.sleep(1)
 
     async def stop(self) -> None:
         """Encerra o listener e a subscrição PubSub."""
