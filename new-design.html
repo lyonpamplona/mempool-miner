@@ -1,0 +1,1307 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>MEMPOOL MINER // MECHA_HUD_EDITION</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /* Mecha Sci-Fi Industrial Palette */
+            --bg-void: #0e1117;
+            --hull-dark: #161b22;
+            --hull-panel: #1f242d;
+            --hull-surface: #272d38;
+            
+            --border-dim: #30363d;
+            --border-hi: #484f58;
+            --border-glow: rgba(0, 240, 255, 0.35);
+            
+            --text-main: #f0f6fc;
+            --text-dim: #8b949e;
+            --text-dark: #484f58;
+            
+            --neon-cyan: #00f0ff;
+            --neon-green: #00ff88;
+            --neon-amber: #f7931a;
+            --neon-red: #ff3355;
+            --neon-magenta: #f000ff;
+            --neon-gold: #ffcc00;
+
+            --f-tech: 'JetBrains Mono', monospace;
+            --f-pixel: 'Press Start 2P', monospace;
+            --f-data: 'VT323', monospace;
+        }
+
+        body.lightning-active {
+            --neon-cyan: #00ff88;
+            --neon-amber: #00f0ff;
+            --border-glow: rgba(0, 255, 136, 0.4);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            background-color: var(--bg-void);
+            color: var(--text-main);
+            font-family: var(--f-tech);
+            height: 100vh;
+            height: 100dvh;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: clamp(6px, 1.5vh, 16px);
+            /* Hazard stripes sutis de fundo */
+            background-image: 
+                linear-gradient(135deg, rgba(255,255,255,0.015) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.015) 50%, rgba(255,255,255,0.015) 75%, transparent 75%, transparent),
+                radial-gradient(circle at 50% 50%, rgba(0, 240, 255, 0.03) 0%, transparent 80%);
+            background-size: 32px 32px, 100% 100%;
+        }
+
+        /* Scanlines CRT sutis */
+        body::after {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: repeating-linear-gradient(0deg, transparent 0, transparent 2px, rgba(0,0,0,0.2) 2px, rgba(0,0,0,0.2) 4px);
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: var(--hull-dark); }
+        ::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
+
+        /* --- CHASSIS INDUSTRIAL MECHA (O FRAME DA IMAGEM) --- */
+        .mecha-frame {
+            width: 100%;
+            max-width: 1440px;
+            height: 100%;
+            background: var(--hull-dark);
+            border: 2px solid var(--border-dim);
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 0 30px rgba(0,0,0,0.8), inset 0 0 15px rgba(0,0,0,0.5);
+            /* Chanfros industriais Mecha */
+            clip-path: polygon(
+                0 16px, 16px 0, 
+                calc(100% - 240px) 0, calc(100% - 216px) 16px, calc(100% - 16px) 16px, 100% 32px,
+                100% calc(100% - 16px), calc(100% - 16px) 100%,
+                16px 100%, 0 calc(100% - 16px)
+            );
+        }
+
+        /* Barras Laterais Decorativas HUD */
+        .side-rail {
+            position: absolute;
+            top: 40px; bottom: 40px;
+            width: 8px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 4;
+            pointer-events: none;
+        }
+        .side-rail.left { left: 8px; border-left: 2px solid var(--border-hi); }
+        .side-rail.right { right: 8px; border-right: 2px solid var(--border-hi); }
+        
+        .rail-notch {
+            width: 6px; height: 14px; background: var(--border-dim);
+            margin: 4px 0;
+        }
+        .rail-notch.active { background: var(--neon-cyan); box-shadow: 0 0 8px var(--neon-cyan); }
+
+        /* --- TOP HEADER (MECHA HUD STATS) --- */
+        .hud-header {
+            height: 54px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 32px 0 24px;
+            border-bottom: 2px solid var(--border-dim);
+            background: rgba(0,0,0,0.4);
+            position: relative;
+            z-index: 5;
+        }
+
+        .hud-title-zone {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .hud-sys-tag {
+            font-family: var(--f-pixel);
+            font-size: 7px;
+            color: var(--neon-cyan);
+            background: rgba(0, 240, 255, 0.1);
+            border: 1px solid var(--neon-cyan);
+            padding: 4px 6px;
+            letter-spacing: 1px;
+        }
+
+        .hud-metrics {
+            display: flex;
+            align-items: center;
+            gap: clamp(12px, 2.5vw, 36px);
+        }
+        .metric-unit { display: flex; flex-direction: column; gap: 1px; }
+        .metric-lbl { font-family: var(--f-pixel); font-size: 6px; color: var(--text-dim); text-transform: uppercase; }
+        .metric-val { font-family: var(--f-data); font-size: 22px; font-weight: 700; line-height: 1; color: var(--text-main); }
+        .metric-val.amber { color: var(--neon-amber); text-shadow: 0 0 8px rgba(247,147,26,0.4); }
+        .metric-val.green { color: var(--neon-green); }
+        .metric-val.cyan { color: var(--neon-cyan); }
+
+        /* --- MAIN WORKSPACE VIEW --- */
+        .hud-body {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr 340px;
+            position: relative;
+            overflow: hidden;
+            background: rgba(15, 18, 24, 0.85);
+        }
+
+        /* --- STAGE CENTRAL ESQUERDO (A MATRIZ E A CORRIDA) --- */
+        .stage-center {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+            position: relative;
+            overflow: hidden;
+            border-right: 2px solid var(--border-dim);
+        }
+
+        /* Marcadores Visuais da Imagem (+) */
+        .stage-center::before, .stage-center::after {
+            content: '+';
+            position: absolute;
+            font-family: var(--f-tech);
+            color: var(--text-dark);
+            font-size: 16px;
+            pointer-events: none;
+        }
+        .stage-center::before { top: 20px; left: 20px; }
+        .stage-center::after { bottom: 20px; right: 20px; }
+
+        /* Barra de Corrida com Visual Industrial */
+        .race-box {
+            width: 100%;
+            max-width: min(65vh, 600px);
+            margin-bottom: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .race-header {
+            display: flex;
+            justify-content: space-between;
+            font-family: var(--f-pixel);
+            font-size: 6px;
+            color: var(--text-dim);
+            letter-spacing: 0.5px;
+        }
+        .race-chute {
+            height: 8px;
+            background: var(--hull-panel);
+            border: 1px solid var(--border-hi);
+            position: relative;
+            overflow: hidden;
+        }
+        .race-bar {
+            height: 100%;
+            width: 0%;
+            background: var(--neon-red);
+            box-shadow: 0 0 10px var(--neon-red);
+            transition: width 1s linear;
+        }
+        .race-bar.rbf { background: var(--neon-gold); box-shadow: 0 0 10px var(--neon-gold); }
+
+        /* Matriz de Caça-Palavras com Moldura Mecha */
+        .grid-hull {
+            position: relative;
+            width: min(65vh, 85vw, 600px);
+            aspect-ratio: 1 / 1;
+            padding: 6px;
+            background: var(--hull-dark);
+            border: 2px solid var(--border-hi);
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.8), 0 0 15px rgba(0,0,0,0.6);
+        }
+
+        .word-grid {
+            display: grid;
+            width: 100%;
+            height: 100%;
+            gap: 3px;
+            touch-action: none;
+        }
+
+        .cell {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: var(--f-data);
+            font-size: clamp(14px, 3.2vh, 30px);
+            font-weight: 700;
+            color: var(--text-dim);
+            background: var(--hull-surface);
+            border: 1px solid rgba(255,255,255,0.03);
+            cursor: pointer;
+            transition: background 0.1s, color 0.1s, transform 0.05s;
+        }
+        .cell:hover { color: var(--text-main); background: #323a48; }
+        .cell.sel {
+            background: rgba(0, 240, 255, 0.25);
+            border-color: var(--neon-cyan);
+            color: #fff;
+            box-shadow: inset 0 0 8px var(--neon-cyan);
+        }
+        .cell.found {
+            color: var(--neon-green);
+            border-color: rgba(0, 255, 136, 0.4);
+            background: rgba(0, 255, 136, 0.12);
+        }
+        .cell.mev-found {
+            border-color: var(--neon-red);
+            color: #fff;
+            background: rgba(255, 51, 85, 0.25);
+            box-shadow: 0 0 12px rgba(255,51,85,0.5);
+        }
+        .cell.hint {
+            animation: pulseHint 0.8s infinite alternate;
+            border-color: var(--neon-gold);
+            color: var(--neon-gold);
+        }
+
+        .svg-layer {
+            position: absolute;
+            inset: 6px;
+            pointer-events: none;
+            z-index: 10;
+            width: calc(100% - 12px);
+            height: calc(100% - 12px);
+        }
+        .cross-line {
+            stroke: var(--neon-green);
+            stroke-width: clamp(8px, 1.8vh, 18px);
+            stroke-linecap: round;
+            opacity: 0.45;
+            transition: stroke-dashoffset 0.3s ease-out;
+        }
+
+        .grid-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(14, 17, 23, 0.94);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 20;
+            gap: 12px;
+        }
+        .grid-overlay.hidden { display: none; }
+        
+        .spinner-mecha {
+            width: 36px; height: 36px;
+            border: 3px solid var(--border-hi);
+            border-top-color: var(--neon-cyan);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        /* --- SIDEBAR DIREITA (ESTILO DO MENU DA IMAGEM) --- */
+        .sidebar-right {
+            display: flex;
+            flex-direction: column;
+            background: var(--hull-panel);
+            padding: 16px 20px;
+            gap: 12px;
+            position: relative;
+            overflow-y: auto;
+        }
+
+        .panel-code-tag {
+            font-family: var(--f-data);
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text-dim);
+            letter-spacing: 2px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid var(--border-dim);
+            padding-bottom: 6px;
+        }
+        .panel-code-tag span { color: var(--neon-cyan); }
+
+        /* Botões do Menu Estilo Mecha Industrial */
+        .mecha-nav-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin: 8px 0;
+        }
+
+        .mecha-btn {
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            background: var(--hull-surface);
+            border: 1px solid var(--border-hi);
+            color: var(--text-main);
+            font-family: var(--f-pixel);
+            font-size: 8px;
+            cursor: pointer;
+            position: relative;
+            transition: all 0.15s;
+            clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+        }
+        .mecha-btn::before {
+            content: '';
+            position: absolute;
+            left: 0; top: 0; bottom: 0;
+            width: 4px;
+            background: transparent;
+            transition: background 0.15s;
+        }
+        .mecha-btn .btn-index {
+            font-family: var(--f-data);
+            font-size: 14px;
+            color: var(--text-dark);
+        }
+        .mecha-btn:hover {
+            background: #333a48;
+            border-color: var(--neon-cyan);
+            transform: translateX(4px);
+        }
+        .mecha-btn:hover::before, .mecha-btn.active::before {
+            background: var(--neon-cyan);
+        }
+        .mecha-btn.active {
+            background: #e6edf3;
+            color: #0d1117;
+            border-color: #fff;
+            box-shadow: 0 0 15px rgba(255,255,255,0.4);
+        }
+        .mecha-btn.active .btn-index { color: #57606a; }
+
+        /* Painel de Abas Dinâmicas */
+        .tab-pane {
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+            flex: 1;
+            overflow-y: auto;
+        }
+        .tab-pane.active { display: flex; }
+
+        /* Cartões de Transação e Itens da Loja */
+        .tx-card-mecha {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            background: var(--hull-surface);
+            border: 1px solid var(--border-dim);
+            border-left: 3px solid var(--border-hi);
+        }
+        .tx-card-mecha.found { opacity: 0.25; text-decoration: line-through; border-left-color: var(--neon-green); }
+        
+        .badge-mecha {
+            font-family: var(--f-pixel);
+            font-size: 6px;
+            padding: 2px 4px;
+            border-radius: 1px;
+        }
+        .badge-std { color: var(--text-dim); border: 1px solid var(--border-hi); }
+        .badge-high { color: var(--neon-magenta); border: 1px solid var(--neon-magenta); background: rgba(240,0,255,0.1); }
+        .badge-gold { color: var(--neon-gold); border: 1px solid var(--neon-gold); background: rgba(255,204,0,0.1); }
+
+        .shop-card-mecha {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            padding: 10px;
+            background: var(--hull-surface);
+            border: 1px solid var(--border-dim);
+        }
+        .shop-row { display: flex; justify-content: space-between; align-items: center; }
+        
+        .btn-action-small {
+            font-family: var(--f-pixel);
+            font-size: 7px;
+            padding: 6px 10px;
+            background: rgba(0, 240, 255, 0.1);
+            color: var(--neon-cyan);
+            border: 1px solid var(--neon-cyan);
+            cursor: pointer;
+            transition: 0.15s;
+        }
+        .btn-action-small:hover:not(:disabled) {
+            background: var(--neon-cyan);
+            color: #000;
+            box-shadow: 0 0 10px var(--neon-cyan);
+        }
+        .btn-action-small:disabled { opacity: 0.3; cursor: not-allowed; }
+
+        /* --- FOOTER INFERIOR (ESTILO 03/06 STATUS) --- */
+        .hud-footer {
+            height: 38px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            border-top: 2px solid var(--border-dim);
+            background: rgba(0,0,0,0.5);
+            font-family: var(--f-data);
+            font-size: 16px;
+            color: var(--text-dim);
+            z-index: 5;
+        }
+        .status-slot { color: var(--neon-green); font-weight: 700; }
+
+        /* --- MODAIS DE ENTRADA & RESULTADO --- */
+        .modal-wrap {
+            position: fixed; inset: 0; background: rgba(14, 17, 23, 0.88);
+            display: flex; justify-content: center; align-items: center;
+            z-index: 1000; padding: 16px; backdrop-filter: blur(4px);
+        }
+        .modal-wrap.hidden { display: none; }
+        
+        .modal-mecha-box {
+            width: 100%; max-width: 440px;
+            background: var(--hull-dark);
+            border: 2px solid var(--neon-cyan);
+            box-shadow: 0 0 25px var(--border-glow);
+            padding: 24px;
+            display: flex; flex-direction: column; gap: 14px;
+            clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+        }
+
+        .input-mecha {
+            width: 100%; padding: 12px;
+            background: var(--bg-void);
+            border: 1px solid var(--border-hi);
+            color: var(--neon-cyan);
+            font-family: var(--f-data);
+            font-size: 20px;
+            outline: none; text-align: center;
+        }
+        .input-mecha:focus { border-color: var(--neon-cyan); box-shadow: 0 0 10px var(--border-glow); }
+
+        /* FX */
+        .float-pts {
+            position: fixed; font-family: var(--f-pixel); font-size: 9px;
+            pointer-events: none; animation: floatUp 1s forwards; z-index: 500;
+        }
+        @keyframes floatUp { 0% { transform: translateY(0); opacity: 0; } 20% { transform: translateY(-8px); opacity: 1; } 100% { transform: translateY(-30px); opacity: 0; } }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes pulseHint { from { background: rgba(255, 204, 0, 0.1); } to { background: rgba(255, 204, 0, 0.4); } }
+
+        /* --- RESPONSIVIDADE (MOBILE & NOTEBOOK) --- */
+        @media (max-width: 900px) {
+            .mecha-frame { clip-path: none; border-radius: 4px; }
+            .side-rail { display: none; }
+            .hud-body { grid-template-columns: 1fr; overflow-y: auto; }
+            .stage-center { border-right: none; border-bottom: 2px solid var(--border-dim); }
+            .sidebar-right { width: 100%; height: auto; }
+            .grid-hull { width: min(48vh, 90vw, 380px); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- MOLDURA PRINCIPAL CHASSIS MECHA -->
+    <div class="mecha-frame">
+        
+        <!-- TRILHOS DECORATIVOS LATERAIS -->
+        <div class="side-rail left">
+            <div class="rail-notch active"></div>
+            <div class="rail-notch"></div>
+            <div class="rail-notch"></div>
+            <div class="rail-notch active"></div>
+        </div>
+        <div class="side-rail right">
+            <div class="rail-notch active"></div>
+            <div class="rail-notch"></div>
+            <div class="rail-notch"></div>
+            <div class="rail-notch active"></div>
+        </div>
+
+        <!-- HEADER HUD -->
+        <header class="hud-header">
+            <div class="hud-title-zone">
+                <span class="hud-sys-tag">SYS // MEMPOOL_MINER</span>
+                <span style="font-family:var(--f-data); font-size:18px; color:var(--text-dim);" id="ui-operator-tag">OP: [F2P]ANON</span>
+            </div>
+            
+            <div class="hud-metrics">
+                <div class="metric-unit">
+                    <span class="metric-lbl">COLD WALLET</span>
+                    <span class="metric-val amber" id="ui-balance">0 SATS</span>
+                </div>
+                <div class="metric-unit">
+                    <span class="metric-lbl">TARGET BLOCK</span>
+                    <span class="metric-val" id="ui-block">#840,000</span>
+                </div>
+                <div class="metric-unit">
+                    <span class="metric-lbl">HASH MULTI</span>
+                    <span class="metric-val green" id="ui-combo">1.0x</span>
+                </div>
+                <div class="metric-unit">
+                    <span class="metric-lbl">HARDWARE</span>
+                    <span class="metric-val cyan" id="ui-hw">CPU</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- CORPO PRINCIPAL HUD -->
+        <main class="hud-body">
+            
+            <!-- PALCO CENTRAL (GRID & CORRIDA CONTRA A REDE) -->
+            <section class="stage-center">
+                <div class="race-box">
+                    <div class="race-header">
+                        <span>LOCAL_NODE_DECRYPT</span>
+                        <span style="color:var(--neon-red);">GLOBAL_NETWORK_LIMIT</span>
+                    </div>
+                    <div class="race-chute">
+                        <div class="race-bar" id="race-fill"></div>
+                    </div>
+                </div>
+
+                <div class="grid-hull" id="grid-wrapper">
+                    <svg id="lines-svg" class="svg-layer"></svg>
+                    <div id="word-grid" class="word-grid"></div>
+                    
+                    <div id="grid-overlay" class="grid-overlay">
+                        <div class="spinner-mecha"></div>
+                        <div style="font-family:var(--f-pixel); font-size:8px; color:var(--neon-cyan);" id="tx-loading">RECEIVING_ZMQ_STREAM [0/6]...</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SIDEBAR DIREITA (MENU DE AÇÕES & ABAS) -->
+            <aside class="sidebar-right">
+                <div class="panel-code-tag">
+                    <span>SN-02</span>
+                    <div style="font-size:14px;">[0-2] ↙</div>
+                </div>
+
+                <!-- BARRAS DE NAVEGAÇÃO INDUSTRIAL -->
+                <div class="mecha-nav-group">
+                    <button class="mecha-btn active" onclick="switchTab('tx', this)">
+                        <span>MEMPOOL TXS</span>
+                        <span class="btn-index">001 &gt;</span>
+                    </button>
+                    <button class="mecha-btn" onclick="switchTab('shop', this)">
+                        <span>UPGRADES</span>
+                        <span class="btn-index">002 &gt;</span>
+                    </button>
+                    <button class="mecha-btn" onclick="switchTab('rank', this)">
+                        <span>NETWORK</span>
+                        <span class="btn-index">003 &gt;</span>
+                    </button>
+                    <button class="mecha-btn" onclick="switchTab('info', this)">
+                        <span>PROTOCOL</span>
+                        <span class="btn-index">004 &gt;</span>
+                    </button>
+                </div>
+
+                <!-- ABA 1: LISTA DE TRANSAÇÕES DA MEMPOOL -->
+                <div class="tab-pane active" id="tab-tx">
+                    <div style="font-family:var(--f-pixel); font-size:6px; color:var(--text-dim); margin-bottom:4px;">BLOCK_TEMPLATE_TXS:</div>
+                    <div id="tx-list-container" style="display:flex; flex-direction:column; gap:6px;"></div>
+                </div>
+
+                <!-- ABA 2: BLACK MARKET / UPGRADES -->
+                <div class="tab-pane" id="tab-shop">
+                    <div class="shop-card-mecha">
+                        <div class="shop-row">
+                            <span style="font-family:var(--f-pixel); font-size:7px;">DECRYPT_HINT</span>
+                            <button class="btn-action-small" id="btn-buy-hint" onclick="buyHint()">5K SATS</button>
+                        </div>
+                        <span style="font-size:11px; color:var(--text-dim);">Varre a matriz e ilumina a célula de origem.</span>
+                    </div>
+
+                    <div class="shop-card-mecha">
+                        <div class="shop-row">
+                            <span style="font-family:var(--f-pixel); font-size:7px;" id="hw-title">ASIC_RIG_V1</span>
+                            <button class="btn-action-small" id="btn-buy-hw" onclick="buyHardware()">100K SATS</button>
+                        </div>
+                        <span style="font-size:11px; color:var(--text-dim);">+10s permanentes contra o limite da rede.</span>
+                    </div>
+
+                    <div class="shop-card-mecha" style="border-color:rgba(0,240,255,0.4); background:rgba(0,240,255,0.05); margin-top:auto;">
+                        <div class="shop-row">
+                            <span style="font-family:var(--f-pixel); font-size:7px; color:var(--neon-cyan);">L2_LIGHTNING</span>
+                            <button class="btn-action-small" id="btn-buy-ln" onclick="buyLightning()">1M SATS</button>
+                        </div>
+                        <span style="font-size:11px; color:var(--text-dim);">Zero-Conf: 8x8 Grid, 10X Recompensas (5 Blocos).</span>
+                    </div>
+                </div>
+
+                <!-- ABA 3: LEADERBOARD & GUILDAS -->
+                <div class="tab-pane" id="tab-rank">
+                    <div style="font-family:var(--f-pixel); font-size:6px; color:var(--text-dim);">TOP OPERATORS (EPOCH 2016):</div>
+                    <div id="leaderboard-list" style="display:flex; flex-direction:column; gap:4px; margin-top:4px;"></div>
+                    
+                    <div style="font-family:var(--f-pixel); font-size:6px; color:var(--text-dim); margin-top:10px;">TOP POOLS:</div>
+                    <div id="pool-list" style="display:flex; flex-direction:column; gap:4px; margin-top:4px;"></div>
+                </div>
+
+                <!-- ABA 4: PROTOCOLO & INFORMAÇÕES -->
+                <div class="tab-pane" id="tab-info">
+                    <div class="shop-card-mecha">
+                        <span style="font-family:var(--f-pixel); font-size:7px; color:var(--neon-amber);">01. PROOF-OF-SEARCH</span>
+                        <span style="font-size:11px; color:var(--text-dim);">Conecte as palavras BIP39 antes da rede esgotar o tempo.</span>
+                    </div>
+                    <div class="shop-card-mecha" style="border-color:var(--neon-red);">
+                        <span style="font-family:var(--f-pixel); font-size:7px; color:var(--neon-red);">02. SLASHING</span>
+                        <span style="font-size:11px; color:var(--text-dim);">3 erros seguidos debitam 5% do saldo da Cold Wallet.</span>
+                    </div>
+                    <div class="shop-card-mecha" style="border-color:var(--neon-magenta);">
+                        <span style="font-family:var(--f-pixel); font-size:7px; color:var(--neon-magenta);">03. MEV OCULTO</span>
+                        <span style="font-size:11px; color:var(--text-dim);">Hashes não listados valem +50k Sats ao serem encontrados.</span>
+                    </div>
+                </div>
+            </aside>
+
+        </main>
+
+        <!-- FOOTER STATUS BAR -->
+        <footer class="hud-footer">
+            <div>
+                <span class="status-slot">03/06</span> // CONSENSUS_ACTIVE // MULTI_NODE_READY
+            </div>
+            <div>
+                <span style="font-size:14px;">ZMQ: 28332</span>
+            </div>
+        </footer>
+
+    </div>
+
+    <!-- MODAL AUTH / OPERATOR LOGIN -->
+    <div class="modal-wrap" id="auth-modal">
+        <div class="modal-mecha-box">
+            <div style="font-family:var(--f-pixel); font-size:9px; color:var(--neon-cyan);">> SYSTEM_AUTHENTICATION</div>
+            <p style="font-size:12px; color:var(--text-dim); line-height:1.6;">
+                Insira sua credencial de operador ou Tag de guilda:<br>
+                • Exemplo: <code>[F2Pool] Satoshi</code>
+            </p>
+            <input type="text" class="input-mecha" id="miner-input" placeholder="[TAG] OPERATOR_ID" maxlength="16">
+            <button class="mecha-btn active" style="justify-content:center;" onclick="startSession()">
+                <span>EXECUTE_NODE</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL RESULTADO (BLOCK MINED / ORPHAN) -->
+    <div class="modal-wrap hidden" id="result-modal">
+        <div class="modal-mecha-box" id="result-box">
+            <div style="font-family:var(--f-pixel); font-size:10px;" id="result-title">BLOCK_MINED</div>
+            <p style="font-size:13px; color:var(--text-main);" id="result-text">Consenso atingido com sucesso.</p>
+            
+            <button class="btn-action-small" id="rbf-btn" style="display:none; background:var(--neon-red); color:#fff; border-color:var(--neon-red);" onclick="useRbf()">
+                RBF EMERGENCY (+15s) - <span id="rbf-timer">3</span>s
+            </button>
+            <button class="mecha-btn active" style="justify-content:center; margin-top:6px;" onclick="prepareNextBlock()">
+                <span>PROCEED_NEXT_BLOCK</span>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        /* CONTROLE DE ABAS (ESTILO MECHA BUTTONS) */
+        function switchTab(tabId, btn) {
+            document.querySelectorAll('.tab-pane').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.mecha-btn').forEach(el => el.classList.remove('active'));
+            
+            document.getElementById('tab-' + tabId).classList.add('active');
+            if (btn) btn.classList.add('active');
+            playSound('tick');
+        }
+
+        /* SINTETIZADOR DE ÁUDIO 8-BIT */
+        let actx = null;
+        function ensureAudio() {
+            if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+            if (actx.state === 'suspended') actx.resume();
+        }
+
+        function playSound(type) {
+            try {
+                ensureAudio();
+                const osc = actx.createOscillator();
+                const gain = actx.createGain();
+                if (type === 'tick') {
+                    osc.type = 'square'; osc.frequency.setValueAtTime(800, actx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(120, actx.currentTime + 0.04);
+                    gain.gain.setValueAtTime(0.02, actx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + 0.04);
+                } else if (type === 'success') {
+                    osc.type = 'square'; osc.frequency.setValueAtTime(523, actx.currentTime); osc.frequency.setValueAtTime(1046, actx.currentTime + 0.08);
+                    gain.gain.setValueAtTime(0.06, actx.currentTime); gain.gain.linearRampToValueAtTime(0, actx.currentTime + 0.2);
+                } else if (type === 'orphan') {
+                    osc.type = 'sawtooth'; osc.frequency.setValueAtTime(160, actx.currentTime); osc.frequency.linearRampToValueAtTime(40, actx.currentTime + 0.3);
+                    gain.gain.setValueAtTime(0.08, actx.currentTime); gain.gain.linearRampToValueAtTime(0, actx.currentTime + 0.3);
+                } else if (type === 'slash') {
+                    osc.type = 'sawtooth'; osc.frequency.setValueAtTime(80, actx.currentTime); osc.frequency.exponentialRampToValueAtTime(20, actx.currentTime + 0.25);
+                    gain.gain.setValueAtTime(0.12, actx.currentTime); gain.gain.exponentialRampToValueAtTime(0.01, actx.currentTime + 0.25);
+                }
+                osc.connect(gain); gain.connect(actx.destination); osc.start(); osc.stop(actx.currentTime + 0.3);
+            } catch(e) {}
+        }
+
+        /* ESTADO GERAL DO JOGO */
+        const WORDS_PER_BLOCK = 6;
+        let currentGridSize = 12;
+        let grid = [];
+        let blockWords = [];
+        let selectedCells = [];
+        let txBuffer = [];
+        let isSelecting = false;
+        let isPlaying = false;
+        let isLightningMode = false;
+        let isRbfActive = false;
+
+        let minerName = "ANON";
+        let poolTag = "F2P";
+        let balanceSatoshis = 0;
+        let hardwareLevel = 1;
+        let hardwareNames = ["CPU", "GPU_RIG", "ASIC_V1", "QUANTUM"];
+        let hardwarePrices = [0, 100000, 500000, 2000000];
+        let networkTimeBonus = 0;
+
+        let blockHeight = 840000;
+        let baseReward = 500;
+        let wordsFoundInBlock = 0;
+        let visibleWordsInBlock = 0;
+
+        let networkTimeLimit = 60;
+        let networkTimePassed = 0;
+        let networkInterval = null;
+        let rbfCountdownInterval = null;
+        let mockZmqInterval = null;
+
+        let comboMultiplier = 1.0;
+        let lastFoundTime = 0;
+        let errorStreak = 0;
+        let lightningBlocksRemaining = 0;
+
+        let mockLeaderboard = [
+            { username: "HalFinney", score: 8200000 },
+            { username: "AdamBack", score: 4100000 },
+            { username: "Cypherpunk", score: 1200000 }
+        ];
+        let mockPools = [
+            { pool: "AntPool", score: 15000000 },
+            { pool: "F2Pool", score: 12000000 }
+        ];
+        const BIP39 = ["ABANDON", "BITCOIN", "BLOCK", "CHAIN", "CRYPTO", "HASH", "NODE", "WALLET", "SATOSHI", "GENESIS", "LEDGER", "PROOF", "REWARD", "MINER", "PEER", "NONCE", "ORPHAN"];
+
+        const gridEl = document.getElementById('word-grid');
+        const svgEl = document.getElementById('lines-svg');
+        const txListEl = document.getElementById('tx-list-container');
+        const netProgressEl = document.getElementById('race-fill');
+        const balanceEl = document.getElementById('ui-balance');
+        const overlayEl = document.getElementById('grid-overlay');
+
+        function initApp() {
+            gridEl.innerHTML = '';
+            gridEl.style.gridTemplateColumns = `repeat(12, 1fr)`;
+            gridEl.style.gridTemplateRows = `repeat(12, 1fr)`;
+            for (let i = 0; i < 144; i++) {
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                cell.innerText = String.fromCharCode(65 + Math.floor(Math.random() * 26));
+                gridEl.appendChild(cell);
+            }
+            updateLeaderboard();
+            updateStore();
+        }
+        initEmptyGrid = initApp;
+        initApp();
+
+        function startSession() {
+            ensureAudio();
+            const input = document.getElementById('miner-input').value.trim();
+            if (input.length > 0) {
+                minerName = input.toUpperCase();
+                const match = input.match(/^\[(.*?)\]/);
+                if (match) poolTag = match[1].toUpperCase();
+            }
+            document.getElementById('ui-operator-tag').innerText = `OP: ${minerName}`;
+            document.getElementById('auth-modal').classList.add('hidden');
+            updateLeaderboard();
+            prepareNextBlock();
+        }
+
+        function updateLeaderboard() {
+            const myRank = mockLeaderboard.find(m => m.username === minerName);
+            if (myRank) myRank.score = balanceSatoshis;
+            else mockLeaderboard.push({ username: minerName, score: balanceSatoshis });
+            mockLeaderboard.sort((a, b) => b.score - a.score);
+
+            const listEl = document.getElementById('leaderboard-list');
+            listEl.innerHTML = '';
+            mockLeaderboard.slice(0, 4).forEach((m, i) => {
+                listEl.innerHTML += `<div class="tx-card-mecha"><span style="font-family:var(--f-data); font-size:16px;">#${i+1} ${m.username}</span><span style="font-family:var(--f-data); font-size:16px; color:var(--neon-amber);">${(m.score/1000).toFixed(0)}K SATS</span></div>`;
+            });
+
+            const poolEl = document.getElementById('pool-list');
+            poolEl.innerHTML = '';
+            mockPools.slice(0, 3).forEach((p, i) => {
+                poolEl.innerHTML += `<div class="tx-card-mecha"><span style="font-family:var(--f-data); font-size:16px;">[${p.pool}]</span><span style="font-family:var(--f-data); font-size:16px; color:var(--neon-cyan);">${(p.score/1000).toFixed(0)}K SATS</span></div>`;
+            });
+        }
+
+        function updateStore() {
+            document.getElementById('btn-buy-hint').disabled = balanceSatoshis < 5000;
+            const hwBtn = document.getElementById('btn-buy-hw');
+            if (hardwareLevel >= hardwareNames.length) {
+                document.getElementById('hw-title').innerText = "MAX_TIER";
+                hwBtn.innerText = "MAX";
+                hwBtn.disabled = true;
+            } else {
+                document.getElementById('hw-title').innerText = `RIG: ${hardwareNames[hardwareLevel]}`;
+                hwBtn.innerText = `${(hardwarePrices[hardwareLevel]/1000)}K SATS`;
+                hwBtn.disabled = balanceSatoshis < hardwarePrices[hardwareLevel];
+            }
+            
+            const lnBtn = document.getElementById('btn-buy-ln');
+            if (isLightningMode) {
+                lnBtn.innerText = `ACTIVE (${lightningBlocksRemaining} BLK)`;
+                lnBtn.disabled = true;
+            } else {
+                lnBtn.innerText = "1M SATS";
+                lnBtn.disabled = balanceSatoshis < 1000000;
+            }
+        }
+
+        function buyHint() {
+            if (balanceSatoshis >= 5000 && isPlaying) {
+                const unfound = blockWords.find(w => !w.found && !w.hinted && !w.isMev);
+                if (unfound) {
+                    balanceSatoshis -= 5000;
+                    balanceEl.innerText = `${balanceSatoshis.toLocaleString()} SATS`;
+                    playSound('tick');
+                    unfound.hinted = true;
+                    grid[unfound.startY][unfound.startX].element.classList.add('hint');
+                    updateStore();
+                    updateLeaderboard();
+                    switchTab('tx', document.querySelector('.mecha-btn'));
+                }
+            }
+        }
+
+        function buyHardware() {
+            if (balanceSatoshis >= hardwarePrices[hardwareLevel] && hardwareLevel < hardwareNames.length) {
+                balanceSatoshis -= hardwarePrices[hardwareLevel];
+                balanceEl.innerText = `${balanceSatoshis.toLocaleString()} SATS`;
+                playSound('success');
+                networkTimeBonus += 10;
+                if (isPlaying && !isLightningMode) networkTimeLimit += 10;
+                document.getElementById('ui-hw').innerText = hardwareNames[hardwareLevel].split('_')[0];
+                hardwareLevel++;
+                updateStore();
+                updateLeaderboard();
+            }
+        }
+
+        function buyLightning() {
+            if (balanceSatoshis >= 1000000 && !isLightningMode) {
+                balanceSatoshis -= 1000000;
+                balanceEl.innerText = `${balanceSatoshis.toLocaleString()} SATS`;
+                playSound('success');
+                isLightningMode = true;
+                lightningBlocksRemaining = 5;
+                document.body.classList.add('lightning-active');
+                updateStore();
+                updateLeaderboard();
+                switchTab('tx', document.querySelector('.mecha-btn'));
+            }
+        }
+
+        function useRbf() {
+            if (balanceSatoshis >= 100000 && !isPlaying) {
+                balanceSatoshis -= 100000;
+                balanceEl.innerText = `${balanceSatoshis.toLocaleString()} SATS`;
+                playSound('success');
+                document.getElementById('result-modal').classList.add('hidden');
+                clearInterval(rbfCountdownInterval);
+                isPlaying = true;
+                isRbfActive = true;
+                networkTimeLimit = networkTimePassed + 15;
+                netProgressEl.classList.add('rbf');
+                startNetworkRace();
+                updateStore();
+                updateLeaderboard();
+            }
+        }
+
+        function prepareNextBlock() {
+            document.getElementById('result-modal').classList.add('hidden');
+            isPlaying = false;
+            isRbfActive = false;
+            txBuffer = [];
+            wordsFoundInBlock = 0;
+            visibleWordsInBlock = 0;
+            errorStreak = 0;
+            networkTimePassed = 0;
+            netProgressEl.style.width = '0%';
+            netProgressEl.classList.remove('rbf');
+            txListEl.innerHTML = '';
+            overlayEl.classList.remove('hidden');
+            document.getElementById('tx-loading').innerText = "RECEIVING_ZMQ_STREAM [0/6]...";
+            updateStore();
+            
+            clearInterval(mockZmqInterval);
+            mockZmqInterval = setInterval(() => {
+                if (txBuffer.length < WORDS_PER_BLOCK && !isPlaying) {
+                    const word = BIP39[Math.floor(Math.random() * BIP39.length)];
+                    if (!txBuffer.find(t => t.word === word)) {
+                        txBuffer.push({
+                            word: word,
+                            isHighFee: Math.random() > 0.7,
+                            isGolden: Math.random() > 0.9,
+                            isMev: Math.random() > 0.85,
+                            vsize: Math.random() > 0.8 ? 1200 : 250
+                        });
+                        document.getElementById('tx-loading').innerText = `RECEIVING_ZMQ_STREAM [${txBuffer.length}/${WORDS_PER_BLOCK}]...`;
+                        if (txBuffer.length === WORDS_PER_BLOCK) {
+                            clearInterval(mockZmqInterval);
+                            setTimeout(() => buildBlock(), 350);
+                        }
+                    }
+                }
+            }, 300);
+        }
+
+        function buildBlock() {
+            overlayEl.classList.add('hidden');
+            gridEl.innerHTML = '';
+            svgEl.innerHTML = '';
+            txListEl.innerHTML = '';
+            grid = [];
+            blockWords = [];
+            isPlaying = true;
+            
+            const maxVsize = Math.max(...txBuffer.map(t => t.vsize || 250));
+            if (isLightningMode) {
+                currentGridSize = 8;
+                networkTimeLimit = 20;
+            } else if (maxVsize > 1000) {
+                currentGridSize = 15;
+                networkTimeLimit = 75 + networkTimeBonus;
+            } else {
+                currentGridSize = 12;
+                networkTimeLimit = 60 + networkTimeBonus;
+            }
+            
+            gridEl.style.gridTemplateColumns = `repeat(${currentGridSize}, 1fr)`;
+            gridEl.style.gridTemplateRows = `repeat(${currentGridSize}, 1fr)`;
+            document.getElementById('ui-block').innerText = `#${blockHeight.toLocaleString()}`;
+
+            for (let y = 0; y < currentGridSize; y++) {
+                let row = [];
+                for (let x = 0; x < currentGridSize; x++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.dataset.x = x;
+                    cell.dataset.y = y;
+                    
+                    cell.addEventListener('mousedown', (e) => { e.preventDefault(); startSelection(cell, x, y); });
+                    cell.addEventListener('mouseenter', () => continueSelection(cell, x, y));
+                    gridEl.appendChild(cell);
+                    row.push({ element: cell, char: '', isFound: false });
+                }
+                grid.push(row);
+            }
+
+            txBuffer.forEach(tx => {
+                injectWordInGrid(tx.word, currentGridSize, tx.isHighFee, tx.isGolden, tx.isMev);
+            });
+
+            for (let y = 0; y < currentGridSize; y++) {
+                for (let x = 0; x < currentGridSize; x++) {
+                    if (grid[y][x].char === '') {
+                        grid[y][x].char = String.fromCharCode(65 + Math.floor(Math.random() * 26));
+                    }
+                    grid[y][x].element.innerText = grid[y][x].char;
+                }
+            }
+
+            gridEl.addEventListener('touchstart', handleTouchStart, {passive: false});
+            gridEl.addEventListener('touchmove', handleTouchMove, {passive: false});
+            
+            startNetworkRace();
+            updateStore();
+        }
+
+        function injectWordInGrid(word, size, isHighFee, isGolden, isMev) {
+            if (word.length > size) word = word.substring(0, size);
+            const dirs = [[1, 0], [0, 1], [1, 1], [1, -1]];
+            for (let attempts = 0; attempts < 250; attempts++) {
+                const dir = dirs[Math.floor(Math.random() * dirs.length)];
+                const startX = Math.floor(Math.random() * size);
+                const startY = Math.floor(Math.random() * size);
+                const endX = startX + dir[0] * (word.length - 1);
+                const endY = startY + dir[1] * (word.length - 1);
+                
+                if (endX >= 0 && endX < size && endY >= 0 && endY < size) {
+                    let canPlace = true;
+                    for (let i = 0; i < word.length; i++) {
+                        const cx = startX + dir[0] * i;
+                        const cy = startY + dir[1] * i;
+                        if (grid[cy][cx].char !== '' && grid[cy][cx].char !== word[i]) {
+                            canPlace = false;
+                            break;
+                        }
+                    }
+                    if (canPlace) {
+                        for (let i = 0; i < word.length; i++) {
+                            const cx = startX + dir[0] * i;
+                            const cy = startY + dir[1] * i;
+                            grid[cy][cx].char = word[i];
+                        }
+                        blockWords.push({ word, found: false, isHighFee, isGolden, startX, startY, isMev });
+                        if (!isMev) {
+                            visibleWordsInBlock++;
+                            let badgeClass = isGolden ? 'badge-gold' : (isHighFee ? 'badge-high' : 'badge-std');
+                            let badgeText = isGolden ? 'GOLDEN' : (isHighFee ? 'HIGH_FEE' : 'STD');
+                            txListEl.innerHTML += `
+                                <div class="tx-card-mecha" id="tx-row-${word}">
+                                    <span style="font-family:var(--f-pixel); font-size:8px;">${word}</span>
+                                    <span class="badge-mecha ${badgeClass}">${badgeText}</span>
+                                </div>
+                            `;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        /* SELEÇÃO POR ARRASTE VETORIAL */
+        let lockDx = null;
+        let lockDy = null;
+
+        function handleTouchStart(e) {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const target = document.elementFromPoint(touch.clientX, touch.clientY);
+            if (target && target.classList.contains('cell')) {
+                startSelection(target, parseInt(target.dataset.x), parseInt(target.dataset.y));
+            }
+        }
+
+        function handleTouchMove(e) {
+            e.preventDefault();
+            if (!isSelecting) return;
+            const touch = e.touches[0];
+            const target = document.elementFromPoint(touch.clientX, touch.clientY);
+            if (target && target.classList.contains('cell')) {
+                continueSelection(target, parseInt(target.dataset.x), parseInt(target.dataset.y));
+            }
+        }
+
+        function startSelection(cell, x, y) {
+            if (!isPlaying || cell.classList.contains('found')) return;
+            ensureAudio();
+            isSelecting = true;
+            lockDx = null; lockDy = null;
+            selectedCells = [{ cell, x, y }];
+            cell.classList.add('sel');
+            playSound('tick');
+        }
+
+        function continueSelection(cell, x, y) {
+            if (!isSelecting || cell.classList.contains('found')) return;
+            const last = selectedCells[selectedCells.length - 1];
+            const dx = x - last.x;
+            const dy = y - last.y;
+            
+            if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1 && (dx !== 0 || dy !== 0)) {
+                if (selectedCells.length === 1) { lockDx = dx; lockDy = dy; }
+                if (dx === lockDx && dy === lockDy && !selectedCells.find(c => c.x === x && c.y === y)) {
+                    selectedCells.push({ cell, x, y });
+                    cell.classList.add('sel');
+                    playSound('tick');
+                }
+            }
+        }
+
+        document.addEventListener('mouseup', endSelection);
+        document.addEventListener('touchend', endSelection);
+
+        function endSelection() {
+            if (!isSelecting) return;
+            isSelecting = false;
+            
+            const selectedWord = selectedCells.map(c => grid[c.y][c.x].char).join('');
+            const reversedWord = selectedWord.split('').reverse().join('');
+            const match = blockWords.find(w => (w.word === selectedWord || w.word === reversedWord) && !w.found);
+            
+            if (match) {
+                match.found = true;
+                errorStreak = 0;
+                let points = 0;
+                
+                if (match.isMev) {
+                    playSound('success'); points = 50000;
+                } else {
+                    playSound('success');
+                    wordsFoundInBlock++;
+                    const now = Date.now();
+                    comboMultiplier = (lastFoundTime !== 0 && now - lastFoundTime < 8000) ? Math.min(comboMultiplier + 0.5, 4.0) : 1.0;
+                    lastFoundTime = now;
+                    document.getElementById('ui-combo').innerText = `${comboMultiplier.toFixed(1)}x`;
+                    points = (baseReward + (match.word.length * 50)) * comboMultiplier * (match.isGolden ? 5 : (match.isHighFee ? 3 : 1)) * (isLightningMode ? 10 : 1);
+                }
+                
+                balanceSatoshis += Math.floor(points);
+                balanceEl.innerText = `${balanceSatoshis.toLocaleString()} SATS`;
+                floatTextFX(selectedCells[0].cell, `+${Math.floor(points)}`);
+                drawSvgLine(selectedCells[0].cell, selectedCells[selectedCells.length - 1].cell);
+                
+                selectedCells.forEach(c => {
+                    c.cell.classList.remove('sel', 'hint');
+                    c.cell.classList.add(match.isMev ? 'mev-found' : 'found');
+                });
+                
+                if (!match.isMev) {
+                    const row = document.getElementById(`tx-row-${match.word}`);
+                    if (row) row.classList.add('found');
+                }
+                
+                updateStore();
+                updateLeaderboard();
+
+                if (wordsFoundInBlock === visibleWordsInBlock) {
+                    clearInterval(networkInterval);
+                    isPlaying = false;
+                    setTimeout(() => showResult(true, isLightningMode ? "Zero-Conf Consensus Settlement!" : "Block verified and minted."), 400);
+                }
+            } else {
+                selectedCells.forEach(c => c.cell.classList.remove('sel'));
+                comboMultiplier = 1.0;
+                document.getElementById('ui-combo').innerText = `1.0x`;
+                errorStreak++;
+                if (errorStreak >= 3 && balanceSatoshis > 0) {
+                    playSound('slash');
+                    let penalty = Math.floor(balanceSatoshis * 0.05);
+                    balanceSatoshis -= penalty;
+                    balanceEl.innerText = `${balanceSatoshis.toLocaleString()} SATS`;
+                    floatTextFX(selectedCells[0].cell, `-${penalty} (SLASH)`, true);
+                    errorStreak = 0;
+                    updateStore();
+                    updateLeaderboard();
+                }
+            }
+            selectedCells = [];
+            lockDx = null; lockDy = null;
+        }
+
+        function floatTextFX(cell, textValue, isRed = false) {
+            const el = document.createElement('div');
+            el.className = 'float-pts';
+            el.innerText = textValue;
+            el.style.color = isRed ? 'var(--neon-red)' : 'var(--neon-green)';
+            const rect = cell.getBoundingClientRect();
+            el.style.left = `${rect.left + 4}px`;
+            el.style.top = `${rect.top}px`;
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 1000);
+        }
+
+        function drawSvgLine(startCell, endCell) {
+            const sRect = startCell.getBoundingClientRect();
+            const eRect = endCell.getBoundingClientRect();
+            const wrapRect = svgEl.getBoundingClientRect();
+            
+            const x1 = (sRect.left - wrapRect.left) + sRect.width / 2;
+            const y1 = (sRect.top - wrapRect.top) + sRect.height / 2;
+            const x2 = (eRect.left - wrapRect.left) + eRect.width / 2;
+            const y2 = (eRect.top - wrapRect.top) + eRect.height / 2;
+            
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+            line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+            line.setAttribute('class', 'cross-line');
+            
+            const length = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+            line.style.strokeDasharray = length;
+            line.style.strokeDashoffset = length;
+            svgEl.appendChild(line);
+            requestAnimationFrame(() => { line.style.strokeDashoffset = 0; });
+        }
+
+        function startNetworkRace() {
+            clearInterval(networkInterval);
+            networkInterval = setInterval(() => {
+                networkTimePassed++;
+                const percent = (networkTimePassed / networkTimeLimit) * 100;
+                netProgressEl.style.width = `${Math.min(100, percent)}%`;
+                if (networkTimePassed >= networkTimeLimit) {
+                    clearInterval(networkInterval);
+                    isPlaying = false;
+                    playSound('orphan');
+                    showResult(false, "Global network hashrate won the race. Block orphaned!");
+                }
+            }, 1000);
+        }
+
+        function showResult(success, message) {
+            const modal = document.getElementById('result-modal');
+            const title = document.getElementById('result-title');
+            const text = document.getElementById('result-text');
+            const rbfBtn = document.getElementById('rbf-btn');
+            
+            modal.classList.remove('hidden');
+            if (success) {
+                rbfBtn.style.display = 'none';
+                if (isLightningMode) {
+                    lightningBlocksRemaining--;
+                    if (lightningBlocksRemaining <= 0) {
+                        isLightningMode = false;
+                        document.body.classList.remove('lightning-active');
+                        updateStore();
+                    }
+                }
+                title.innerText = "BLOCK_MINED // CONSENSUS_OK";
+                title.style.color = "var(--neon-green)";
+                text.innerText = message;
+                blockHeight++;
+            } else {
+                title.innerText = "ORPHANED_BLOCK // TIMEOUT";
+                title.style.color = "var(--neon-red)";
+                text.innerText = message;
+                
+                if (balanceSatoshis >= 100000) {
+                    rbfBtn.style.display = 'block';
+                    let rbfTime = 3;
+                    document.getElementById('rbf-timer').innerText = rbfTime;
+                    clearInterval(rbfCountdownInterval);
+                    rbfCountdownInterval = setInterval(() => {
+                        rbfTime--;
+                        document.getElementById('rbf-timer').innerText = rbfTime;
+                        if (rbfTime <= 0) {
+                            clearInterval(rbfCountdownInterval);
+                            rbfBtn.style.display = 'none';
+                        }
+                    }, 1000);
+                } else {
+                    rbfBtn.style.display = 'none';
+                }
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,16 +1,41 @@
 name: mempool-miner
 
+x-bitcoin-node: &bitcoin-node
+  image: bitcoin/bitcoin:31.1
+  restart: unless-stopped
+  stop_grace_period: 2m
+  security_opt:
+    - no-new-privileges:true
+
+x-ingestor: &ingestor
+  image: ${BACKEND_IMAGE:-mempool-miner-backend:local}
+  build:
+    context: ./backend
+  command: ["python", "-m", "app.ingestor"]
+  restart: unless-stopped
+  stop_grace_period: 30s
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp
+  healthcheck:
+    test: ["CMD", "python", "-m", "app.ingestor_healthcheck"]
+    interval: 10s
+    timeout: 10s
+    retries: 6
+    start_period: 30s
+
 services:
   redis:
     image: redis:7.4-alpine
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD não definido}"]
     restart: unless-stopped
     volumes:
       - redis_data:/data
     networks:
-      - data
+      - app_data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -20,68 +45,243 @@ services:
       resources:
         limits:
           cpus: "0.5"
-          memory: 256M
+          memory: 512M
 
-  bitcoind:
-    image: bitcoin/bitcoin:31.1
-    env_file:
-      - .env
+  bitcoin-regtest:
+    <<: *bitcoin-node
+    environment:
+      BITCOIN_NETWORK: regtest
     command:
-      - -chain=${BITCOIN_NETWORK:-regtest}
-      - -rpcuser=${RPC_USER:?RPC_USER não definido}
-      - -rpcpassword=${RPC_PASSWORD:?RPC_PASSWORD não definido}
+      - -conf=/etc/bitcoin/bitcoin.conf
+      - -datadir=/home/bitcoin/.bitcoin
+      - -chain=regtest
+      - -prune=550
+      - -dbcache=64
+      - -maxmempool=50
+      - -maxconnections=10
       - -printtoconsole=1
-    restart: unless-stopped
     volumes:
-      - ./bitcoin/bitcoin.conf:/home/bitcoin/.bitcoin/bitcoin.conf:ro
+      - ./bitcoin/bitcoin.conf:/etc/bitcoin/bitcoin.conf:ro
       - bitcoin_data:/home/bitcoin/.bitcoin
     networks:
-      - data
-      - p2p
+      - btc_regtest
     healthcheck:
       test:
         - CMD-SHELL
-        - bitcoin-cli -chain="$${BITCOIN_NETWORK:-regtest}" -rpcuser="$${RPC_USER}" -rpcpassword="$${RPC_PASSWORD}" getblockchaininfo > /dev/null 2>&1
+        - bitcoin-cli -conf=/etc/bitcoin/bitcoin.conf -datadir=/home/bitcoin/.bitcoin -chain=regtest getblockchaininfo > /dev/null 2>&1
       interval: 10s
       timeout: 5s
       retries: 30
       start_period: 20s
-    security_opt:
-      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 384M
+
+  bitcoin-signet:
+    <<: *bitcoin-node
+    environment:
+      BITCOIN_NETWORK: signet
+      RPC_USER: ${SIGNET_RPC_USER:-${RPC_USER:?RPC_USER não definido}}
+      RPC_PASSWORD: ${SIGNET_RPC_PASSWORD:-${RPC_PASSWORD:?RPC_PASSWORD não definido}}
+    command:
+      - -conf=/etc/bitcoin/bitcoin.conf
+      - -datadir=/home/bitcoin/.bitcoin
+      - -chain=signet
+      - -prune=${SIGNET_PRUNE_MIB:-2048}
+      - -dbcache=128
+      - -maxmempool=100
+      - -maxconnections=10
+      - -disablewallet=1
+      - -printtoconsole=1
+    volumes:
+      - ./bitcoin/bitcoin.conf:/etc/bitcoin/bitcoin.conf:ro
+      - bitcoin_signet_data:/home/bitcoin/.bitcoin
+    networks:
+      btc_signet:
+      signet_p2p:
+        gw_priority: 1
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - bitcoin-cli -datadir=/home/bitcoin/.bitcoin -chain=signet -rpcuser="$${RPC_USER}" -rpcpassword="$${RPC_PASSWORD}" getblockchaininfo > /dev/null 2>&1
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
     deploy:
       resources:
         limits:
           cpus: "1.0"
-          memory: 1G
-        reservations:
+          memory: 2G
+
+  bitcoin-mainnet:
+    <<: *bitcoin-node
+    profiles: ["mainnet"]
+    environment:
+      BITCOIN_NETWORK: main
+      RPC_USER: ${MAINNET_RPC_USER:-${RPC_USER:?RPC_USER não definido}}
+      RPC_PASSWORD: ${MAINNET_RPC_PASSWORD:-${RPC_PASSWORD:?RPC_PASSWORD não definido}}
+    command:
+      - -conf=/etc/bitcoin/bitcoin.conf
+      - -datadir=/home/bitcoin/.bitcoin
+      - -chain=main
+      - -rpcuser=${MAINNET_RPC_USER:-${RPC_USER:?RPC_USER não definido}}
+      - -rpcpassword=${MAINNET_RPC_PASSWORD:-${RPC_PASSWORD:?RPC_PASSWORD não definido}}
+      - -prune=${MAINNET_PRUNE_MIB:-10240}
+      - -txindex=0
+      - -dbcache=${MAINNET_DBCACHE_MIB:-450}
+      - -maxmempool=300
+      - -disablewallet=1
+      - -printtoconsole=1
+    volumes:
+      - ./bitcoin/bitcoin.conf:/etc/bitcoin/bitcoin.conf:ro
+      - bitcoin_mainnet_data:/home/bitcoin/.bitcoin
+    networks:
+      btc_mainnet:
+      mainnet_p2p:
+        gw_priority: 1
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - bitcoin-cli -datadir=/home/bitcoin/.bitcoin -chain=main -rpcuser="$${RPC_USER}" -rpcpassword="$${RPC_PASSWORD}" getblockchaininfo > /dev/null 2>&1
+      interval: 15s
+      timeout: 10s
+      retries: 80
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 3G
+
+  ingestor-regtest:
+    <<: *ingestor
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      NODE_ID: regtest-local
+      REALM_ID: regtest
+      BITCOIN_NETWORK: regtest
+      RPC_HOST: bitcoin-regtest
+      RPC_PORT: "18443"
+      ZMQ_HOST: bitcoin-regtest
+      ZMQ_PORT: "28332"
+      RPC_USER: ${REGTEST_RPC_USER:-${RPC_USER:?RPC_USER não definido}}
+      RPC_PASSWORD: ${REGTEST_RPC_PASSWORD:-${RPC_PASSWORD:?RPC_PASSWORD não definido}}
+      GAME_MODE: ${GAME_MODE:-mempool}
+      HIGH_FEE_RATE_SAT_VB: ${HIGH_FEE_RATE_SAT_VB:-20}
+      TX_QUEUE_MAX_SIZE: ${TX_QUEUE_MAX_SIZE:-5000}
+      TX_PROCESS_INTERVAL_SECONDS: ${TX_PROCESS_INTERVAL_SECONDS:-1.0}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+      bitcoin-regtest:
+        condition: service_healthy
+    networks:
+      - app_data
+      - btc_regtest
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+
+  ingestor-signet:
+    <<: *ingestor
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      NODE_ID: signet-public
+      REALM_ID: signet
+      BITCOIN_NETWORK: signet
+      RPC_HOST: bitcoin-signet
+      RPC_PORT: "38332"
+      ZMQ_HOST: bitcoin-signet
+      ZMQ_PORT: "28332"
+      RPC_USER: ${SIGNET_RPC_USER:-${RPC_USER:?RPC_USER não definido}}
+      RPC_PASSWORD: ${SIGNET_RPC_PASSWORD:-${RPC_PASSWORD:?RPC_PASSWORD não definido}}
+      GAME_MODE: ${GAME_MODE:-mempool}
+      HIGH_FEE_RATE_SAT_VB: ${HIGH_FEE_RATE_SAT_VB:-20}
+      TX_QUEUE_MAX_SIZE: ${TX_QUEUE_MAX_SIZE:-20000}
+      # Signet tem menos transações; intervalo menor para resposta mais rápida.
+      TX_PROCESS_INTERVAL_SECONDS: ${SIGNET_TX_PROCESS_INTERVAL_SECONDS:-0.5}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+      bitcoin-signet:
+        condition: service_healthy
+    networks:
+      - app_data
+      - btc_signet
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+
+  ingestor-mainnet:
+    <<: *ingestor
+    profiles: ["mainnet"]
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      NODE_ID: mainnet-pruned
+      REALM_ID: mainnet
+      BITCOIN_NETWORK: mainnet
+      RPC_HOST: bitcoin-mainnet
+      RPC_PORT: "8332"
+      ZMQ_HOST: bitcoin-mainnet
+      ZMQ_PORT: "28332"
+      RPC_USER: ${MAINNET_RPC_USER:-${RPC_USER:?RPC_USER não definido}}
+      RPC_PASSWORD: ${MAINNET_RPC_PASSWORD:-${RPC_PASSWORD:?RPC_PASSWORD não definido}}
+      GAME_MODE: ${GAME_MODE:-mempool}
+      HIGH_FEE_RATE_SAT_VB: ${HIGH_FEE_RATE_SAT_VB:-20}
+      TX_QUEUE_MAX_SIZE: "20000"
+      TX_PROCESS_INTERVAL_SECONDS: "0.25"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+      bitcoin-mainnet:
+        condition: service_healthy
+    networks:
+      - app_data
+      - btc_mainnet
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
           memory: 512M
 
   backend:
+    image: ${BACKEND_IMAGE:-mempool-miner-backend:local}
     build:
       context: ./backend
-    env_file:
-      - .env
     environment:
-      REDIS_URL: redis://redis:6379
-      ZMQ_HOST: bitcoind
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      DEFAULT_REALM_ID: ${DEFAULT_REALM_ID:-regtest}
+      GAME_MODE: ${GAME_MODE:-mempool}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8010,http://127.0.0.1:8010}
+      TRUSTED_HOSTS: ${TRUSTED_HOSTS:-localhost:8010,127.0.0.1:8010,backend,localhost,127.0.0.1}
+      ENABLE_API_DOCS: ${ENABLE_API_DOCS:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
     restart: unless-stopped
     depends_on:
       redis:
         condition: service_healthy
-      bitcoind:
-        condition: service_healthy
     expose:
       - "8000"
     networks:
       - edge
-      - data
+      - app_data
     healthcheck:
       test:
         - CMD
         - python
         - -c
-        - import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=2)
+        - import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/live', timeout=2)
       interval: 10s
       timeout: 3s
       retries: 10
@@ -98,8 +298,8 @@ services:
 
   frontend:
     build:
-      context: .
-      dockerfile: frontend/Dockerfile
+      context: ./frontend
+      dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
       backend:
@@ -109,24 +309,69 @@ services:
     networks:
       - edge
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost/ > /dev/null 2>&1"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/"]
       interval: 10s
-      timeout: 3s
+      timeout: 5s
       retries: 10
+      start_period: 30s
     security_opt:
       - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
     deploy:
       resources:
         limits:
           cpus: "0.2"
           memory: 128M
 
+  docs:
+    profiles: ["docs"]
+    build:
+      context: .
+      dockerfile: docs/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8020:80"
+    networks:
+      - docs_publication
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1/ > /dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 64M
+
 volumes:
+  # A chave lógica legada preserva o volume físico mempool-miner_bitcoin_data.
   bitcoin_data:
+  bitcoin_signet_data:
+  bitcoin_mainnet_data:
   redis_data:
 
 networks:
   edge:
-  data:
+  app_data:
     internal: true
-  p2p:
+  btc_regtest:
+    internal: true
+  btc_signet:
+    internal: true
+  btc_mainnet:
+    internal: true
+  signet_p2p:
+  mainnet_p2p:
+  docs_publication:

@@ -35,7 +35,7 @@ jobs:
           python -m compileall -q backend/app
           ruff check .
           ruff format --check .
-          pytest -q
+          pytest -q --cov=app --cov-report=term-missing --cov-fail-under=60
           python scripts/validate_docs.py
 
       - name: Preparar Node.js
@@ -46,12 +46,16 @@ jobs:
       - name: Validar JavaScript
         run: |
           node --check frontend/game.js
-          node --check docs/api-page.js
+          node --check frontend/service-worker.js
+          python -m json.tool frontend/manifest.webmanifest > /dev/null
 
   compose-smoke:
     needs: quality
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      COMPOSE_PROJECT_NAME: mempool-miner-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      BACKEND_IMAGE: mempool-miner-backend:ci-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Obter o código
         uses: actions/checkout@v4
@@ -60,17 +64,84 @@ jobs:
         run: |
           cp .env.example .env
           docker compose config --quiet
+          docker compose --profile mainnet config --quiet
+          docker compose --profile docs config --quiet
+          docker compose --profile mainnet --profile docs config --quiet
+          printf '%s\n' 'RPC_USER=legacy_ci' 'RPC_PASSWORD=legacy_ci_password' > "$RUNNER_TEMP/legacy.env"
+          docker compose --env-file "$RUNNER_TEMP/legacy.env" --profile mainnet config --quiet
+          printf '%s\n' \
+            'REGTEST_RPC_USER=regtest_ci' 'REGTEST_RPC_PASSWORD=regtest_ci_password' \
+            'SIGNET_RPC_USER=signet_ci' 'SIGNET_RPC_PASSWORD=signet_ci_password' \
+            'MAINNET_RPC_USER=mainnet_ci' 'MAINNET_RPC_PASSWORD=mainnet_ci_password' \
+            > "$RUNNER_TEMP/per-network.env"
+          docker compose --env-file "$RUNNER_TEMP/per-network.env" --profile mainnet config --quiet
 
       - name: Construir imagens
-        run: docker compose build --pull
+        run: |
+          docker compose build --pull
+          docker compose --profile docs build docs
 
       - name: Iniciar a stack
-        run: docker compose up -d --wait --wait-timeout 600
+        run: |
+          docker compose up -d --wait --wait-timeout 600 redis bitcoin-regtest
+          docker compose exec -T bitcoin-regtest sh -lc '
+            bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" createwallet ci_miner >/dev/null
+            address=$(bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" -rpcwallet=ci_miner getnewaddress)
+            bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" generatetoaddress 101 "$address" >/dev/null
+          '
+          docker compose up -d --wait --wait-timeout 180 ingestor-regtest backend frontend
+          docker compose --profile docs up -d --wait --wait-timeout 60 docs
 
       - name: Executar smoke tests
         run: |
           curl --fail --silent --show-error http://127.0.0.1:8010/api/health
+          curl --fail --silent --show-error http://127.0.0.1:8010/api/v1/networks
+          curl --fail --silent --show-error http://127.0.0.1:8010/api/v1/networks/regtest/health |
+            python -c 'import json,sys; data=json.load(sys.stdin); assert data["status"] == "ready" and data["playable"] is True'
+          curl --fail --silent --show-error http://127.0.0.1:8010/ > /dev/null
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8010/openapi.json)" = "404"
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8010/backend-docs)" = "404"
+          docker compose exec -T frontend sh -c '
+            test -e /usr/share/nginx/html/manifest.webmanifest
+            test -e /usr/share/nginx/html/service-worker.js
+            test ! -e /usr/share/nginx/html/docs
+            test ! -e /usr/share/nginx/html/apresentacao.html
+            test ! -e /usr/share/nginx/html/README.md
+          '
+          curl --fail --silent --show-error http://127.0.0.1:8020/ > /dev/null
+          curl --fail --silent --show-error http://127.0.0.1:8020/api/ > /dev/null
+          curl --fail --silent --show-error http://127.0.0.1:8020/apresentacao/ > /dev/null
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8020/openapi.json)" = "404"
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8020/AUDITORIA.md)" = "404"
+          docker compose --profile docs exec -T docs sh -c '
+            test ! -e /usr/share/nginx/html/AUDITORIA.md
+            test ! -e /usr/share/nginx/html/ROADMAP.md
+            test ! -e /usr/share/nginx/html/prototipo-v2.html
+          '
           test "$(docker compose exec -T redis redis-cli ping)" = "PONG"
+          docker compose exec -T bitcoin-regtest sh -lc '
+            destination=$(bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" -rpcwallet=ci_miner getnewaddress)
+            bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" -rpcwallet=ci_miner sendtoaddress "$destination" 0.001 >/dev/null
+          '
+          for attempt in $(seq 1 30); do
+            count=$(docker compose exec -T redis redis-cli --raw GET 'mempool_miner:v2:{regtest}:mempool_count')
+            current_epoch=$(docker compose exec -T redis redis-cli --raw GET 'mempool_miner:v2:{regtest}:epoch')
+            seen=$(docker compose exec -T redis redis-cli --raw SCARD "mempool_miner:v2:{regtest}:seen:${current_epoch}")
+            if [ "${count:-0}" -ge 1 ] && [ "${seen:-0}" -ge 1 ]; then break; fi
+            test "$attempt" -lt 30
+            sleep 1
+          done
+          previous_epoch=$(docker compose exec -T redis redis-cli --raw GET 'mempool_miner:v2:{regtest}:epoch')
+          docker compose exec -T bitcoin-regtest sh -lc '
+            address=$(bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" -rpcwallet=ci_miner getnewaddress)
+            bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" generatetoaddress 1 "$address" >/dev/null
+          '
+          for attempt in $(seq 1 30); do
+            current_epoch=$(docker compose exec -T redis redis-cli --raw GET 'mempool_miner:v2:{regtest}:epoch')
+            if [ -n "$current_epoch" ] && [ "$current_epoch" != "$previous_epoch" ]; then break; fi
+            test "$attempt" -lt 30
+            sleep 1
+          done
 
       - name: Coletar logs em caso de falha
         if: failure()
@@ -80,4 +151,4 @@ jobs:
 
       - name: Encerrar a stack efêmera
         if: always()
-        run: docker compose down --volumes --remove-orphans
+        run: docker compose --profile docs down --volumes --remove-orphans

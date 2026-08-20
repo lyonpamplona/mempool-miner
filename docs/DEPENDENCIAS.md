@@ -17,6 +17,7 @@
 | Redis Server | 7.4 | persistência e fan-out |
 | Nginx | 1.28 | estáticos e proxy |
 | Bitcoin Core | 31.1 | RPC e ZMQ |
+| Docker Compose | ≥ 2.33.1 | profiles, health e `gw_priority` |
 
 As versões Python estão em backend/requirements.txt. pytest, pytest-asyncio e
 Ruff são dependências de desenvolvimento.

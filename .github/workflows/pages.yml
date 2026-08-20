@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "docs/**"
+      - "guia-apresentacao.html"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:
@@ -24,9 +26,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - id: pages
+        uses: actions/configure-pages@v6
+      - name: Montar publicação sanitizada
+        env:
+          PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+        run: |
+          mkdir -p _site/api _site/apresentacao _site/assets
+          cp docs/index.html _site/index.html
+          cp docs/api.html _site/api/index.html
+          cp guia-apresentacao.html _site/apresentacao/index.html
+          cp docs/site.css _site/
+          cp docs/assets/*.svg _site/assets/
+          for page in _site/index.html _site/api/index.html _site/apresentacao/index.html; do
+            sed -i \
+              -e "s|href=\"/|href=\"${PAGES_BASE_PATH}/|g" \
+              -e "s|src=\"/|src=\"${PAGES_BASE_PATH}/|g" \
+              "$page"
+          done
+          test -z "$(find _site -type f -name '*.md' -print -quit)"
+          test -z "$(find _site -type f ! -name '*.html' ! -name '*.css' ! -name '*.svg' -print -quit)"
+          test ! -e _site/AUDITORIA.md
+          test ! -e _site/ROADMAP.md
+          ! grep -RIE '(RPC_PASSWORD|RPC_USER|REDIS_URL|BEGIN [A-Z ]*PRIVATE KEY)' _site
+      - uses: actions/upload-pages-artifact@v5
         with:
-          path: docs
+          path: _site
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

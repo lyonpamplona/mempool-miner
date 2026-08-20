@@ -1,0 +1,14 @@
+# A imagem do jogo recebe somente o shell PWA explicitamente versionado.
+**
+!Dockerfile
+!nginx.conf
+!index.html
+!style.css
+!pixel.css
+!game.js
+!manifest.webmanifest
+!service-worker.js
+!icons/
+!icons/*.svg
+!fonts/
+!fonts/*.woff2

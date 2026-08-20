@@ -1,9 +1,32 @@
-__pycache__
-*.py[cod]
-.pytest_cache
-.ruff_cache
-.venv
-tests
-README.md
-requirements-dev.txt
-*.log
+# Testes não são necessários na imagem de produção
+tests/
+pytest.ini
+.pytest_cache/
+coverage.xml
+.coverage
+
+# Ambiente virtual
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Docs e configs locais
+.env
+.env.local
+*.md
+LICENSE
+
+# Scripts de desenvolvimento
+scripts/

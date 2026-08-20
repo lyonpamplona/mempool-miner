@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="dark">
+    <title>Protótipo mobile — Mempool Miner</title>
+    <style>
+        :root { color-scheme: dark; --bg: #050505; --panel: rgba(19, 19, 23, .92); --line: rgba(255, 255, 255, .12); --text: #e2e8f0; --muted: #94a3b8; --orange: #f7931a; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html { scroll-behavior: smooth; }
+        body { min-height: 100dvh; padding: max(14px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) calc(82px + max(12px, env(safe-area-inset-bottom))) max(14px, env(safe-area-inset-left)); background: radial-gradient(circle at 50% 0, rgba(247, 147, 26, .13), transparent 46%), var(--bg); color: var(--text); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+        button, select { min-height: 44px; font: inherit; touch-action: manipulation; }
+        button, a, select { border-radius: 9px; }
+        .shell { width: min(100%, 1024px); margin: auto; }
+        .notice { margin-bottom: 10px; padding: 9px 12px; border: 1px dashed var(--orange); border-radius: 9px; color: var(--orange); font-size: 11px; text-align: center; }
+        .panel { border: 1px solid var(--line); border-radius: 16px; background: var(--panel); box-shadow: 0 18px 60px rgba(0, 0, 0, .45); }
+        header { display: grid; gap: 16px; padding: 18px; }
+        .brand { display: flex; align-items: center; gap: 12px; }
+        .logo { width: 48px; height: 48px; flex: 0 0 auto; }
+        h1 { color: var(--orange); font-size: clamp(19px, 6vw, 28px); }
+        .subtitle { margin-top: 3px; color: var(--muted); font-size: 10px; }
+        .network { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+        label { grid-column: 1 / -1; color: var(--muted); font-size: 10px; text-transform: uppercase; }
+        select, .install { border: 1px solid var(--line); padding: 8px 10px; background: #111114; color: var(--text); }
+        .install { border-color: var(--orange); color: var(--orange); cursor: pointer; }
+        .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
+        .stat { padding: 12px 10px; text-align: center; }
+        .stat span { display: block; color: var(--muted); font-size: 9px; text-transform: uppercase; }
+        .stat strong { display: block; margin-top: 4px; color: var(--orange); font-size: 15px; }
+        main { display: grid; gap: 12px; }
+        section { padding: 14px; scroll-margin-top: 12px; }
+        h2 { margin-bottom: 12px; color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+        .words { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; }
+        .word { display: flex; justify-content: space-between; gap: 6px; padding: 8px; border-radius: 7px; background: rgba(255,255,255,.04); font-size: 10px; }
+        .fee { color: var(--orange); }
+        .grid { --size: min(10.4vw, 39px); display: grid; grid-template-columns: repeat(8, var(--size)); gap: 3px; justify-content: center; user-select: none; touch-action: manipulation; }
+        .cell { width: var(--size); height: var(--size); display: grid; place-items: center; border: 1px solid rgba(255,255,255,.05); border-radius: 5px; background: rgba(255,255,255,.04); color: var(--muted); cursor: pointer; font: 700 clamp(11px, 4vw, 17px)/1 ui-monospace, monospace; }
+        .cell[aria-selected="true"] { border-color: var(--orange); background: rgba(247,147,26,.22); color: var(--orange); }
+        .cell:focus-visible, button:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid #fde047; outline-offset: 2px; }
+        .hint { min-height: 1.5em; margin-top: 12px; color: var(--muted); font-size: 10px; text-align: center; }
+        .rank { display: flex; justify-content: space-between; padding: 9px; border-bottom: 1px solid var(--line); font-size: 11px; }
+        .rank:first-of-type { color: #fde047; }
+        nav { position: fixed; right: max(10px, env(safe-area-inset-right)); bottom: max(8px, env(safe-area-inset-bottom)); left: max(10px, env(safe-area-inset-left)); display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 5px; z-index: 10; }
+        nav a { min-height: 48px; display: grid; place-items: center; color: var(--muted); font-size: 11px; text-decoration: none; }
+        @media (min-width: 760px) { body { padding-bottom: 24px; } header { grid-template-columns: 1fr minmax(310px, .7fr); align-items: center; } main { grid-template-columns: 220px minmax(390px, 1fr) 220px; } .grid { --size: min(5vw, 48px); } .words { grid-template-columns: 1fr; } nav { display: none; } }
+        @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <p class="notice">PROTÓTIPO AUTÔNOMO · não conecta à API, ao WebSocket nem ao ranking real</p>
+        <header class="panel">
+            <div class="brand">
+                <svg class="logo" viewBox="0 0 64 64" role="img" aria-label="Símbolo do Mempool Miner">
+                    <circle cx="32" cy="32" r="29" fill="#f7931a"/>
+                    <path d="M24 14v36m8-36v36M19 22h21c8 0 8 10 0 10H20h22c9 0 9 11 0 11H18" fill="none" stroke="#050505" stroke-width="5" stroke-linecap="round"/>
+                </svg>
+                <div><h1>Mempool Miner</h1><p class="subtitle">Proof-of-Search · conceito PWA mobile-first</p></div>
+            </div>
+            <div class="network">
+                <label for="demo-network">Realm isolado</label>
+                <select id="demo-network"><option>Regtest local</option><option>Bitcoin Signet</option><option>Mainnet (profile)</option></select>
+                <button class="install" id="demo-install" type="button">Instalar</button>
+            </div>
+        </header>
+
+        <div class="stats" aria-label="Estatísticas simuladas">
+            <div class="stat panel"><span>Rede</span><strong id="demo-realm">Regtest</strong></div>
+            <div class="stat panel"><span>Saldo</span><strong>12.450</strong></div>
+            <div class="stat panel"><span>Rodada</span><strong>#08</strong></div>
+        </div>
+
+        <main>
+            <section class="panel" id="words">
+                <h2>Transações</h2>
+                <div class="words">
+                    <div class="word"><span>MINER</span><span class="fee">HIGH</span></div>
+                    <div class="word"><span>BLOCK</span><span>STD</span></div>
+                    <div class="word"><span>HASH</span><span>STD</span></div>
+                    <div class="word"><span>NODE</span><span class="fee">GOLD</span></div>
+                </div>
+            </section>
+
+            <section class="panel" id="play">
+                <h2>Grade acessível</h2>
+                <div class="grid" id="demo-grid" role="grid" aria-label="Grade demonstrativa"></div>
+                <p class="hint" id="demo-status" role="status" aria-live="polite">Toque ou pressione Espaço para marcar letras; use as setas para navegar.</p>
+            </section>
+
+            <section class="panel" id="ranking">
+                <h2>Ranking do realm</h2>
+                <div class="rank"><span>#1 Ada</span><strong>98.200</strong></div>
+                <div class="rank"><span>#2 Satoshi</span><strong>87.400</strong></div>
+                <div class="rank"><span>#3 Linus</span><strong>63.050</strong></div>
+            </section>
+        </main>
+    </div>
+
+    <nav class="panel" aria-label="Navegação do protótipo"><a href="#play">Grade</a><a href="#words">TXs</a><a href="#ranking">Ranking</a></nav>
+
+    <script>
+        'use strict';
+        const letters = 'MINERABCHJKLBLOCKPQHASHRSTNODEUVWXYZQWERTYUIOPASDFGHJKLZXCVBNM';
+        const grid = document.getElementById('demo-grid');
+        const status = document.getElementById('demo-status');
+        Array.from({ length: 64 }, (_, index) => {
+            const cell = document.createElement('button');
+            cell.type = 'button';
+            cell.className = 'cell';
+            cell.textContent = letters[index % letters.length];
+            cell.dataset.index = String(index);
+            cell.tabIndex = index === 0 ? 0 : -1;
+            cell.setAttribute('role', 'gridcell');
+            cell.setAttribute('aria-selected', 'false');
+            cell.setAttribute('aria-label', `Letra ${cell.textContent}`);
+            grid.appendChild(cell);
+            return cell;
+        });
+
+        function focusCell(index) {
+            const cells = Array.from(grid.children);
+            const target = cells[Math.max(0, Math.min(cells.length - 1, index))];
+            cells.forEach(cell => { cell.tabIndex = cell === target ? 0 : -1; });
+            target.focus();
+        }
+
+        grid.addEventListener('click', event => {
+            const cell = event.target.closest('.cell');
+            if (!cell) return;
+            const selected = cell.getAttribute('aria-selected') !== 'true';
+            cell.setAttribute('aria-selected', String(selected));
+            status.textContent = `Letra ${cell.textContent} ${selected ? 'marcada' : 'desmarcada'}.`;
+        });
+
+        grid.addEventListener('keydown', event => {
+            const cell = event.target.closest('.cell');
+            if (!cell) return;
+            const index = Number(cell.dataset.index);
+            const moves = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -8, ArrowDown: 8 };
+            if (event.key in moves) { event.preventDefault(); focusCell(index + moves[event.key]); }
+            else if (event.key === ' ') { event.preventDefault(); cell.click(); }
+        });
+
+        document.getElementById('demo-network').addEventListener('change', event => {
+            document.getElementById('demo-realm').textContent = event.target.value.split(' ')[0];
+            status.textContent = 'A troca é apenas visual; nenhum dado real foi carregado.';
+        });
+        document.getElementById('demo-install').addEventListener('click', () => {
+            status.textContent = 'Instalação é demonstrativa neste arquivo autônomo.';
+        });
+    </script>
+</body>
+</html>

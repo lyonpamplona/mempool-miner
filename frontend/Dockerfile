@@ -1,8 +1,8 @@
 FROM nginx:1.28-alpine
 
-COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
-COPY frontend/index.html frontend/style.css frontend/game.js /usr/share/nginx/html/
-COPY docs/ /usr/share/nginx/html/docs/
-COPY guia-apresentacao.html /usr/share/nginx/html/apresentacao.html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY index.html style.css pixel.css game.js manifest.webmanifest service-worker.js /usr/share/nginx/html/
+COPY icons/ /usr/share/nginx/html/icons/
+COPY fonts/ /usr/share/nginx/html/fonts/
 
 EXPOSE 80

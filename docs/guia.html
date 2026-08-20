@@ -1,0 +1,1272 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Guia Completo — Mempool Miner</title>
+  <link rel="stylesheet" href="site.css">
+  <style>
+    /* LAYOUT DO GUIA */
+    .guide-layout {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0;
+    }
+
+    @media (min-width: 901px) {
+      .guide-layout {
+        grid-template-columns: 280px 1fr;
+        min-height: calc(100vh - 68px);
+      }
+    }
+
+    /* SIDEBAR */
+    .sidebar {
+      position: sticky;
+      top: 68px;
+      height: calc(100vh - 68px);
+      overflow-y: auto;
+      padding: 32px 24px;
+      border-right: 1px solid var(--line);
+      background: rgba(5, 5, 5, 0.6);
+      backdrop-filter: blur(12px);
+      display: none;
+    }
+
+    @media (min-width: 901px) {
+      .sidebar { display: block; }
+    }
+
+    .sidebar-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+      color: var(--text);
+      font: 700 0.82rem var(--mono);
+      cursor: pointer;
+      width: 100%;
+      justify-content: space-between;
+    }
+
+    @media (min-width: 901px) {
+      .sidebar-toggle { display: none; }
+    }
+
+    .sidebar-toggle svg {
+      width: 18px;
+      height: 18px;
+      transition: transform 0.2s ease;
+    }
+
+    .sidebar-toggle[aria-expanded="true"] svg {
+      transform: rotate(180deg);
+    }
+
+    .sidebar-mobile {
+      display: none;
+      padding: 0 24px 24px;
+    }
+
+    .sidebar-mobile.open {
+      display: block;
+    }
+
+    @media (min-width: 901px) {
+      .sidebar-mobile { display: none !important; }
+    }
+
+    .sidebar h3 {
+      color: var(--orange);
+      font: 700 0.72rem var(--mono);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin: 24px 0 12px;
+    }
+
+    .sidebar h3:first-child {
+      margin-top: 0;
+    }
+
+    .sidebar ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .sidebar li {
+      margin: 0;
+    }
+
+    .sidebar a {
+      display: block;
+      padding: 6px 12px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.88rem;
+      border-radius: 8px;
+      transition: all 0.15s ease;
+    }
+
+    .sidebar a:hover,
+    .sidebar a.active {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .sidebar a.active {
+      border-left: 2px solid var(--orange);
+      color: var(--orange);
+    }
+
+    /* BUSCA */
+    .search-box {
+      position: relative;
+      margin-bottom: 24px;
+    }
+
+    .search-input {
+      width: 100%;
+      padding: 10px 14px 10px 38px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+      color: var(--text);
+      font: 700 0.82rem var(--mono);
+      outline: none;
+      transition: border-color 0.2s ease;
+    }
+
+    .search-input::placeholder {
+      color: var(--muted);
+      font-weight: 400;
+    }
+
+    .search-input:focus {
+      border-color: var(--orange);
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 16px;
+      height: 16px;
+      color: var(--muted);
+      pointer-events: none;
+    }
+
+    .search-results {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      right: 0;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      max-height: 320px;
+      overflow-y: auto;
+      z-index: 50;
+      display: none;
+    }
+
+    .search-results.open {
+      display: block;
+    }
+
+    .search-result {
+      display: block;
+      padding: 10px 14px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.84rem;
+      border-bottom: 1px solid var(--line);
+      transition: all 0.15s ease;
+    }
+
+    .search-result:last-child {
+      border-bottom: none;
+    }
+
+    .search-result:hover {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .search-result mark {
+      background: rgba(247, 147, 26, 0.25);
+      color: var(--orange);
+      padding: 0 2px;
+      border-radius: 2px;
+    }
+
+    .search-no-results {
+      padding: 14px;
+      color: var(--muted);
+      font-size: 0.84rem;
+      text-align: center;
+    }
+
+    /* CONTEUDO DO GUIA */
+    .guide-content {
+      padding: 48px 24px;
+      max-width: 860px;
+    }
+
+    @media (min-width: 901px) {
+      .guide-content {
+        padding: 48px 48px;
+      }
+    }
+
+    .guide-content h1 {
+      margin: 0 0 12px;
+      font-size: clamp(2rem, 5vw, 3.2rem);
+    }
+
+    .guide-content .lead {
+      margin: 0 0 48px;
+    }
+
+    .guide-content h2 {
+      margin: 56px 0 24px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+      font-size: clamp(1.5rem, 3vw, 2rem);
+    }
+
+    .guide-content h3 {
+      margin: 36px 0 16px;
+      font-size: 1.15rem;
+    }
+
+    .guide-content h4 {
+      margin: 24px 0 12px;
+      font-size: 1rem;
+      color: var(--muted);
+    }
+
+    .guide-content p {
+      margin: 0 0 16px;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .guide-content p strong {
+      color: var(--text);
+    }
+
+    .guide-content ul,
+    .guide-content ol {
+      margin: 0 0 20px;
+      padding-left: 24px;
+    }
+
+    .guide-content li {
+      margin: 0 0 8px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .guide-content li strong {
+      color: var(--text);
+    }
+
+    .guide-content blockquote {
+      margin: 24px 0;
+      padding: 18px 22px;
+      border-left: 3px solid var(--orange);
+      background: rgba(247, 147, 26, 0.06);
+      border-radius: 0 12px 12px 0;
+      color: var(--muted);
+    }
+
+    .guide-content blockquote p {
+      margin: 0;
+    }
+
+    .guide-content hr {
+      border: none;
+      border-top: 1px solid var(--line);
+      margin: 48px 0;
+    }
+
+    /* TABELAS */
+    .guide-content table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0 28px;
+      font-size: 0.9rem;
+    }
+
+    .guide-content thead {
+      background: var(--surface);
+    }
+
+    .guide-content th {
+      padding: 12px 16px;
+      text-align: left;
+      font: 700 0.82rem var(--mono);
+      color: var(--text);
+      border-bottom: 2px solid var(--orange);
+    }
+
+    .guide-content td {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+    }
+
+    .guide-content tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    /* CODE BLOCKS */
+    .guide-content pre {
+      margin: 20px 0 28px;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #020409;
+      color: #dbeafe;
+      overflow: auto;
+      font-size: 0.83rem;
+      line-height: 1.6;
+    }
+
+    .guide-content code {
+      font-family: var(--mono);
+      font-size: 0.85em;
+      background: rgba(255, 255, 255, 0.06);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: var(--blue);
+    }
+
+    .guide-content pre code {
+      background: none;
+      padding: 0;
+      color: inherit;
+    }
+
+    /* DIAGRAMAS ASCII */
+    .ascii-diagram {
+      margin: 24px 0 32px;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+      overflow-x: auto;
+    }
+
+    .ascii-diagram pre {
+      margin: 0;
+      padding: 0;
+      border: none;
+      background: none;
+      font-size: 0.78rem;
+      line-height: 1.4;
+      color: var(--text);
+    }
+
+    /* TAGS */
+    .tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 16px 0 24px;
+    }
+
+    /* BACK TO TOP */
+    .back-to-top {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      width: 44px;
+      height: 44px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+      color: var(--text);
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      opacity: 0;
+      transform: translateY(12px);
+      transition: all 0.2s ease;
+      z-index: 30;
+    }
+
+    .back-to-top.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .back-to-top:hover {
+      border-color: var(--orange);
+      color: var(--orange);
+    }
+
+    .back-to-top svg {
+      width: 20px;
+      height: 20px;
+    }
+
+    /* PRINT */
+    @media print {
+      .sidebar, .back-to-top, .search-box { display: none !important; }
+      .guide-layout { grid-template-columns: 1fr; }
+      .guide-content { max-width: none; padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <a href="#main" class="skip-link">Pular para o conteudo</a>
+
+  <header class="site-header">
+    <nav class="nav">
+      <a href="/" class="brand">
+        <span class="brand-mark">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        </span>
+        Mempool Miner
+      </a>
+      <div class="nav-links">
+        <a href="/">Inicio</a>
+        <a href="/api/">API</a>
+        <a href="/guia/" aria-current="page">Guia</a>
+      </div>
+    </nav>
+  </header>
+
+  <div class="guide-layout">
+    <!-- SIDEBAR -->
+    <aside class="sidebar" id="sidebar">
+      <div class="search-box">
+        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        <input type="search" class="search-input" id="searchInput" placeholder="Buscar no guia..." autocomplete="off">
+        <div class="search-results" id="searchResults"></div>
+      </div>
+
+      <h3>Conteudo</h3>
+      <ul>
+        <li><a href="#o-que-e">O que e o Mempool Miner?</a></li>
+        <li><a href="#como-funciona">Como funciona o sistema</a></li>
+        <li><a href="#arquitetura">Arquitetura tecnica</a></li>
+        <li><a href="#instalacao">Instalacao e execucao</a></li>
+        <li><a href="#mecanicas">Mecanicas do jogo</a></li>
+        <li><a href="#in-game">Mecanicas in-game</a></li>
+        <li><a href="#api">API e WebSocket</a></li>
+        <li><a href="#configuracao">Configuracao avancada</a></li>
+        <li><a href="#comandos">Comandos operacionais</a></li>
+        <li><a href="#faq">Perguntas frequentes</a></li>
+      </ul>
+
+      <h3>Referencias</h3>
+      <ul>
+        <li><a href="ARQUITETURA.md">Arquitetura</a></li>
+        <li><a href="API.md">API</a></li>
+        <li><a href="CONFIGURACAO.md">Configuracao</a></li>
+        <li><a href="TUTORIAL.md">Tutorial</a></li>
+        <li><a href="TROUBLESHOOTING.md">Troubleshooting</a></li>
+      </ul>
+    </aside>
+
+    <!-- CONTEUDO -->
+    <main class="guide-content" id="main">
+      <button class="sidebar-toggle" id="sidebarToggle" aria-expanded="false" aria-controls="sidebarMobile">
+        <span>Menu de navegacao</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="sidebar-mobile" id="sidebarMobile">
+        <ul>
+          <li><a href="#o-que-e">O que e o Mempool Miner?</a></li>
+          <li><a href="#como-funciona">Como funciona o sistema</a></li>
+          <li><a href="#arquitetura">Arquitetura tecnica</a></li>
+          <li><a href="#instalacao">Instalacao e execucao</a></li>
+          <li><a href="#mecanicas">Mecanicas do jogo</a></li>
+          <li><a href="#in-game">Mecanicas in-game</a></li>
+          <li><a href="#api">API e WebSocket</a></li>
+          <li><a href="#configuracao">Configuracao avancada</a></li>
+          <li><a href="#comandos">Comandos operacionais</a></li>
+          <li><a href="#faq">Perguntas frequentes</a></li>
+        </ul>
+      </div>
+
+      <h1>Guia Completo do Mempool Miner</h1>
+      <p class="lead">Jogo educacional em tempo real que transforma transacoes reais do Bitcoin em palavras dentro de uma grade de caca-palavras.</p>
+
+      <hr>
+
+      <section id="o-que-e">
+        <h2>O que e o Mempool Miner?</h2>
+        <p>O <strong>Mempool Miner</strong> e um jogo educacional que conecta o mundo real do Bitcoin a experiencia interativa de um caca-palavras. Ele monitora transacoes reais da rede Bitcoin (Regtest, Signet ou Mainnet) e transforma cada transacao em uma palavra derivada do padrao BIP39, criando uma grade dinamica onde o jogador precisa encontrar as palavras antes que um novo bloco seja minerado.</p>
+
+        <h3>Conceito central</h3>
+        <div class="ascii-diagram">
+          <pre>Transacao Bitcoin → TXID → Hash SHA-256 → 128 bits → Palavra BIP39 → Grade</pre>
+        </div>
+        <p>Cada transacao que entra no mempool do Bitcoin Core e convertida em uma palavra unica. Quando 6 palavras diferentes sao coletadas, uma nova rodada de caca-palavras e iniciada. O jogador tem ate o proximo bloco para encontrar todas as palavras.</p>
+
+        <h3>O que o jogo NAO faz</h3>
+        <ul>
+          <li><strong>Nao minera Bitcoin real</strong></li>
+          <li><strong>Nao abre canais Lightning</strong></li>
+          <li><strong>Nao movimenta fundos reais</strong></li>
+          <li><strong>Nao conecta carteiras</strong></li>
+          <li><strong>Nao calcula hashrate real</strong></li>
+        </ul>
+        <p>Sats, hashrate, carteira, recompensas e modo L2 sao <strong>mecanicas simuladas</strong> para fins educacionais e de entretenimento.</p>
+      </section>
+
+      <section id="como-funciona">
+        <h2>Como funciona o sistema</h2>
+
+        <h3>Fluxo completo de uma transacao ao jogo</h3>
+        <div class="ascii-diagram">
+          <pre>
+┌─────────────────────────────────────────────────────────────────┐
+│                    FLUXO DO MEMPOOL MINER                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. Bitcoin Core publica transacao via ZMQ                      │
+│     ↓                                                           │
+│  2. Ingestor recebe e coloca na fila                           │
+│     ↓                                                           │
+│  3. GameEngine calcula TXID e converte para palavra BIP39       │
+│     ↓                                                           │
+│  4. RPC consulta vsize e taxa da transacao                      │
+│     ↓                                                           │
+│  5. Evento publicado no Redis Pub/Sub                           │
+│     ↓                                                           │
+│  6. FastAPI entrega via WebSocket ao navegador                  │
+│     ↓                                                           │
+│  7. Frontend adiciona palavra a grade                           │
+│     ↓                                                           │
+│  8. Jogador encontra palavras e ganha pontos                    │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+          </pre>
+        </div>
+
+        <h3>Componentes do sistema</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Componente</th>
+              <th>Responsabilidade</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Bitcoin Core</strong></td>
+              <td>Nao Bitcoin que publica transacoes e blocos via ZMQ; fornece metadados via RPC</td>
+            </tr>
+            <tr>
+              <td><strong>Ingestor</strong></td>
+              <td>Processo singleton por rede que consome ZMQ, calcula palavras e publica eventos</td>
+            </tr>
+            <tr>
+              <td><strong>Redis</strong></td>
+              <td>Pub/Sub para eventos, estado dos nos, leaderboard e deduplicacao</td>
+            </tr>
+            <tr>
+              <td><strong>FastAPI</strong></td>
+              <td>API REST e WebSocket que entrega dados ao frontend</td>
+            </tr>
+            <tr>
+              <td><strong>Nginx</strong></td>
+              <td>Proxy same-origin que serve o frontend e redireciona para a API</td>
+            </tr>
+            <tr>
+              <td><strong>Frontend</strong></td>
+              <td>Interface PWA com grade, cronometro, loja simulada e controles</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="arquitetura">
+        <h2>Arquitetura tecnica</h2>
+
+        <div class="ascii-diagram">
+          <pre>
+┌─────────────────────────────────────────────────────────────────────┐
+│                        MEMPOOL MINER                                 │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐                      │
+│  │ Regtest  │    │  Signet   │    │ Mainnet  │ (opcional)           │
+│  │ Bitcoin  │    │  Bitcoin  │    │ Bitcoin  │                      │
+│  │  Core    │    │  Core     │    │  Core    │                      │
+│  └────┬─────┘    └────┬─────┘    └────┬─────┘                      │
+│       │ ZMQ           │ ZMQ           │ ZMQ                         │
+│       ▼               ▼               ▼                            │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐                      │
+│  │Ingestor  │    │Ingestor  │    │Ingestor  │                      │
+│  │Regtest   │    │ Signet   │    │Mainnet   │                      │
+│  └────┬─────┘    └────┬─────┘    └────┬─────┘                      │
+│       │               │               │                             │
+│       └───────────────┼───────────────┘                             │
+│                       ▼                                             │
+│              ┌────────────────┐                                     │
+│              │   Redis        │                                     │
+│              │ (Pub/Sub +     │                                     │
+│              │  Sorted Sets)  │                                     │
+│              └───────┬────────┘                                     │
+│                      │                                              │
+│              ┌───────▼────────┐                                     │
+│              │   FastAPI      │                                     │
+│              │ (REST + WS)    │                                     │
+│              └───────┬────────┘                                     │
+│                      │                                              │
+│              ┌───────▼────────┐                                     │
+│              │    Nginx       │                                     │
+│              │  (Proxy + PWA) │                                     │
+│              └───────┬────────┘                                     │
+│                      │                                              │
+│              ┌───────▼────────┐                                     │
+│              │   Navegador    │                                     │
+│              │  (Jogo PWA)    │                                     │
+│              └────────────────┘                                     │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+          </pre>
+        </div>
+
+        <h3>Redes suportadas</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Rede</th>
+              <th>Descricao</th>
+              <th>Uso</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Regtest</strong></td>
+              <td>Rede local de teste</td>
+              <td>Desenvolvimento e demonstracao</td>
+            </tr>
+            <tr>
+              <td><strong>Signet</strong></td>
+              <td>Rede publica de teste</td>
+              <td>Transacoes reais sem valor</td>
+            </tr>
+            <tr>
+              <td><strong>Mainnet</strong></td>
+              <td>Rede principal (opcional)</td>
+              <td>Transacoes reais da mainnet</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="instalacao">
+        <h2>Instalacao e execucao</h2>
+
+        <h3>Pre-requisitos</h3>
+        <ul>
+          <li><strong>Docker Engine</strong> ou <strong>Docker Desktop</strong> com Compose 2.33.1+</li>
+          <li><strong>4 GB de RAM</strong> livres (Regtest + Signet)</li>
+          <li><strong>Porta 8010</strong> disponivel (jogo)</li>
+          <li><strong>Porta 8020</strong> disponivel (documentacao, opcional)</li>
+        </ul>
+
+        <h3>Instalacao rapida</h3>
+        <pre><code># 1. Clone o repositorio
+git clone https://github.com/seu-usuario/mempool.miner.git
+cd mempool.miner
+
+# 2. Copie o arquivo de configuracao
+cp .env.example .env
+
+# 3. Edite .env e substitua as senhas RPC de exemplo
+#    (IMPORTANTE: use senhas fortes e aleatorias)
+
+# 4. Valide a configuracao
+docker compose config --quiet
+
+# 5. Inicie o sistema
+docker compose up -d --build
+
+# 6. Verifique os servicos
+docker compose ps</code></pre>
+
+        <h3>Acessando o jogo</h3>
+        <ul>
+          <li><strong>Jogo:</strong> http://localhost:8010</li>
+          <li><strong>Documentacao:</strong> http://localhost:8020/ (opcional)</li>
+          <li><strong>API publica:</strong> http://localhost:8020/api/ (opcional)</li>
+        </ul>
+
+        <h3>Instalando como PWA</h3>
+        <p>No navegador, clique no botao <strong>"Instalar app"</strong> para instalar o jogo como Progressive Web App. O service worker mantem apenas o shell estatico em cache; API, WebSocket, health e leaderboard nunca sao armazenados offline.</p>
+      </section>
+
+      <section id="mecanicas">
+        <h2>Mecanicas do jogo</h2>
+
+        <h3>Objetivo</h3>
+        <p>Encontrar <strong>6 palavras</strong> escondidas em uma grade de caca-palavras antes que:</p>
+        <ul>
+          <li>O <strong>tempo acabe</strong> (20, 60 ou 75 segundos, dependendo da grade)</li>
+          <li>Um <strong>novo bloco</strong> seja minerado na rede Bitcoin</li>
+        </ul>
+
+        <h3>Fluxo de jogo</h3>
+        <div class="ascii-diagram">
+          <pre>
+┌─────────────────────────────────────────────────────────────────┐
+│                    CICLO DE JOGO                                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. Coleta de palavras                                          │
+│     → Transacoes chegam via WebSocket                           │
+│     → Cada transacao vira uma palavra BIP39                     │
+│     → 6 palavras unicas = nova rodada                           │
+│     ↓                                                           │
+│  2. Construcao da grade                                         │
+│     → Grade 8×8 (modo L2), 12×12 (padrao) ou 15×15 (vsize alto)│
+│     → Palavras posicionadas sem sobreposicao                    │
+│     → Espacos preenchidos com letras aleatorias                 │
+│     ↓                                                           │
+│  3. Rodada ativa                                                │
+│     → Cronometro inicia                                         │
+│     → Jogador seleciona palavras na grade                       │
+│     → Pontos calculados por palavra encontrada                  │
+│     ↓                                                           │
+│  4. Fim da rodada                                               │
+│     → Vitoria: todas as palavras encontradas                    │
+│     → Derrota: tempo esgotado ou novo bloco minerado            │
+│     ↓                                                           │
+│  5. Nova coleta                                                 │
+│     → Buffer limpo, espera proximas transacoes                  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+          </pre>
+        </div>
+
+        <h3>Selecao de palavras</h3>
+        <ul>
+          <li><strong>Mouse/Toque:</strong> Clique na primeira letra, arraste ate a ultima</li>
+          <li><strong>Teclado:</strong> Use as setas para navegar, Enter para confirmar</li>
+          <li><strong>Direcoes:</strong> Horizontal, vertical e diagonal (ambos os sentidos)</li>
+        </ul>
+
+        <h3>Pontuacao</h3>
+        <pre><code>pontos = (500 + comprimento × 50) × combo</code></pre>
+        <table>
+          <thead>
+            <tr>
+              <th>Fator</th>
+              <th>Valor</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Base por palavra</td>
+              <td>500 pontos</td>
+            </tr>
+            <tr>
+              <td>Bonus por letra</td>
+              <td>50 pontos × comprimento</td>
+            </tr>
+            <tr>
+              <td>Combo</td>
+              <td>Cresce 0.5x por acerto em menos de 8s (max 4x)</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Multiplicadores especiais</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Multiplicador</th>
+              <th>Valor</th>
+              <th>Condicao</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Taxa alta</strong></td>
+              <td>×3</td>
+              <td>Transacao com taxa acima de 20 sats/vB</td>
+            </tr>
+            <tr>
+              <td><strong>Hash dourado</strong></td>
+              <td>×5</td>
+              <td>TXID comeca com "00"</td>
+            </tr>
+            <tr>
+              <td><strong>Modo Lightning</strong></td>
+              <td>×10</td>
+              <td>Modo L2 ativado na loja</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="in-game">
+        <h2>Mecanicas in-game</h2>
+
+        <h3>Loja de upgrades</h3>
+        <p>A loja oferece 3 tipos de upgrades simulados:</p>
+
+        <h4>1. Dica (Hint)</h4>
+        <ul>
+          <li><strong>Custo:</strong> 5.000 sats ficticios</li>
+          <li><strong>Efeito:</strong> Destaca a primeira celula de uma palavra nao encontrada</li>
+          <li><strong>Uso:</strong> Apenas durante a rodada ativa</li>
+        </ul>
+
+        <h4>2. Hardware (Minerador)</h4>
+        <ul>
+          <li><strong>Custo:</strong> Progressivo (100k, 500k, 2M sats)</li>
+          <li><strong>Efeito:</strong> Adiciona +10 sats ao saldo por transacao processada</li>
+          <li><strong>Niveis:</strong> 3 niveis disponiveis (CPU Miner → GPU Rig → ASIC Antminer)</li>
+        </ul>
+
+        <h4>3. Modo Lightning (L2)</h4>
+        <ul>
+          <li><strong>Custo:</strong> 1.000.000 sats ficticios</li>
+          <li><strong>Efeito:</strong> Muda o tema visual para azul Lightning, grade reduzida para 8×8, multiplicador ×10 em todas as palavras</li>
+          <li><strong>Restricao:</strong> So pode ser ativado entre rodadas</li>
+        </ul>
+
+        <h3>Estados da rede</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Estado</th>
+              <th>Significado</th>
+              <th>Acao do jogo</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>starting</code></td>
+              <td>Servico iniciando</td>
+              <td>Aguarda</td>
+            </tr>
+            <tr>
+              <td><code>syncing</code></td>
+              <td>Na sincronizando (IBD)</td>
+              <td>Nao inicia partidas</td>
+            </tr>
+            <tr>
+              <td><code>ready</code></td>
+              <td>Realm disponivel</td>
+              <td>Jogo ativo</td>
+            </tr>
+            <tr>
+              <td><code>disabled</code></td>
+              <td>Profile nao iniciado</td>
+              <td>Nao aparece no seletor</td>
+            </tr>
+            <tr>
+              <td><code>unavailable</code></td>
+              <td>Heartbeat indisponivel</td>
+              <td>Retorna ao seletor</td>
+            </tr>
+            <tr>
+              <td><code>stopped</code></td>
+              <td>Ingestor encerrado</td>
+              <td>Retorna ao seletor</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Troca de rede</h3>
+        <p>Ao trocar de rede (Regtest → Signet → Mainnet):</p>
+        <ol>
+          <li>A sessao atual e invalidada</li>
+          <li>WebSocket e fechado</li>
+          <li>Todos os timeouts e intervals sao cancelados</li>
+          <li>Saldo e upgrades <strong>nao</strong> atravessam realms</li>
+          <li>Nova conexao e estabelecida com o realm selecionado</li>
+        </ol>
+      </section>
+
+      <section id="api">
+        <h2>API e WebSocket</h2>
+
+        <h3>Endpoints REST</h3>
+
+        <h4>GET <code>/api/v1/health/live</code></h4>
+        <p>Verifica se a API esta respondendo.</p>
+        <pre><code>{"status": "ok"}</code></pre>
+
+        <h4>GET <code>/api/v1/networks</code></h4>
+        <p>Lista todas as redes disponiveis com seu status.</p>
+        <pre><code>{
+  "schema_version": 2,
+  "default_realm_id": "regtest",
+  "networks": [
+    {
+      "realm_id": "regtest",
+      "network": "regtest",
+      "display_name": "Regtest local",
+      "status": "ready",
+      "playable": true,
+      "initial_block_download": false,
+      "verification_progress": 1.0,
+      "pruned": false
+    }
+  ]
+}</code></pre>
+
+        <h4>GET <code>/api/v1/networks/{realm_id}/leaderboard</code></h4>
+        <p>Lista os 10 maiores recordes de uma rede.</p>
+        <pre><code>{
+  "realm_id": "regtest",
+  "leaderboard": [
+    {"username": "Miner_42", "score": 12500}
+  ]
+}</code></pre>
+
+        <h4>POST <code>/api/v1/networks/{realm_id}/leaderboard</code></h4>
+        <p>Envia uma pontuacao para o leaderboard.</p>
+        <pre><code>{"username": "Miner_42", "score": 12500}</code></pre>
+        <p><strong>Regras:</strong></p>
+        <ul>
+          <li>Nickname: 1-12 caracteres (letras, numeros, hifen, sublinhado)</li>
+          <li>Score: inteiro entre 0 e 2.147.483.647</li>
+          <li>Apenas o maior valor e mantido</li>
+        </ul>
+
+        <h3>WebSocket</h3>
+        <p><strong>Conexao:</strong></p>
+        <pre><code>ws://localhost:8010/ws/v1/game/{realm_id}</code></pre>
+
+        <h4>Eventos recebidos</h4>
+
+        <p><strong><code>game_start</code></strong> — Inicio da conexao</p>
+        <pre><code>{
+  "schema_version": 2,
+  "action": "game_start",
+  "realm_id": "regtest",
+  "network": "regtest",
+  "status": "ready",
+  "playable": true,
+  "initial_block_download": false,
+  "verification_progress": 1.0,
+  "pruned": false
+}</code></pre>
+
+        <p><strong><code>transaction_received</code></strong> — Nova transacao</p>
+        <pre><code>{
+  "schema_version": 2,
+  "action": "transaction_received",
+  "realm_id": "regtest",
+  "epoch": "opaque-stream-id",
+  "word": "ABANDON",
+  "tx_stub": "4a5e1e4b",
+  "is_golden": false,
+  "is_high_fee": true,
+  "vsize": 250,
+  "fee_rate_sat_vb": 24.5
+}</code></pre>
+
+        <p><strong><code>block_mined</code></strong> — Novo bloco minerado</p>
+        <pre><code>{
+  "schema_version": 2,
+  "action": "block_mined",
+  "realm_id": "regtest",
+  "epoch": "new-opaque-stream-id"
+}</code></pre>
+
+        <p><strong><code>network_status</code></strong> — Mudanca de status da rede</p>
+        <pre><code>{
+  "schema_version": 2,
+  "action": "network_status",
+  "realm_id": "signet",
+  "status": "syncing",
+  "playable": false,
+  "initial_block_download": true,
+  "verification_progress": 0.82
+}</code></pre>
+      </section>
+
+      <section id="configuracao">
+        <h2>Configuracao avancada</h2>
+
+        <h3>Variaveis de ambiente</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Variavel</th>
+              <th>Descricao</th>
+              <th>Padrao</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>DEFAULT_REALM_ID</code></td>
+              <td>Realm padrao para aliases legados</td>
+              <td><code>regtest</code></td>
+            </tr>
+            <tr>
+              <td><code>REDIS_PASSWORD</code></td>
+              <td>Senha do Redis (obrigatorio)</td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td><code>RPC_USER</code></td>
+              <td>Usuario RPC do Bitcoin Core</td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td><code>RPC_PASSWORD</code></td>
+              <td>Senha RPC do Bitcoin Core</td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td><code>RPC_HOST</code></td>
+              <td>Host RPC do Bitcoin Core</td>
+              <td><code>bitcoin-{realm}</code></td>
+            </tr>
+            <tr>
+              <td><code>RPC_PORT</code></td>
+              <td>Porta RPC do Bitcoin Core</td>
+              <td><code>18443</code> (regtest)</td>
+            </tr>
+            <tr>
+              <td><code>ZMQ_HOST</code></td>
+              <td>Host ZMQ do Bitcoin Core</td>
+              <td><code>bitcoin-{realm}</code></td>
+            </tr>
+            <tr>
+              <td><code>ZMQ_PORT</code></td>
+              <td>Porta ZMQ do Bitcoin Core</td>
+              <td><code>28332</code></td>
+            </tr>
+            <tr>
+              <td><code>HIGH_FEE_RATE_SAT_VB</code></td>
+              <td>Limite para taxa alta</td>
+              <td><code>20</code></td>
+            </tr>
+            <tr>
+              <td><code>TX_QUEUE_MAX_SIZE</code></td>
+              <td>Tamanho maximo da fila</td>
+              <td><code>5000</code></td>
+            </tr>
+            <tr>
+              <td><code>TX_PROCESS_INTERVAL_SECONDS</code></td>
+              <td>Intervalo entre processamentos</td>
+              <td><code>1.0</code></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Perfis Docker</h3>
+        <pre><code># Regtest + Signet (padrao)
+docker compose up -d --build
+
+# Com Mainnet (opcional)
+docker compose --profile mainnet up -d --build
+
+# Com documentacao (opcional)
+docker compose --profile docs up -d --build docs</code></pre>
+
+        <h3>Pruning Mainnet</h3>
+        <p>Para reduzir o espaco em disco do na Mainnet:</p>
+        <pre><code>MAINNET_PRUNE_MIB=10240  # 10 GiB de blocos</code></pre>
+      </section>
+
+      <section id="comandos">
+        <h2>Comandos operacionais</h2>
+
+        <h3>Verificar status</h3>
+        <pre><code>docker compose ps</code></pre>
+
+        <h3>Ver logs</h3>
+        <pre><code># Logs do ingestor Regtest
+docker compose logs -f ingestor-regtest
+
+# Logs da API
+docker compose logs -f api
+
+# Logs do Redis
+docker compose logs -f redis</code></pre>
+
+        <h3>Reiniciar servicos</h3>
+        <pre><code># Reiniciar tudo
+docker compose restart
+
+# Reiniciar apenas a API
+docker compose restart api
+
+# Reiniciar apenas o ingestor Regtest
+docker compose restart ingestor-regtest</code></pre>
+
+        <h3>Parar e remover</h3>
+        <pre><code># Parar todos os containers
+docker compose down
+
+# Parar e remover volumes (cuidado: perde dados)
+docker compose down -v</code></pre>
+
+        <h3>Healthcheck do ingestor</h3>
+        <pre><code># Executar healthcheck manualmente
+docker compose exec ingestor-regtest python -m app.ingestor_healthcheck</code></pre>
+      </section>
+
+      <section id="faq">
+        <h2>Perguntas frequentes</h2>
+
+        <h3>O jogo minera Bitcoin real?</h3>
+        <p>Nao. O Mempool Miner e um jogo educacional que simula mecanicas de mineracao. Nenhuma transacao real e enviada, nenhum hashrate e calculado e nenhum Bitcoin e minerado.</p>
+
+        <h3>Por que nao ha transacoes aparecendo?</h3>
+        <p>Verifique se:</p>
+        <ol>
+          <li>O Bitcoin Core esta sincronizado (<code>playable: true</code>)</li>
+          <li>Transacoes estao sendo enviadas ao mempool (em Regtest, use <code>generatetoaddress</code> ou envie transacoes)</li>
+          <li>O ingestor esta rodando (<code>docker compose ps</code>)</li>
+          <li>O WebSocket esta conectado (console do navegador)</li>
+        </ol>
+
+        <h3>Como gerar transacoes em Regtest?</h3>
+        <pre><code># Obter endereco
+docker compose exec bitcoin-regtest bitcoin-cli getnewaddress
+
+# Enviar transacao
+docker compose exec bitcoin-regtest bitcoin-cli sendtoaddress &lt;endereco&gt; 0.01
+
+# Gerar bloco (para minerar transacoes pendentes)
+docker compose exec bitcoin-regtest bitcoin-cli generatetoaddress 1 &lt;endereco&gt;</code></pre>
+
+        <h3>O leaderboard e persistente?</h3>
+        <p>Sim, os recordes sao armazenados no Redis. Para resetar:</p>
+        <pre><code>docker compose exec redis redis-cli FLUSHALL</code></pre>
+
+        <h3>Como instalar como PWA?</h3>
+        <p>No navegador (Chrome, Edge, Firefox), clique no icone de instalacao na barra de endereco ou no botao <strong>"Instalar app"</strong> dentro do jogo.</p>
+
+        <h3>O jogo funciona offline?</h3>
+        <p>O shell do jogo (HTML, CSS, JS) e cacheado pelo service worker, mas as transacoes e eventos requerem conexao com a API. Offline, o jogo mostra uma mensagem indicando que a conexao e necessaria.</p>
+
+        <h3>Posso usar minha propria carteira?</h3>
+        <p>Nao. O jogo nao se conecta a carteiras externas. Sats, hashrate e recompensas sao simulados internamente.</p>
+
+        <h3>Como contribuir?</h3>
+        <p>Leia <a href="../CONTRIBUTING.md">CONTRIBUTING.md</a> para diretrizes de contribuicao. O historico de mudancas esta em <a href="../CHANGELOG.md">CHANGELOG.md</a>.</p>
+      </section>
+
+      <hr>
+
+      <h2>Referencias</h2>
+      <ul>
+        <li><a href="ARQUITETURA.md">Arquitetura</a></li>
+        <li><a href="API.md">API</a></li>
+        <li><a href="CONFIGURACAO.md">Configuracao</a></li>
+        <li><a href="TUTORIAL.md">Tutorial</a></li>
+        <li><a href="COMANDOS.md">Comandos</a></li>
+        <li><a href="SEGURANCA.md">Seguranca</a></li>
+        <li><a href="TROUBLESHOOTING.md">Troubleshooting</a></li>
+      </ul>
+    </main>
+  </div>
+
+  <button class="back-to-top" id="backToTop" aria-label="Voltar ao inicio">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 15l-6-6-6 6"/></svg>
+  </button>
+
+  <script>
+    // SIDEBAR TOGGLE (mobile)
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    const sidebarMobile = document.getElementById('sidebarMobile');
+    sidebarToggle.addEventListener('click', () => {
+      const expanded = sidebarToggle.getAttribute('aria-expanded') === 'true';
+      sidebarToggle.setAttribute('aria-expanded', !expanded);
+      sidebarMobile.classList.toggle('open');
+    });
+
+    // BACK TO TOP
+    const backToTop = document.getElementById('backToTop');
+    window.addEventListener('scroll', () => {
+      backToTop.classList.toggle('visible', window.scrollY > 400);
+    }, { passive: true });
+    backToTop.addEventListener('click', () => {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+
+    // ACTIVE SECTION HIGHLIGHT
+    const sections = document.querySelectorAll('section[id]');
+    const navLinks = document.querySelectorAll('.sidebar a[href^="#"]');
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          navLinks.forEach(link => {
+            link.classList.toggle('active', link.getAttribute('href') === '#' + entry.target.id);
+          });
+        }
+      });
+    }, { rootMargin: '-20% 0px -60% 0px' });
+    sections.forEach(section => observer.observe(section));
+
+    // SEARCH
+    const searchInput = document.getElementById('searchInput');
+    const searchResults = document.getElementById('searchResults');
+    const searchIndex = [];
+
+    // Build search index from sections
+    sections.forEach(section => {
+      const id = section.id;
+      const title = section.querySelector('h2')?.textContent || '';
+      const text = section.textContent.replace(/\s+/g, ' ').trim();
+      searchIndex.push({ id, title, text });
+    });
+
+    searchInput.addEventListener('input', () => {
+      const query = searchInput.value.toLowerCase().trim();
+      if (query.length < 2) {
+        searchResults.classList.remove('open');
+        return;
+      }
+
+      const results = searchIndex.filter(item =>
+        item.text.toLowerCase().includes(query)
+      ).slice(0, 8);
+
+      if (results.length === 0) {
+        searchResults.innerHTML = '<div class="search-no-results">Nenhum resultado encontrado</div>';
+      } else {
+        searchResults.innerHTML = results.map(item => {
+          const highlighted = item.title.replace(
+            new RegExp(query, 'gi'),
+            match => `<mark>${match}</mark>`
+          );
+          return `<a href="#${item.id}" class="search-result">${highlighted}</a>`;
+        }).join('');
+      }
+      searchResults.classList.add('open');
+    });
+
+    searchInput.addEventListener('blur', () => {
+      setTimeout(() => searchResults.classList.remove('open'), 200);
+    });
+
+    searchInput.addEventListener('focus', () => {
+      if (searchInput.value.length >= 2) {
+        searchResults.classList.add('open');
+      }
+    });
+
+    // Close search on result click
+    searchResults.addEventListener('click', (e) => {
+      if (e.target.classList.contains('search-result')) {
+        searchResults.classList.remove('open');
+        searchInput.blur();
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,109 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:alpine
+    container_name: tetris-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # Nó 1: Regtest (Laboratório Local)
+  btc-regtest:
+    image: nicolasdorier/docker-bitcoin:latest
+    container_name: btc_regtest
+    volumes:
+      - ./bitcoin/bitcoin.conf:/home/bitcoin/.bitcoin/bitcoin.conf
+      - btc_reg_data:/home/bitcoin/.bitcoin
+    command: ["-regtest"]
+    ports:
+      - "18443:18443"
+      - "28332:28332"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  # Nó 2: Signet (Rede de Teste Pública)
+  btc-signet:
+    image: nicolasdorier/docker-bitcoin:latest
+    container_name: btc_signet
+    volumes:
+      - ./bitcoin/bitcoin.conf:/home/bitcoin/.bitcoin/bitcoin.conf
+      - btc_sig_data:/home/bitcoin/.bitcoin
+    command: ["-signet"]
+    ports:
+      - "38332:38332"
+      - "38333:28332" # Expõe ZMQ em 38333 na máquina host para evitar conflito
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  # Nó 3: Mainnet (Desativado / Comentado)
+  # btc-mainnet:
+  #   image: nicolasdorier/docker-bitcoin:latest
+  #   container_name: btc_mainnet
+  #   volumes:
+  #     - ./bitcoin/bitcoin.conf:/home/bitcoin/.bitcoin/bitcoin.conf
+  #     - btc_main_data:/home/bitcoin/.bitcoin
+  #   command: ["-mainnet"]
+  #   ports:
+  #     - "8332:8332"
+  #     - "28334:28332"
+  #   restart: unless-stopped
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: '1.5'
+  #         memory: 1.5G
+
+  backend:
+    build: ./backend
+    container_name: tetris-backend
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+      - btc-regtest
+      - btc-signet
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  frontend:
+    build: ./frontend
+    container_name: tetris-ui
+    ports:
+      - "8010:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html
+    depends_on:
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 128M
+
+volumes:
+  btc_reg_data:
+  btc_sig_data:
+  btc_main_data:

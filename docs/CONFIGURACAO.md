@@ -4,75 +4,111 @@
 
 Copie .env.example para .env. O arquivo real é ignorado pelo Git.
 
-### Obrigatórias
+### Credenciais RPC
 
 | Variável | Exemplo seguro | Descrição |
 |---|---|---|
-| RPC_USER | mempool_app | usuário exclusivo do backend |
-| RPC_PASSWORD | valor aleatório | senha longa; nunca use a amostra |
+| REGTEST_RPC_USER / REGTEST_RPC_PASSWORD | valores exclusivos | credencial do nó Regtest |
+| SIGNET_RPC_USER / SIGNET_RPC_PASSWORD | valores exclusivos | credencial do nó Signet |
+| MAINNET_RPC_USER / MAINNET_RPC_PASSWORD | valores exclusivos | credencial do profile Mainnet |
+| RPC_USER / RPC_PASSWORD | fallback legado | aceito somente para migrar `.env` antigo |
 
-O backend falha cedo quando uma dessas variáveis não está definida. Isso evita
-credenciais silenciosas embutidas no código.
+Cada ingestor falha cedo quando a credencial efetiva não está definida. As
+variáveis específicas prevalecem sobre o fallback e permitem rotação por nó. O
+Compose injeta em cada serviço somente sua credencial; a API HTTP não recebe
+nenhuma delas. A passagem por ambiente/argumento ainda é de laboratório:
+`rpcauth` e secrets continuam necessários para produção.
 
 ### Bitcoin
 
 | Variável | Padrão | Valores/efeito |
 |---|---|---|
-| BITCOIN_NETWORK | regtest | regtest, signet ou main |
-| RPC_HOST | bitcoind | hostname RPC visto pelo backend |
-| RPC_PORT | 18443 | 18443 regtest, 38332 signet, 8332 main |
-| ZMQ_HOST | bitcoind | hostname do publisher ZMQ |
-| ZMQ_PORT | 28332 | porta configurada em bitcoin.conf |
+| DEFAULT_REALM_ID | regtest | realm usado pelos aliases legados |
+| SIGNET_PRUNE_MIB | 2048 | alvo de blocos retidos pela Signet |
+| MAINNET_PRUNE_MIB | 10240 | alvo Mainnet; mínimo operacional deve ser revisto |
+| MAINNET_DBCACHE_MIB | 450 | cache do nó Mainnet sob limite de memória |
 
-BITCOIN_NETWORK e RPC_PORT devem sempre formar um par coerente.
+`BITCOIN_NETWORK`, `REALM_ID`, hosts e portas são definidos por serviço no
+Compose. Não os copie para URLs vindas do usuário. O catálogo público aceita
+somente `regtest`, `signet` e `mainnet`.
 
 ### Aplicação
 
 | Variável | Padrão | Descrição |
 |---|---:|---|
 | GAME_MODE | mempool | identificador enviado em game_start |
+| BACKEND_IMAGE | mempool-miner-backend:local | tag compartilhada por API/ingestores |
 | HIGH_FEE_RATE_SAT_VB | 20 | limiar para a flag is_high_fee |
-| TX_QUEUE_MAX_SIZE | 5000 | máximo de transações aguardando |
-| TX_PROCESS_INTERVAL_SECONDS | 1.0 | intervalo entre publicações |
+| TX_QUEUE_MAX_SIZE | 5000 | máximo por ingestor; Mainnet usa 20000 |
+| TX_PROCESS_INTERVAL_SECONDS | 1.0 | intervalo por ingestor; Mainnet usa 0.25 |
 | LOG_LEVEL | INFO | DEBUG, INFO, WARNING ou ERROR |
 | CORS_ORIGINS | localhost:8010 | origens diretas separadas por vírgula |
+| ENABLE_API_DOCS | false | habilita Swagger/OpenAPI somente para desenvolvimento direto |
+| TRUSTED_HOSTS | derivado de CORS | allowlist opcional de Host, sem `*` |
 | REDIS_URL | redis://redis:6379 | injetada pelo Compose |
 
 Valores numéricos inválidos impedem o import do serviço; valide .env antes de
 subir.
 
-## Configuração do frontend
+## Configuração do jogo/PWA
 
 index.html contém:
 
     <meta name="api-base-url" content="/">
 
-Barra significa mesma origem. Para servir o HTML sem Nginx durante
-desenvolvimento, informe uma URL absoluta que exponha REST e WebSocket.
+Barra significa mesma origem. Em produção, preserve esse valor e encaminhe
+somente `/api/` e `/ws/` pelo proxy do jogo. O service worker não armazena essas
+rotas, healthchecks ou rankings.
 
 ## Portas
 
 | Porta | Publicada | Uso |
 |---:|---|---|
-| 8010 | 127.0.0.1 | Nginx, jogo e documentação |
+| 8010 | 127.0.0.1 | Nginx do jogo/PWA e proxy REST/WebSocket |
+| 8020 | 127.0.0.1 | portal sanitizado; somente com `--profile docs` |
 | 8000 | somente rede Docker | FastAPI |
 | 6379 | somente rede Docker | Redis |
 | 28332 | somente rede Docker | ZMQ |
 | RPC da rede | somente rede Docker | Bitcoin JSON-RPC |
 
 Para acesso remoto, coloque um proxy TLS confiável à frente e altere o bind da
-porta 8010 conscientemente. Não publique Redis, RPC ou ZMQ.
+porta 8010 conscientemente. O portal 8020 é opcional e não encaminha a API.
+Não publique Redis, RPC ou ZMQ.
 
 ## Redes Docker
 
-- edge: frontend e backend;
-- data: backend, Redis e Bitcoin; marcada internal;
-- p2p: somente Bitcoin, para saída à rede quando signet/main forem usados.
+- edge: frontend e API;
+- app_data: API, Redis e ingestores; marcada internal;
+- btc_regtest, btc_signet e btc_mainnet: RPC/ZMQ exclusivos por nó;
+- signet_p2p e mainnet_p2p: saída dos nós públicos, sem portas no host.
+
+O serviço `docs` participa apenas da rede de borda, usa imagem e document root
+próprios e não é dependência do jogo.
+
+Signet/Mainnet usam `gw_priority: 1` na rede P2P. Isso requer Docker Compose
+2.33.1 ou superior; versões anteriores devem ser atualizadas antes do `up`.
+Consulte a referência oficial de
+[`gw_priority`](https://docs.docker.com/reference/compose-file/services/#gw_priority).
+
+## Perfis e volumes
+
+| Realm | Inicialização | Volume | Pruning |
+|---|---|---|---|
+| Regtest | padrão | lógico `bitcoin_data`; físico `mempool-miner_bitcoin_data` preservado | desativado |
+| Signet | padrão | `bitcoin_signet_data` | 2048 MiB |
+| Mainnet | `--profile mainnet` | `bitcoin_mainnet_data` | 10240 MiB |
+
+O profile `docs` não cria volume nem altera qualquer realm; ele publica somente
+a allowlist estática do portal em `127.0.0.1:8020`.
+
+Nunca monte o mesmo datadir em duas chains. `docker compose down --volumes`
+remove blockchain e ranking e só deve ser usado com intenção explícita.
 
 ## Segredos em produção
 
-O Compose atual usa .env e argumentos de processo, aceitáveis apenas para
-laboratório. Em produção:
+O Compose ainda fornece cada credencial RPC via `.env`/argumentos, aceitável
+apenas para laboratório. `RPC_PASSWORD_FILE` já é suportado pelo ingestor, mas o nó
+também precisa migrar para `rpcauth` antes de produção:
 
 1. gere rpcauth com a ferramenta oficial do Bitcoin Core;
 2. use um secret manager;
@@ -80,6 +116,13 @@ laboratório. Em produção:
 4. rotacione credenciais por ambiente;
 5. restrinja RPC à subnet exata;
 6. monitore tentativas de autenticação.
+
+## Compatibilidade Redis
+
+A topologia entregue usa um único Redis 7.4 standalone. Os commits fenced e a
+migração legada executam scripts Lua com várias chaves. Redis Cluster não é
+suportado nesta versão; migrar exige alinhar todas as hash-tags/slots ou separar
+os commits por realm sem perder atomicidade.
 
 ## Recursos
 

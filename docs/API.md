@@ -1,106 +1,142 @@
-# API técnica
+# API pública
 
-Base same-origin: /api para REST e /ws para WebSocket.
+Este documento descreve somente o contrato necessário ao jogo. Credenciais,
+endereços RPC/ZMQ, chaves Redis, tokens de lease, identificadores físicos de
+nós e endpoints operacionais não fazem parte da superfície pública.
 
-Não há autenticação nesta versão. Exponha a API apenas atrás do Nginx local até
-implementar identidade, rate limiting e score autoritativo.
+## Convenções
 
-## GET /api/health
+- `realm_id`: arena lógica escolhida a partir do catálogo;
+- `network`: `regtest`, `signet` ou `mainnet`;
+- `schema_version`: versão do envelope de eventos, atualmente `2`;
+- conteúdo JSON usa UTF-8;
+- novas propriedades podem ser adicionadas de forma compatível.
 
-Confirma que o processo atende e que Redis responde.
+O cliente nunca envia um hostname de nó nem constrói uma chave de
+infraestrutura. Um realm desconhecido resulta em HTTP `404` ou fechamento do
+WebSocket com código de política.
 
-Resposta 200:
+## REST
 
-~~~json
+### GET `/api/v1/health/live`
+
+Confirma que a API responde:
+
+```json
+{"status":"ok"}
+```
+
+Este endpoint não revela versão de dependência, topologia ou estado detalhado
+dos nós.
+
+### GET `/api/v1/networks`
+
+Retorna o catálogo sanitizado usado pelo seletor do jogo:
+
+```json
 {
-  "status": "ok"
-}
-~~~
-
-Falha de Redis resulta em erro 5xx e torna o healthcheck do contêiner inválido.
-
-## GET /api/leaderboard
-
-Retorna até dez recordes em ordem decrescente.
-
-~~~json
-{
-  "leaderboard": [
+  "schema_version": 2,
+  "default_realm_id": "regtest",
+  "networks": [
     {
-      "username": "Miner_42",
-      "score": 12500
+      "realm_id": "regtest",
+      "network": "regtest",
+      "display_name": "Regtest local",
+      "status": "ready",
+      "playable": true,
+      "initial_block_download": false,
+      "verification_progress": 1.0,
+      "pruned": false
     }
   ]
 }
-~~~
+```
 
-score é serializado como inteiro.
+Estados conhecidos:
 
-## POST /api/leaderboard
+| status | significado público |
+|---|---|
+| `starting` | serviço iniciando |
+| `syncing` | nó sincronizando |
+| `ready` | realm disponível |
+| `disabled` | profile opcional não iniciado |
+| `unavailable` | heartbeat indisponível |
+| `stopped` | ingestor encerrado ordenadamente |
 
-Registra somente um valor maior que o recorde atual do nickname.
+O cliente deve confiar em `playable`. Um nó podado pode continuar jogável.
+
+### GET `/api/v1/networks/{realm_id}/leaderboard`
+
+Retorna até dez recordes isolados por realm:
+
+```json
+{
+  "realm_id": "regtest",
+  "leaderboard": [
+    {"username":"Miner_42","score":12500}
+  ]
+}
+```
+
+### POST `/api/v1/networks/{realm_id}/leaderboard`
 
 Corpo:
 
-~~~json
+```json
+{"username":"Miner_42","score":12500}
+```
+
+Regras atuais:
+
+- nickname de 1 a 12 caracteres;
+- letras, números, hífen e sublinhado;
+- score inteiro entre `0` e `2147483647`;
+- o recorde só aumenta.
+
+Resposta:
+
+```json
+{"status":"ok","updated":true}
+```
+
+> O score ainda é calculado pelo navegador. O leaderboard é demonstrativo e
+> não prova que uma partida legítima ocorreu.
+
+## WebSocket
+
+Rota canônica:
+
+```text
+/ws/v1/game/{realm_id}
+```
+
+O cliente obtém o `realm_id` no catálogo e aguarda `game_start` antes de aceitar
+eventos de jogo.
+
+### `game_start`
+
+```json
 {
-  "username": "Miner_42",
-  "score": 12500
-}
-~~~
-
-Regras:
-
-| Campo | Regra |
-|---|---|
-| username | 1–12 caracteres após validação |
-| username | letras/números Unicode, hífen e sublinhado |
-| score | inteiro entre 0 e 2.147.483.647 |
-
-Resposta 200:
-
-~~~json
-{
-  "status": "success",
-  "updated": true
-}
-~~~
-
-updated false significa que o valor não superou o recorde. Entrada inválida
-retorna 422 no formato padrão do FastAPI.
-
-### Exemplo
-
-    curl -X POST http://localhost:8010/api/leaderboard \
-      -H "Content-Type: application/json" \
-      -d "{\"username\":\"Miner_42\",\"score\":12500}"
-
-## WebSocket /ws/game
-
-Conecte em ws://localhost:8010/ws/game. Em HTTPS use wss.
-
-O cliente não precisa enviar comandos. O backend mantém uma tarefa receptora
-apenas para detectar a desconexão.
-
-### game_start
-
-Primeira mensagem de cada conexão:
-
-~~~json
-{
+  "schema_version": 2,
   "action": "game_start",
+  "realm_id": "regtest",
   "network": "regtest",
-  "game_mode": "mempool",
-  "mempool_count": 0
+  "status": "ready",
+  "playable": true,
+  "initial_block_download": false,
+  "verification_progress": 1.0,
+  "pruned": false
 }
-~~~
+```
 
-### transaction_received
+### `transaction_received`
 
-~~~json
+```json
 {
+  "schema_version": 2,
   "action": "transaction_received",
-  "mempool_count": 1,
+  "realm_id": "regtest",
+  "epoch": "opaque-stream-id",
   "word": "ABANDON",
   "tx_stub": "4a5e1e4b",
   "is_golden": false,
@@ -108,47 +144,46 @@ Primeira mensagem de cada conexão:
   "vsize": 250,
   "fee_rate_sat_vb": 24.5
 }
-~~~
+```
 
-| Campo | Origem |
-|---|---|
-| word | primeiro termo BIP39 derivado do TXID |
-| tx_stub | oito primeiros caracteres do TXID |
-| is_golden | TXID começa com 00 |
-| is_high_fee | taxa efetiva supera HIGH_FEE_RATE_SAT_VB |
-| vsize | getmempoolentry ou fallback 250 |
-| fee_rate_sat_vb | fees.base convertido para sats/vB |
+`epoch` é uma identidade opaca de continuidade. O navegador a usa somente para
+descartar callbacks ou eventos de uma geração anterior.
 
-### block_mined
+### `block_mined`
 
-~~~json
+```json
 {
+  "schema_version": 2,
   "action": "block_mined",
-  "block_hash": "000000000000000000...",
-  "mempool_count": 3
+  "realm_id": "regtest",
+  "epoch": "new-opaque-stream-id"
 }
-~~~
+```
 
-mempool_count vem de getmempoolinfo após o evento ou usa zero se RPC falhar.
+### `network_status`
 
-## Redis interno
+```json
+{
+  "schema_version": 2,
+  "action": "network_status",
+  "realm_id": "signet",
+  "status": "syncing",
+  "playable": false,
+  "initial_block_download": true,
+  "verification_progress": 0.82
+}
+```
 
-Não é API pública, mas integra os processos:
-
-- canal: game_events;
-- chave: mempool_count;
-- Sorted Set: global_leaderboard.
-
-## Documentação gerada
-
-Com a stack ativa:
-
-- Swagger: /backend-docs
-- OpenAPI JSON: /openapi.json
-
-A página visual complementar está em [api.html](api.html).
+Se `playable` mudar para `false`, o cliente encerra a rodada e retorna ao seletor.
 
 ## Compatibilidade
 
-Campos novos devem ser aditivos. Remover/renomear campos WebSocket exige
-versionar o contrato, atualizar game.js, API.md, api.html e testes de integração.
+Aliases da primeira versão podem continuar ativos durante a migração, mas não
+são parte do contrato recomendado para novos clientes. O frontend e o backend
+devem ser publicados juntos enquanto não houver negociação explícita de versão.
+
+## Documentação interativa
+
+Swagger e o documento OpenAPI bruto ficam desabilitados por padrão. Quando
+necessários em desenvolvimento, devem ser habilitados explicitamente e mantidos
+fora do proxy público do jogo.

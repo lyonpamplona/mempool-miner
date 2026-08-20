@@ -17,52 +17,79 @@ ZMQ, Redis Pub/Sub, WebSocket, Nginx e JavaScript sem framework.
 | Componente | Responsabilidade | Documento |
 |---|---|---|
 | <img src="docs/assets/bitcoin.svg" width="34" alt=""> Bitcoin Core | Publica transações e blocos via ZMQ; fornece metadados via RPC | [bitcoin/README.md](bitcoin/README.md) |
-| <img src="docs/assets/backend.svg" width="34" alt=""> FastAPI | Ingestão, transformação BIP39, API REST e gateway WebSocket | [backend/README.md](backend/README.md) |
-| <img src="docs/assets/redis.svg" width="34" alt=""> Redis | Pub/Sub, contador observado e Top 10 | [Arquitetura](docs/ARQUITETURA.md) |
+| <img src="docs/assets/backend.svg" width="34" alt=""> Ingestores + FastAPI | Um ingestor singleton por rede; API REST/WebSocket desacoplada | [backend/README.md](backend/README.md) |
+| <img src="docs/assets/redis.svg" width="34" alt=""> Redis | Eventos, estado e leaderboard isolados por realm | [Arquitetura](docs/ARQUITETURA.md) |
 | <img src="docs/assets/frontend.svg" width="34" alt=""> Frontend | Grade, cronômetro, loja simulada e interface do jogador | [frontend/README.md](frontend/README.md) |
 
 ~~~mermaid
 flowchart LR
-    BTC[Bitcoin Core] -->|rawtx / hashblock| ZMQ[Listener ZMQ]
-    ZMQ --> Queue[Fila limitada]
-    Queue --> Engine[GameEngine + RPC]
-    Engine --> Redis[(Redis)]
-    Redis -->|Pub/Sub| API[FastAPI / WebSocket]
-    API -->|/ws/game| UI[Frontend]
-    UI -->|REST| Rank[Leaderboard]
-    Rank --> Redis
+    R[Core Regtest] --> IR[Ingestor Regtest]
+    S[Core Signet] --> IS[Ingestor Signet]
+    M[Core Mainnet pruned<br>profile opcional] -.-> IM[Ingestor Mainnet]
+    IR --> Redis[(Redis por realm)]
+    IS --> Redis
+    IM -.-> Redis
+    Redis --> API[FastAPI]
+    API -->|/ws/v1/game/realm| UI[Frontend]
+    UI -->|REST por realm| API
 ~~~
 
 ## Início rápido
 
-Pré-requisitos: Docker Engine ou Docker Desktop com Compose v2, pelo menos
-2 GB de RAM livres e portas locais 8010 disponíveis.
+Pré-requisitos: Docker Engine ou Docker Desktop com Compose 2.33.1 ou superior,
+cerca de 4 GB de RAM livres para Regtest + Signet e a porta local 8010
+disponível. O portal opcional usa a porta 8020. A versão mínima é necessária
+para selecionar deterministicamente o gateway P2P dos nós públicos.
 
 No PowerShell:
 
     Copy-Item .env.example .env
-    # Edite .env e substitua RPC_PASSWORD por uma senha aleatória.
+    # Edite .env e substitua as três senhas RPC de exemplo.
     docker compose config --quiet
     docker compose up -d --build
     docker compose ps
 
-Abra:
+O comando padrão inicia Regtest e Signet. Mainnet permanece desativada. Para
+incluir o nó Mainnet podado e seu ingestor:
+
+    docker compose --profile mainnet config --quiet
+    docker compose --profile mainnet up -d --build
+
+O alvo de pruning Mainnet padrão é 10 GiB de blocos (`MAINNET_PRUNE_MIB=10240`).
+Chainstate e índices exigem espaço adicional, e o IBD ainda baixa e valida a
+cadeia antes de descartar blocos antigos.
+
+O jogo mobile-first/PWA fica disponível em:
 
 - jogo: http://localhost:8010
-- apresentação: http://localhost:8010/apresentacao.html
-- documentação: http://localhost:8010/docs/
-- página técnica da API: http://localhost:8010/docs/api.html
-- Swagger da instância: http://localhost:8010/backend-docs
 
-Em regtest, o jogo precisa de transações. Consulte o roteiro de geração em
+Documentação e apresentação não são copiadas para a imagem do jogo. Para subir
+o portal público sanitizado em um serviço separado:
+
+    docker compose --profile docs up -d --build docs
+
+- documentação: http://localhost:8020/
+- página pública da API: http://localhost:8020/api/
+- apresentação: http://localhost:8020/apresentacao/
+
+Swagger e OpenAPI bruto ficam desabilitados por padrão e não são publicados por
+nenhum dos proxies.
+
+Escolha a rede no diálogo inicial. Uma rede em IBD aparece como
+"sincronizando" e não inicia partidas. Em Regtest, gere transações conforme o
 [TUTORIAL.md](docs/TUTORIAL.md).
+
+Em um navegador compatível, use o botão **Instalar app**. O service worker
+mantém apenas o shell estático; API, WebSocket, health e leaderboard nunca são
+armazenados no cache offline.
 
 ## Documentação
 
 | Documento | Conteúdo |
 |---|---|
-| [Portal técnico](docs/README.md) | Índice completo e páginas HTML |
+| [Portal técnico](docs/README.md) | Separação entre fontes Markdown e publicação sanitizada |
 | [Arquitetura](docs/ARQUITETURA.md) | Camadas, decisões, limites e implantação |
+| [Multi-rede](docs/MULTI_REDE.md) | Relatório Regtest/Signet/Mainnet, migração e aceite |
 | [Fluxos](docs/FLUXOS.md) | Inicialização, transação, bloco, jogo e ranking |
 | [Módulos](docs/MODULOS.md) | Arquivos, classes, funções e responsabilidades |
 | [API](docs/API.md) | REST, WebSocket, esquemas e erros |
@@ -76,6 +103,27 @@ Em regtest, o jogo precisa de transações. Consulte o roteiro de geração em
 | [Roadmap](docs/ROADMAP.md) | Plano priorizado para riscos remanescentes |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Diagnóstico dos erros mais comuns |
 | [Apresentação](guia-apresentacao.html) | Página visual completa do projeto |
+
+## Mudanças recentes (16/08/2026)
+
+Quatro fases de correção foram aplicadas em agosto de 2026:
+
+- **Persistência de sessão** — `saveSessionState`/`loadSessionState`/`clearSessionState`
+  com `sessionStorage`; `startSession()` aceita `realmIdOverride` para reconexão
+  automática; estado salvo em 9 pontos críticos (saldo, hardware, lightning, RBF,
+  resultado); sessão restaurada ao recarregar a página (F5).
+- **Responsividade** — font-size adaptativo com `clamp(12px, 2.5vw, 14px)`;
+  z-index do `.floating-text` corrigido para 170; `.grid-wrapper` com
+  `min-height: min(480px, 80vh)`; `.modal-content` considera `safe-area-inset`;
+  main-layout em 2 colunas para gap 560–760px.
+- **Estabilidade do ingestor** — retry RPC com backoff exponencial; buffer
+  aumentado para 50 000 transações.
+- **Sincronização de epoch** — verificação de epoch no frontend com reconexão
+  automática quando o backend avança de epoch.
+- **Loop RBF** — `btn.onclick = null` adicionado em ambos os fluxos para
+  impedir re-disparo infinito do botão de RBF.
+
+Leia [CHANGELOG.md](CHANGELOG.md) para o histórico completo.
 
 ## Segurança e estado atual
 

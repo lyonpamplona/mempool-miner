@@ -2,23 +2,22 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Documentação técnica e arquitetura do Mempool Miner.">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Visão pública e sanitizada da arquitetura do Mempool Miner.">
   <meta name="theme-color" content="#050505">
-  <title>Mempool Miner — Documentação técnica</title>
-  <link rel="stylesheet" href="site.css">
+  <title>Mempool Miner — Documentação pública</title>
+  <link rel="stylesheet" href="/site.css">
 </head>
 <body>
   <a class="skip-link" href="#conteudo">Pular para o conteúdo</a>
   <header class="site-header">
     <nav class="nav" aria-label="Navegação principal">
-      <a class="brand" href="index.html"><span class="brand-mark">₿</span> MEMPOOL.MINER</a>
+      <a class="brand" href="/"><span class="brand-mark">₿</span> MEMPOOL.MINER</a>
       <div class="nav-links">
-        <a href="ARQUITETURA.md">Arquitetura</a>
-        <a href="FLUXOS.md">Fluxos</a>
-        <a href="api.html">API</a>
-        <a href="AUDITORIA.md">Auditoria</a>
-        <a href="ROADMAP.md">Roadmap</a>
+        <a href="/" aria-current="page">Visão geral</a>
+        <a href="/api/">API pública</a>
+        <a href="/apresentacao/">Apresentação</a>
+        <a href="http://localhost:8010/">Jogo local</a>
       </div>
     </nav>
   </header>
@@ -26,43 +25,46 @@
   <main id="conteudo">
     <section class="container hero">
       <div>
-        <p class="eyebrow">Documentação técnica · 2026</p>
-        <h1>Do evento Bitcoin à grade.</h1>
-        <p class="lead">Arquitetura, contratos, fluxos, operação e riscos do
-          Mempool Miner em uma base única, versionável e transparente.</p>
+        <p class="eyebrow">Portal público · superfície reduzida</p>
+        <h1>Do evento Bitcoin ao desafio.</h1>
+        <p class="lead">Uma visão essencial do Mempool Miner: redes suportadas,
+          fluxo de dados, limites do produto e contrato público consumido pelo
+          jogo — sem credenciais, hosts internos ou detalhes operacionais.</p>
         <div class="actions">
-          <a class="button primary" href="TUTORIAL.md">Executar o projeto</a>
-          <a class="button" href="ARQUITETURA.md">Explorar arquitetura</a>
-          <a class="button" href="api.html">Abrir API técnica</a>
+          <a class="button primary" href="/apresentacao/">Conhecer o projeto</a>
+          <a class="button" href="/api/">Consultar a API pública</a>
+          <a class="button" href="http://localhost:8010/">Abrir o jogo local</a>
         </div>
       </div>
       <div class="hero-visual">
-        <img src="assets/mempool-miner-banner.svg" alt="Fluxo visual do Mempool Miner">
+        <img src="/assets/mempool-miner-banner.svg" alt="Fluxo visual entre Bitcoin e o jogo Mempool Miner">
       </div>
     </section>
 
-    <section class="container" aria-label="Indicadores do projeto">
+    <section class="container" aria-label="Resumo do projeto">
       <div class="metrics">
-        <div class="metric"><strong>4</strong><span>serviços no Compose</span></div>
-        <div class="metric"><strong>6</strong><span>palavras por rodada</span></div>
-        <div class="metric"><strong>3</strong><span>tamanhos de matriz</span></div>
-        <div class="metric"><strong>1</strong><span>origem HTTP/WS</span></div>
+        <div class="metric"><strong>3</strong><span>redes isoladas</span></div>
+        <div class="metric"><strong>2</strong><span>redes no perfil padrão</span></div>
+        <div class="metric"><strong>1</strong><span>Mainnet opcional e podada</span></div>
+        <div class="metric"><strong>PWA</strong><span>interface mobile-first</span></div>
       </div>
     </section>
 
     <section class="section">
       <div class="container">
         <div class="section-intro">
-          <p class="eyebrow">Mapa do sistema</p>
-          <h2>Uma pipeline orientada a eventos</h2>
-          <p class="muted">Bitcoin Core publica, FastAPI transforma, Redis
-            distribui e o navegador converte seis transações em uma partida.</p>
+          <p class="eyebrow">Arquitetura pública</p>
+          <h2>Uma pipeline por rede.</h2>
+          <p class="muted">Regtest, Signet e Mainnet não compartilham contador,
+            epoch, eventos ou leaderboard. Mainnet só existe quando seu profile
+            é habilitado explicitamente.</p>
         </div>
-        <div class="flow" aria-label="Bitcoin Core para navegador">
+        <div class="flow" aria-label="Fluxo de um realm Bitcoin até o navegador">
           <div class="flow-node">Bitcoin Core</div><div class="flow-arrow">→</div>
-          <div class="flow-node">ZMQ + Engine</div><div class="flow-arrow">→</div>
-          <div class="flow-node">Redis + API</div><div class="flow-arrow">→</div>
-          <div class="flow-node">Navegador</div>
+          <div class="flow-node">Ingestor do realm</div><div class="flow-arrow">→</div>
+          <div class="flow-node">Redis isolado</div><div class="flow-arrow">→</div>
+          <div class="flow-node">API + WebSocket</div><div class="flow-arrow">→</div>
+          <div class="flow-node">PWA do jogo</div>
         </div>
       </div>
     </section>
@@ -70,29 +72,29 @@
     <section class="section alt">
       <div class="container">
         <div class="section-intro">
-          <p class="eyebrow">Componentes</p>
-          <h2>Responsabilidades explícitas</h2>
+          <p class="eyebrow">Responsabilidades</p>
+          <h2>Componentes com fronteiras claras.</h2>
         </div>
         <div class="grid four">
           <article class="card">
-            <img class="icon" src="assets/bitcoin.svg" alt="">
+            <img class="icon" src="/assets/bitcoin.svg" alt="">
             <h3>Bitcoin Core</h3>
-            <p>rawtx, hashblock, getmempoolentry e getmempoolinfo.</p>
+            <p>Origem de transações e blocos; RPC e ZMQ permanecem na rede privada.</p>
           </article>
           <article class="card">
-            <img class="icon" src="assets/backend.svg" alt="">
-            <h3>FastAPI</h3>
-            <p>BIP39, taxa, lifecycle, REST e gateway WebSocket.</p>
+            <img class="icon" src="/assets/backend.svg" alt="">
+            <h3>Ingestores + API</h3>
+            <p>Transformam eventos, aplicam isolamento por realm e entregam contratos sanitizados.</p>
           </article>
           <article class="card">
-            <img class="icon" src="assets/redis.svg" alt="">
+            <img class="icon" src="/assets/redis.svg" alt="">
             <h3>Redis</h3>
-            <p>Fan-out, contador observado, recordes e persistência AOF.</p>
+            <p>Estado efêmero, fan-out e ranking; não possui porta publicada no host.</p>
           </article>
           <article class="card">
-            <img class="icon" src="assets/frontend.svg" alt="">
-            <h3>Frontend</h3>
-            <p>Grade responsiva, corrida, loja e feedback acessível.</p>
+            <img class="icon" src="/assets/frontend.svg" alt="">
+            <h3>PWA do jogo</h3>
+            <p>Shell instalável, mobile-first e same-origin, sem armazenar respostas da API no cache offline.</p>
           </article>
         </div>
       </div>
@@ -101,63 +103,49 @@
     <section class="section">
       <div class="container">
         <div class="section-intro">
-          <p class="eyebrow">Leitura orientada</p>
-          <h2>Comece pelo seu objetivo</h2>
+          <p class="eyebrow">Separação de acesso</p>
+          <h2>Jogo e documentação não compartilham publicação.</h2>
         </div>
         <div class="grid three">
           <article class="card">
-            <span class="tag ok">Operar</span>
-            <h3>Do zero à primeira rodada</h3>
-            <p>Ambiente, regtest, carteira, transações, logs e comandos.</p>
-            <div class="actions"><a class="button" href="TUTORIAL.md">Tutorial</a><a class="button" href="COMANDOS.md">Runbook</a></div>
+            <span class="tag ok">Porta 8010</span>
+            <h3>Jogo</h3>
+            <p>Publica somente o PWA e encaminha os contratos REST/WebSocket necessários à partida.</p>
           </article>
           <article class="card">
-            <span class="tag">Desenvolver</span>
-            <h3>Contratos e módulos</h3>
-            <p>Funções, dados, sequências, REST, WebSocket e decisões.</p>
-            <div class="actions"><a class="button" href="MODULOS.md">Módulos</a><a class="button" href="API.md">Contratos</a></div>
+            <span class="tag">Porta 8020</span>
+            <h3>Portal opcional</h3>
+            <p>Profile separado, imagem estática própria e allowlist de apresentação, API e assets públicos.</p>
           </article>
           <article class="card">
-            <span class="tag warn">Evoluir</span>
-            <h3>Riscos e prioridades</h3>
-            <p>Achados corrigidos, pendências, critérios de aceite e fases.</p>
-            <div class="actions"><a class="button" href="AUDITORIA.md">Auditoria</a><a class="button" href="ROADMAP.md">Roadmap</a></div>
+            <span class="tag warn">Privado</span>
+            <h3>Operação</h3>
+            <p>Swagger, OpenAPI bruto, configurações, auditorias detalhadas e topologia não são publicados pelo jogo.</p>
           </article>
         </div>
       </div>
     </section>
 
     <section class="section alt">
-      <div class="container">
-        <div class="section-intro">
-          <p class="eyebrow">Transparência</p>
-          <h2>Integração real, economia simulada</h2>
-        </div>
-        <div class="grid two">
-          <article class="card">
-            <span class="tag ok">Real</span>
-            <h3>Dados e transporte</h3>
-            <p>ZMQ, TXID, RPC, vsize, taxa, hash de bloco, Redis, HTTP e
-              WebSocket são componentes executáveis da stack.</p>
-          </article>
-          <article class="card">
-            <span class="tag warn">Simulado</span>
-            <h3>Narrativa do jogo</h3>
-            <p>Saldo, carteira, hashrate, recompensa, mineração e Lightning não
-              representam ativos ou operações financeiras.</p>
-          </article>
-        </div>
-        <p class="callout danger" style="margin-top:18px">O score ainda é
-          calculado pelo browser. Até o motor autoritativo do roadmap, o
-          leaderboard não é competitivo nem resistente a fraude.</p>
+      <div class="container grid two">
+        <article class="card">
+          <span class="tag ok">Integração real</span>
+          <h2>Eventos Bitcoin</h2>
+          <p>Transações, blocos, TXID, vsize e taxas vêm da infraestrutura configurada para cada realm.</p>
+        </article>
+        <article class="card">
+          <span class="tag warn">Economia simulada</span>
+          <h2>Sem fundos reais</h2>
+          <p>Saldo, recompensa, hardware, mineração e Lightning são apenas mecânicas educacionais do jogo.</p>
+        </article>
       </div>
     </section>
   </main>
 
   <footer class="site-footer">
     <div class="container footer-row">
-      <span>Mempool Miner · documentação versionada</span>
-      <span><a href="README.md">README</a> · <a href="SEGURANCA.md">Segurança</a> · <a href="DEPENDENCIAS.md">Dependências</a></span>
+      <span>Mempool Miner · documentação pública sanitizada</span>
+      <span>Sem credenciais · sem endpoints operacionais</span>
     </div>
   </footer>
 </body>

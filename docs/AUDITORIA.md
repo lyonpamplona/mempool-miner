@@ -14,7 +14,9 @@ A leitura inicial encontrou quatro riscos de impacto imediato:
 Os três primeiros foram mitigados na aplicação principal. O quarto exige
 mudança de arquitetura e permanece aberto. Também foram corrigidos bugs de
 grade insolúvel, touch acumulado, estado após block_mined, matriz 15×15,
-coordenadas SVG, taxa absoluta e atualização não atômica.
+coordenadas SVG, taxa absoluta, atualização não atômica e contaminação entre
+redes. Regtest e Signet agora podem operar simultaneamente; Mainnet podada é
+opt-in por profile.
 
 ## Escopo revisado
 
@@ -25,21 +27,30 @@ correções; o hash curto ajuda a identificar a versão analisada.
 | Arquivo | Linhas | SHA-256 curto | Resultado |
 |---|---:|---|---|
 | backend/app/__init__.py | 1 | 12CEC4DDFADD | sem achado |
-| backend/app/blockchain.py | 71 | FCE2970C5FB6 | corrigido / dívida ZMQ |
-| backend/app/engine.py | 128 | ACC3C6EE5A38 | corrigido |
-| backend/app/main.py | 245 | FB9DBAA47E85 | corrigido / risco de score |
+| backend/app/blockchain.py | 115 | 9D85ED55FD83 | listener supervisionado / dívida de replay ZMQ |
+| backend/app/config.py | 184 | 6FFE6F8B3C67 | catálogo e identidade multi-rede validados |
+| backend/app/engine.py | 155 | 3FBF56EC70D6 | RPC validado / reconciliação implementada |
+| backend/app/events.py | 81 | 211DB51A2067 | envelope de eventos v2 implementado |
+| backend/app/ingestor.py | 518 | 356FACC7ACD8 | ingestor por realm / commits com lease fenced |
+| backend/app/ingestor_healthcheck.py | 59 | 48D6AA5314A4 | identidade, lease e heartbeat validados |
+| backend/app/main.py | 342 | 44D1634872A1 | API multi-rede / risco de score permanece |
+| backend/app/storage.py | 88 | 1EEE8DADD143 | namespace por realm / migração atômica |
 | backend/Dockerfile | 19 | 7D9C4A925DC5 | endurecido |
 | backend/requirements.txt | 9 | 7C0EDFDF9A8A | atualização parcial |
-| bitcoin/bitcoin.conf | 25 | 9ED3CBE53D33 | segredo removido / restrição pendente |
-| docker-compose.yaml | 132 | 64865A51D7EF | endurecido, não executado localmente |
+| backend/tests/test_engine.py | 88 | DB4B62504B2B | contratos RPC cobertos |
+| backend/tests/test_models.py | 68 | 1C567E2AEEE9 | modelos e validações cobertos |
+| backend/tests/test_multi_network.py | 476 | 680BF20CC5E0 | isolamento, epoch e lease cobertos |
+| bitcoin/bitcoin.conf | 23 | 6A59A0F50980 | base comum sem segredo versionado |
+| docker-compose.yaml | 343 | 84954499ED06 | três redes / runtime Docker pendente |
 | frontend/Dockerfile | 8 | 45D6E1BF6CF2 | ajustado |
 | frontend/nginx.conf | 40 | 6A69CCCDAFB8 | novo proxy |
-| frontend/index.html | 138 | CDC4B967128F | acessibilidade parcial |
-| frontend/style.css | 158 | 065DD3A550FB | responsivo |
-| frontend/game.js | 723 | E83CB807F71D | corrigido / score local |
+| frontend/index.html | 149 | 8FE6F05505D4 | seletor e status de rede adicionados |
+| frontend/style.css | 168 | DB29EA687355 | responsivo / estados multi-rede |
+| frontend/game.js | 1058 | C66D3ABDC598 | sessões isoladas / score local permanece |
 | prototipo-v2.html | 653 | F32CE984D66F | legado sinalizado, fora do runtime |
 | prototipo-game-L2.html | 566 | FEFF694FFD66 | legado sinalizado, fora do runtime |
 | guia-apresentacao.html | 201 | 8AD67DC45DC0 | substituído e revisado |
+| .github/workflows/ci.yml | 128 | 5D75DF441791 | smoke ZMQ multi-rede definido, não executado |
 
 Arquivos criados depois da leitura foram revisados por sintaxe, links, XML/HTML
 e consistência cruzada.
@@ -72,10 +83,12 @@ vazamentos passados não puderam ser auditados.
 ### FIX-001 — Eventos ZMQ multiplicados
 
 Inicialmente o Compose usava quatro workers; cada processo criava listener e
-lifespan próprios. Agora Compose e Dockerfile fixam um worker
-(docker-compose.yaml:67, backend/Dockerfile:19).
+lifespan próprios. Agora `app.main` não abre ZMQ/RPC e cada `ingestor-*` executa
+`python -m app.ingestor` uma única vez por realm.
 
-Status: mitigado. A separação definitiva do ingestor continua no roadmap.
+Status: corrigido arquiteturalmente. A API pode ser escalada sem multiplicar os
+listeners. Commits Redis do ingestor são condicionados à lease/token do realm;
+uma instância antiga perde o direito de publicar após takeover.
 
 ### FIX-002 — Credenciais e portas de dados
 
@@ -83,32 +96,33 @@ bitcoin.conf não contém mais usuário/senha. Redis, RPC, ZMQ e FastAPI não
 publicam portas no host; somente Nginx liga 127.0.0.1:8010. Redes e volumes foram
 separados.
 
-Status: mitigado. A credencial local conhecida deve ser rotacionada. rpcauth e
-secret manager ainda não foram implementados.
+Status: mitigado. Cada nó aceita credencial própria e a API não recebe segredos,
+mas os valores ainda passam por ambiente/argv. A credencial local conhecida
+deve ser rotacionada; rpcauth e secret manager ainda não foram implementados.
 
 ### FIX-003 — XSS persistente
 
-O ranking construía innerHTML com miner.username. A implementação atual cria
-spans e usa textContent (frontend/game.js:268–278). Palavras do WebSocket também
-são renderizadas por nós de texto (frontend/game.js:542–550).
+O ranking construía `innerHTML` com `miner.username`. A implementação atual usa
+`replaceChildren`, cria elementos e atribui conteúdo externo apenas com
+`textContent`. Palavras do WebSocket seguem a mesma fronteira segura.
 
 Status: corrigido no runtime principal. Protótipos legados não devem ser
 publicados.
 
 ### FIX-004 — Ranking não atômico e entrada ilimitada
 
-ScoreSubmit limita username/score (backend/app/main.py:40–62) e ZADD GT + CH faz
-a atualização de máximo em uma operação, informando também se o registro mudou
-(linhas 163–172).
+ScoreSubmit limita username/score e `submit_score_for_realm` usa ZADD GT + CH
+em uma única operação, informando também se o registro mudou.
 
 Status: corrigida a corrida; autenticidade do score permanece aberta.
 
 ### FIX-005 — Fila sem limite e erros invisíveis
 
-A fila agora possui maxsize configurável (backend/app/main.py:31–34). RPC,
-processamento e ZMQ geram logs; shutdown cancela e aguarda tarefas.
+A fila de cada NodeIngestor possui maxsize configurável. `put_nowait` descarta e
+mede rawtx excedente sem bloquear hashblock; shutdown cancela e aguarda tarefas.
 
-Status: mitigado. Falta política de descarte, sequência e métricas.
+Status: corrigido para limite/descarte. Queue depth e descarte entram no
+heartbeat; lag e métricas exportáveis continuam pendentes.
 
 ### FIX-006 — Classificação errada de taxa
 
@@ -119,13 +133,13 @@ Status: corrigido e coberto por teste.
 
 ### FIX-007 — Bugs da grade
 
-- palavras não se sobrepõem (frontend/game.js:496–502);
+- palavras não se sobrepõem;
 - montagem possui fallback/retry;
-- listeners de toque são registrados uma vez (linhas 166–167);
-- seleção mantém vetor reto (linhas 581–599);
-- células respondem à viewport (linhas 101–108);
-- SVG calcula coordenadas no próprio sistema (linhas 672–675);
-- block_mined desativa a partida e descarta buffer antigo (linhas 234–250).
+- listeners de toque são registrados uma vez;
+- seleção mantém vetor reto;
+- células respondem à viewport;
+- SVG calcula coordenadas no próprio sistema;
+- `block_mined` desativa a partida e descarta o buffer antigo.
 
 Status: corrigido no runtime principal.
 
@@ -138,7 +152,9 @@ Status: corrigido.
 
 ### FIX-009 — Persistência e prontidão
 
-Redis ganhou AOF/volume, serviços têm healthchecks e depends_on aguarda saúde.
+Redis ganhou AOF/volume; nós, API, frontend e ingestores têm healthchecks. O
+healthcheck do ingestor valida heartbeat recente, token local e lease ativa, e
+`depends_on` aguarda saúde.
 
 Status: implementado, ainda sem smoke test local por ausência de Docker.
 
@@ -157,6 +173,26 @@ um build pendente é cancelado na desconexão e exige socket aberto.
 
 Status: corrigido no runtime principal; faltam testes E2E para as corridas de
 eventos.
+
+### FIX-012 — Isolamento multi-rede e Mainnet opcional
+
+Catálogo, eventos, contador, epoch e leaderboard são namespaced por `realm_id`.
+Cada Core possui rede de controle e volume próprios; Signet/Mainnet usam gateway
+P2P explícito. Mainnet e seu ingestor compartilham `profiles: [mainnet]`, usam
+`prune=10240` por padrão e não são dependência da API.
+
+Status: implementado estaticamente; build/up/smoke reais dependem de Docker/CI.
+
+### FIX-013 — Corridas de epoch, contador e takeover
+
+Metadados RPC são revalidados sob a barreira de epoch. TX, bloco, heartbeat e
+shutdown usam scripts Redis que comparam a lease antes do commit. O contador é
+reconciliado com `getmempoolinfo.size`, e o token interno não entra no contrato
+público. Testes determinísticos cobrem epoch antiga, token obsoleto, shutdown
+atômico e healthcheck de outra instância.
+
+Status: corrigido no processo singleton; HA com múltiplos nós continua fora do
+escopo atual.
 
 ## Achados abertos
 
@@ -185,20 +221,25 @@ Correção: proxy rate limit, autenticação, quotas e retenção.
 
 Severidade: P1 alta em signet/mainnet.
 
-O listener ignora frame de sequência, não deduplica rawtx e não invalida itens
-da fila ao chegar hashblock. Pub/Sub não oferece replay.
+O listener agora lê o terceiro frame de sequência, identifica a sessão, deduplica
+TXID por epoch e invalida backlog ao chegar hashblock. Ainda não interpreta toda
+a semântica do tópico `sequence`, detecta saltos nem reconcilia com um log
+durável. Pub/Sub não oferece replay.
 
-Impacto: contador e rodadas podem usar evento repetido, perdido ou antigo.
+O contador numérico é reconciliado periodicamente e em cada evento processado,
+mas gaps/restart ainda podem perder quais transações viraram itens do jogo,
+principalmente sob carga Mainnet.
 
-Correção: tópico sequence, época de bloco, reconciliação periódica e stream
-durável.
+Correção restante: interpretar eventos A/R e gaps do tópico `sequence`,
+reconciliar a lista com `getrawmempool` e adotar stream durável.
 
 ### AUD-004 — Throughput artificial
 
 Severidade: P1 alta em mainnet, P2 em regtest.
 
-Um consumidor publica por padrão uma transação por segundo. Backpressure impede
-RAM ilimitada no processo, mas pode acumular no socket e aumentar latência.
+Regtest/Signet publicam por padrão até uma transação por segundo; Mainnet usa
+intervalo de 0,25 s. Backpressure impede RAM ilimitada, mas pode descartar itens
+e aumentar latência sob uma mempool movimentada.
 
 Correção: separar ingestão do sampling de UI; consumir em lote, medir lag e
 definir descarte/coalescência.
@@ -227,10 +268,21 @@ Correção: lock, SBOM, pip-audit/Trivy, assinatura/proveniência e promoção.
 
 Severidade: P2 média.
 
-O cliente exibe perda de conexão, mas não reconecta e Pub/Sub não reenvia. Uma
-queda exige reload.
+O cliente invalida a geração, detecta heartbeat expirado e permite escolher a
+rede novamente, mas não reconecta automaticamente e Pub/Sub não reenvia.
 
-Correção: backoff com jitter, snapshot/epoch e retomada idempotente.
+Correção restante: backoff com jitter, stream durável e retomada idempotente.
+
+### AUD-007A — HA entre dois nós do mesmo realm
+
+O desenho single-node usava canal, contador e leaderboard globais. Agora
+Regtest, Signet e Mainnet possuem `realm_id`, canais/chaves com hash-tag Redis,
+filas/epochs, volumes e redes Docker independentes. Todo evento declara
+network/node/realm/source e o frontend rejeita realm divergente.
+
+Status: a contaminação foi corrigida para um nó por realm. Lease com commit
+condicional impede dois publicadores do mesmo namespace, mas HA com múltiplas
+origens, failover, dedupe entre fontes e reorg continuam abertos.
 
 ### AUD-008 — Acessibilidade incompleta
 
@@ -255,10 +307,11 @@ publicação.
 
 Severidade: P2 média.
 
-Testes unitários cobrem contratos básicos. Um workflow agora constrói a stack e
-testa health/Redis, mas ainda não foi executado neste repositório sem remoto; não
-há evidência automatizada de transações regtest, WebSocket, concorrência, mobile
-ou E2E.
+Testes unitários cobrem contratos, epoch e lease. Um workflow agora constrói a
+stack, prepara Regtest, envia uma transação, observa contador/heartbeat, minera
+um bloco e verifica mudança da epoch. Ele ainda não foi executado neste
+repositório sem remoto; não há evidência local de WebSocket, carga, mobile ou
+E2E.
 
 Correção: stack efêmera em CI, fixtures regtest e Playwright.
 
@@ -274,6 +327,15 @@ de Compose escolhida.
 
 Correção: imagem Nginx não-root/porta alta, capabilities mínimas, `read_only` +
 `tmpfs`, driver/rotação de logs e teste dos limites no runtime de destino.
+
+### AUD-012 — Redis Cluster não suportado
+
+Severidade: P3 no Compose atual, que usa Redis standalone.
+
+Os commits fenced e a migração legada usam Lua multi-chave. Algumas chaves
+operacionais não compartilham a mesma hash-tag; em Redis Cluster isso resulta em
+`CROSSSLOT`. Não habilite Cluster sem redesenhar os slots e preservar a
+atomicidade por realm.
 
 ## Dependências
 
@@ -297,11 +359,11 @@ pronta para produção.
 
 ## Evidências de validação
 
-- 11 testes pytest aprovados;
+- 39 testes pytest aprovados;
 - Ruff check e format check aprovados;
 - compileall do backend aprovado;
 - node --check em game.js e api-page.js aprovado;
 - pip-audit 2.10.1: nenhuma vulnerabilidade conhecida no conjunto resolvido;
-- parsing básico de 6 HTML, 24 Markdown, 6 SVG e 108 links locais validado;
+- parsing básico de 6 HTML, 24 Markdown, 6 SVG e 115 links locais validado;
 - 8 arquivos YAML analisados sintaticamente;
 - Docker Compose não executado porque o binário Docker está ausente.

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192" role="img" aria-labelledby="title">
+  <title id="title">Mempool Miner</title>
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="35%" r="70%">
+      <stop offset="0" stop-color="#202026"/>
+      <stop offset="1" stop-color="#050505"/>
+    </radialGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="192" height="192" rx="42" fill="url(#bg)"/>
+  <circle cx="96" cy="96" r="57" fill="none" stroke="#f7931a" stroke-width="8" opacity=".28"/>
+  <circle class="pulse" cx="96" cy="96" r="45" fill="#f7931a"/>
+  <path d="M76 58v76m20-76v76m-30-61h48c17 0 17 23 1 23H69h50c18 0 18 25-1 25H66" fill="none" stroke="#050505" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <path class="orbit" d="M34 96a62 62 0 0 1 62-62" fill="none" stroke="#fde047" stroke-width="5" stroke-linecap="round" filter="url(#glow)"/>
+  <style>
+    @media (prefers-reduced-motion: no-preference) {
+      .pulse { animation: pulse 2.4s ease-in-out infinite; transform-origin: 96px 96px; }
+      .orbit { animation: orbit 4s linear infinite; transform-origin: 96px 96px; }
+      @keyframes pulse { 50% { transform: scale(.94); } }
+      @keyframes orbit { to { transform: rotate(360deg); } }
+    }
+  </style>
+</svg>

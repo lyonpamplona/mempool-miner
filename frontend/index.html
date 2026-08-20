@@ -2,136 +2,605 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="description" content="Jogo educacional que transforma eventos da mempool Bitcoin em uma corrida de caça-palavras.">
-    <meta name="theme-color" content="#050505">
+    <meta name="theme-color" content="#0e1117">
+    <meta name="color-scheme" content="dark">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Mempool Miner">
     <meta name="api-base-url" content="/">
-    <title>Mempool Miner: Proof-of-Search</title>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+    <title>MEMPOOL MINER // MECHA_HUD_EDITION</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" type="image/svg+xml" href="icons/icon-192.svg">
+    <link rel="apple-touch-icon" href="icons/icon-192.svg">
+    <link rel="stylesheet" href="pixel.css">
 </head>
 <body>
-    <a class="skip-link" href="#word-grid">Pular para a grade</a>
-    <header class="dashboard glass-panel">
-        <div class="wallet-info">
-            <span class="wallet-label">Nome do minerador</span>
-            <span class="wallet-balance" id="ui-miner-name" style="font-size: 18px;">Anônimo</span>
-        </div>
-        <div class="wallet-info">
-            <span class="wallet-label">Saldo da carteira (sats)</span>
-            <span class="wallet-balance" id="ui-balance">0</span>
-        </div>
-        <div class="mining-stats">
-            <div class="stat-box">
-                <span class="wallet-label">Rodada local</span>
-                <span class="stat-val" id="ui-block">#1</span>
-            </div>
-            <div class="stat-box">
-                <span class="wallet-label">Nível de hardware</span>
-                <span class="stat-val halving" id="ui-hardware">CPU Miner</span>
-            </div>
-            <div class="stat-box">
-                <span class="wallet-label">Combo simulado</span>
-                <span class="stat-val" style="color: var(--success-green);" id="ui-combo">1.0×</span>
-            </div>
-        </div>
-    </header>
 
-    <div class="race-track">
-        <div class="race-bar-network" id="ui-network-progress" role="progressbar" aria-label="Tempo restante da rodada" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
-    </div>
-
-    <main class="main-layout">
-        <!-- GLOBAL LEADERBOARD -->
-        <div class="side-panel glass-panel">
-            <div class="panel-header">Top 10 de recordes</div>
-            <div id="leaderboard-list" class="leaderboard-list" aria-live="polite">
-                <div class="loading-state">Carregando rankings...</div>
+    <!-- PWA UPDATE BANNER -->
+    <div class="modal-wrap hidden" id="pwa-update-banner" role="region" aria-labelledby="pwa-update-message">
+        <div class="modal-mecha-box u-inline-001">
+            <div class="u-inline-002">> SYSTEM_UPDATE_AVAILABLE</div>
+            <span class="u-inline-003" id="pwa-update-message" role="status" aria-live="polite">Uma nova versão do jogo está pronta.</span>
+            <div class="u-inline-004">
+                <button class="btn-action-small" id="btn-update-app">ATUALIZAR</button>
+                <button class="btn-action-small u-inline-005" id="btn-dismiss-update">AGORA NÃO</button>
             </div>
-        </div>
-
-        <!-- ÁREA CENTRAL -->
-        <div class="game-area">
-            <div class="word-bank glass-panel">
-                <div class="panel-header">Transações pendentes</div>
-                <div id="word-bank-list" class="word-bank-list" aria-live="polite">
-                    <div class="loading-state" id="tx-loading">Aguardando transações (0/6)...</div>
-                </div>
-            </div>
-
-            <div class="grid-wrapper glass-panel" id="grid-wrapper">
-                <svg id="lines-svg" class="svg-lines" aria-hidden="true"></svg>
-                <div id="word-grid" class="word-grid" role="grid" aria-label="Caça-palavras da rodada" tabindex="-1"></div>
-                
-                <div id="grid-overlay" class="grid-overlay">
-                    <div class="loader-spinner"></div>
-                    <div class="loader-text">Coletando Hashes da Mempool...</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- MARKETPLACE INTERNO -->
-        <div class="side-panel glass-panel store-panel">
-            <div class="panel-header">Loja de upgrades</div>
-            
-            <div class="store-item">
-                <div class="store-info">
-                    <span class="store-title">Revelar dica</span>
-                    <span class="store-desc">Revela a 1ª letra de uma TX pendente.</span>
-                </div>
-                <button type="button" class="btn-store" id="btn-buy-hint" onclick="buyHint()">5,000 SATS</button>
-            </div>
-
-            <div class="store-item">
-                <div class="store-info">
-                    <span class="store-title" id="hw-title">Upgrade: ASIC Miner</span>
-                    <span class="store-desc">+10s de tempo contra a rede.</span>
-                </div>
-                <button type="button" class="btn-store btn-hardware" id="btn-buy-hw" onclick="buyHardware()">100,000 SATS</button>
-            </div>
-
-            <div class="store-item mt-auto lightning-item">
-                <div class="store-info">
-                    <span class="store-title">Modo Lightning (simulado)</span>
-                    <span class="store-desc">Ativa um upgrade L2 simulado: recompensas 10× e matriz condensada.</span>
-                </div>
-                <button type="button" class="btn-store btn-lightning" id="btn-buy-lightning" onclick="buyLightning()">1,000,000 SATS</button>
-            </div>
-        </div>
-    </main>
-
-    <!-- Modais -->
-    <div class="modal-overlay active" id="tutorial-modal" role="dialog" aria-modal="true" aria-labelledby="tutorial-title" tabindex="-1">
-        <div class="modal-content glass-panel">
-            <h2 class="modal-title" id="tutorial-title">Proof of Search</h2>
-            <p class="modal-text">Você participa de uma simulação educacional alimentada por eventos do Bitcoin Core.<br><br>O tamanho da matriz adapta-se ao peso virtual (vsize) das transações. Transações grandes expandem o desafio para 15×15.<br><br>Ao atingir 1 milhão de sats fictícios, ative o upgrade Lightning. Ele é uma mecânica do jogo e não abre um canal nem movimenta fundos reais.</p>
-            <form onsubmit="event.preventDefault(); startSession();">
-                <label for="miner-input" class="visually-hidden">Nickname do minerador</label>
-                <input type="text" id="miner-input" class="miner-input" placeholder="Digite seu nickname" maxlength="12" autocomplete="nickname">
-                <button type="submit" class="btn" style="width:100%; margin-top: 15px;">Conectar ao backend</button>
-            </form>
         </div>
     </div>
 
-    <div class="modal-overlay" id="result-modal" role="dialog" aria-modal="true" aria-labelledby="result-title" aria-hidden="true" tabindex="-1">
-        <div class="modal-content glass-panel">
-            <h2 class="modal-title" id="result-title">Resultado da rodada</h2>
-            <p class="modal-text" id="result-text">Aguardando resultado.</p>
-            <button type="button" class="btn" id="next-btn" onclick="prepareNextBlock()">Próxima rodada</button>
+    <!-- ACHIEVEMENT TOAST -->
+    <div id="achievement-toast" class="achievement-toast hidden" role="alert" aria-live="polite">
+        <div class="achievement-toast-content">
+            <span class="achievement-toast-icon" id="achievement-toast-icon"></span>
+            <div>
+                <div class="achievement-toast-title" id="achievement-toast-title"></div>
+                <div class="achievement-toast-desc" id="achievement-toast-desc"></div>
+            </div>
         </div>
     </div>
 
-    <div class="modal-overlay" id="lightning-modal" role="dialog" aria-modal="true" aria-label="Ativação do modo Lightning" aria-hidden="true" tabindex="-1">
-        <div class="modal-content glass-panel" style="text-align: left; font-family: var(--font-mono); color: var(--success-green); background: #000; border-color: var(--lightning-blue);">
-            <div id="lightning-text" style="font-size: 13px; line-height: 1.8;"></div>
+    <!-- MOLDURA PRINCIPAL CHASSIS MECHA -->
+    <div class="mecha-frame">
+
+        <!-- TRILHOS DECORATIVOS LATERAIS -->
+        <div class="side-rail left">
+            <div class="rail-notch active"></div>
+            <div class="rail-notch"></div>
+            <div class="rail-notch"></div>
+            <div class="rail-notch active"></div>
+        </div>
+        <div class="side-rail right">
+            <div class="rail-notch active"></div>
+            <div class="rail-notch"></div>
+            <div class="rail-notch"></div>
+            <div class="rail-notch active"></div>
+        </div>
+
+        <!-- HEADER HUD -->
+        <header class="hud-header">
+            <div class="hud-title-zone">
+                <span class="hud-sys-tag">SYS // MEMPOOL_MINER</span>
+                <span class="u-inline-006" id="ui-operator-tag">OP: [F2P]ANON</span>
+                <!-- ALIAS: ui-miner-name -->
+                <span id="ui-miner-name" class="hidden">ANON</span>
+                <!-- PWA INSTALL BUTTON -->
+                <button type="button" class="btn-action-small u-inline-007" id="btn-install-app" hidden>INSTALL</button>
+            </div>
+
+            <div class="hud-metrics">
+                <div class="metric-unit">
+                    <span class="metric-lbl">COLD WALLET</span>
+                    <span class="metric-val amber" id="ui-balance">0 SATS</span>
+                </div>
+                <div class="metric-unit">
+                    <span class="metric-lbl">TARGET BLOCK</span>
+                    <span class="metric-val" id="ui-block">#840,000</span>
+                </div>
+                <div class="metric-unit">
+                    <span class="metric-lbl">HASH MULTI</span>
+                    <span class="metric-val green" id="ui-combo">1.0x</span>
+                </div>
+                <div class="metric-unit">
+                    <span class="metric-lbl">HARDWARE</span>
+                    <span class="metric-val cyan" id="ui-hw">CPU</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- LEVEL BAR (Fase 2: Sistema de Níveis) -->
+        <div class="level-bar-container" id="level-bar-container" hidden>
+            <div class="level-info">
+                <span class="level-icon" id="level-icon"></span>
+                <span class="level-name" id="level-name">Script Kiddie</span>
+                <span class="level-value" id="level-value">Nível 1</span>
+            </div>
+            <div class="level-bar-track">
+                <div class="level-bar-fill u-inline-008" id="level-bar-fill"></div>
+                <span class="level-bar-text" id="level-bar-text">0 / 100 XP</span>
+            </div>
+        </div>
+
+        <!-- ENERGY BAR (Fase 11: Energy System) -->
+        <div class="energy-bar-container" id="energy-bar-container">
+            <span class="energy-label ui-icon-label"><svg class="ui-icon" aria-hidden="true"><use href="icons/ui-sprite.svg#icon-bolt"></use></svg> Energia</span>
+            <div class="energy-bar-track">
+                <div class="energy-bar-fill" id="ui-energy-bar" role="progressbar" aria-label="Energia disponível" aria-valuemin="0" aria-valuemax="10" aria-valuenow="10" aria-valuetext="10 de 10 energia"></div>
+            </div>
+            <span class="energy-count" id="ui-energy-count">10/10</span>
+            <span class="energy-timer" id="ui-energy-timer"></span>
+        </div>
+
+        <!-- POWERUPS BAR (Fase 2: Power-ups) -->
+        <div class="powerups-bar-container" id="powerups-bar-container">
+            <div class="powerups-header">
+                <span class="powerups-label ui-icon-label"><svg class="ui-icon" aria-hidden="true"><use href="icons/ui-sprite.svg#icon-controller"></use></svg> Power-ups</span>
+                <button type="button" class="btn-powerups-toggle" id="btn-powerups-toggle" aria-label="Abrir inventário de power-ups" aria-expanded="false" aria-controls="powerups-active"><svg class="ui-icon" aria-hidden="true"><use href="icons/ui-sprite.svg#icon-crate"></use></svg></button>
+            </div>
+            <div class="powerups-active" id="powerups-active" hidden></div>
+        </div>
+
+        <!-- CORPO PRINCIPAL HUD -->
+        <main class="hud-body">
+
+            <!-- PALCO CENTRAL (GRID & CORRIDA CONTRA A REDE) -->
+            <section class="stage-center">
+                <div class="race-box">
+                    <div class="race-header">
+                        <span>LOCAL_NODE_DECRYPT</span>
+                        <span class="u-inline-009">GLOBAL_NETWORK_LIMIT</span>
+                    </div>
+                    <div class="race-chute">
+                        <div class="race-bar" id="race-fill"></div>
+                    </div>
+                </div>
+
+                <div class="grid-hull" id="grid-wrapper">
+                    <svg id="lines-svg" class="svg-layer"></svg>
+                    <div id="word-grid" class="word-grid" role="grid" aria-label="Caça-palavras da rodada" aria-describedby="grid-instructions game-status" tabindex="-1"></div>
+
+                    <div id="grid-overlay" class="grid-overlay">
+                        <div class="spinner-mecha"></div>
+                        <div class="u-inline-010" id="tx-loading">RECEIVING_ZMQ_STREAM [0/6]...</div>
+                    </div>
+
+                    <!-- BOSS HUD (Fase 6: Boss Battles) -->
+                    <div id="boss-hud" class="boss-hud hidden" aria-live="polite">
+                        <div class="boss-header">
+                            <span class="boss-icon" aria-hidden="true"><svg class="ui-icon"><use href="icons/ui-sprite.svg#icon-boss"></use></svg></span>
+                            <span class="boss-title">BOSS BLOCK</span>
+                            <span class="boss-subtitle" id="boss-subtitle">5× RECOMPENSA</span>
+                        </div>
+                        <div class="boss-hp-bar-container" role="progressbar" aria-label="HP do boss" aria-valuemin="0" aria-valuemax="10" aria-valuenow="10" aria-valuetext="10 de 10 HP">
+                            <div class="boss-hp-bar u-inline-011" id="boss-hp-bar"></div>
+                            <span class="boss-hp-text" id="boss-hp-text">10 / 10</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- GLOBAL EVENT BANNER (Fase 8: Eventos Globais) -->
+                <div id="global-event-banner" class="global-event-banner hidden" aria-live="polite" role="alert">
+                    <div class="global-event-banner-inner">
+                        <span class="global-event-icon" id="global-event-icon"></span>
+                        <div class="global-event-info">
+                            <span class="global-event-label" id="global-event-label"></span>
+                            <span class="global-event-description" id="global-event-description"></span>
+                        </div>
+                        <div class="global-event-timer">
+                            <span id="global-event-countdown" class="global-event-countdown"></span>
+                        </div>
+                        <button type="button" class="global-event-dismiss" id="btn-dismiss-event" aria-label="Fechar banner de evento"><svg class="ui-icon" aria-hidden="true"><use href="icons/ui-sprite.svg#icon-close"></use></svg></button>
+                    </div>
+                </div>
+
+                <p class="game-instructions" id="grid-instructions">Arraste sobre as letras. No teclado, use as setas; Enter inicia ou conclui e Escape cancela.</p>
+                <p class="game-status" id="game-status" role="status" aria-live="polite" aria-atomic="true">Aguardando uma rede jogável.</p>
+            </section>
+
+            <!-- SIDEBAR DIREITA (MENU DE AÇÕES & ABAS) -->
+            <aside class="sidebar-right">
+                <div class="panel-code-tag">
+                    <span>SN-02</span>
+                    <div class="u-inline-012">[0-2] ↙</div>
+                </div>
+
+                <!-- NAVEGAÇÃO PRINCIPAL: mesma arquitetura em todas as telas -->
+                <div class="mecha-nav-group" role="tablist" aria-label="Áreas do Mempool Miner">
+                    <button class="mecha-btn active" id="tab-btn-jogo" data-tab="jogo" type="button" role="tab" aria-controls="tab-jogo" aria-selected="true">
+                        <span>JOGO</span>
+                        <span class="btn-index">01</span>
+                    </button>
+                    <button class="mecha-btn" id="tab-btn-upgrades" data-tab="upgrades" type="button" role="tab" aria-controls="tab-upgrades" aria-selected="false" tabindex="-1">
+                        <span>UPGRADES</span>
+                        <span class="btn-index">02</span>
+                    </button>
+                    <button class="mecha-btn" id="tab-btn-competir" data-tab="competir" type="button" role="tab" aria-controls="tab-competir" aria-selected="false" tabindex="-1">
+                        <span>COMPETIR</span>
+                        <span class="btn-index">03</span>
+                    </button>
+                    <button class="mecha-btn" id="tab-btn-perfil" data-tab="perfil" type="button" role="tab" aria-controls="tab-perfil" aria-selected="false" tabindex="-1">
+                        <span>PERFIL</span>
+                        <span class="btn-index">04</span>
+                    </button>
+                    <button class="mecha-btn" id="tab-btn-social" data-tab="social" type="button" role="tab" aria-controls="tab-social" aria-selected="false" tabindex="-1">
+                        <span>SOCIAL</span>
+                        <span class="btn-index">05</span>
+                    </button>
+                </div>
+
+                <!-- ABA 1: JOGO — transações da rodada e ações contextuais -->
+                <div class="tab-pane active" id="tab-jogo" role="tabpanel" aria-labelledby="tab-btn-jogo">
+                    <div class="u-inline-013">BLOCK_TEMPLATE_TXS:</div>
+                    <div class="u-inline-014" id="tx-list-container"></div>
+                </div>
+
+                <!-- ABA 2: UPGRADES — progressão e utilidades da rodada -->
+                <div class="tab-pane" id="tab-upgrades" role="tabpanel" aria-labelledby="tab-btn-upgrades" hidden>
+                    <div class="mechanic-subnav" role="tablist" aria-label="Seções de upgrades" data-section-nav="upgrades">
+                        <button class="mechanic-subnav-btn active" id="section-btn-upgrades-shop" type="button" role="tab" aria-selected="true" aria-controls="section-upgrades-shop" data-section-group="upgrades" data-section="shop">LOJA</button>
+                        <button class="mechanic-subnav-btn" id="section-btn-upgrades-inventory" type="button" role="tab" aria-selected="false" aria-controls="section-upgrades-inventory" data-section-group="upgrades" data-section="inventory" tabindex="-1">INVENTÁRIO</button>
+                        <button class="mechanic-subnav-btn" id="section-btn-upgrades-tools" type="button" role="tab" aria-selected="false" aria-controls="section-upgrades-tools" data-section-group="upgrades" data-section="tools" tabindex="-1">UTILITÁRIOS</button>
+                    </div>
+
+                    <section class="mechanic-section active" id="section-upgrades-shop" role="tabpanel" aria-labelledby="section-btn-upgrades-shop" data-section-group="upgrades" data-section="shop">
+                    <div class="shop-card-mecha">
+                        <div class="shop-row">
+                            <span class="u-inline-015">DECRYPT_HINT</span>
+                            <button class="btn-action-small" id="btn-buy-hint" type="button">5K SATS</button>
+                        </div>
+                        <span class="u-inline-016">Varre a matriz e ilumina a célula de origem.</span>
+                    </div>
+
+                    <div class="shop-card-mecha">
+                        <div class="shop-row">
+                            <span class="u-inline-015" id="hw-title">ASIC_RIG_V1</span>
+                            <button class="btn-action-small" id="btn-buy-hw" type="button">100K SATS</button>
+                        </div>
+                        <span class="u-inline-016">+10s permanentes contra o limite da rede.</span>
+                    </div>
+
+                    <div class="shop-card-mecha u-inline-017">
+                        <div class="shop-row">
+                            <span class="u-inline-018">L2_LIGHTNING</span>
+                            <button class="btn-action-small" id="btn-buy-ln" type="button">1M SATS</button>
+                        </div>
+                        <span class="u-inline-016">Zero-Conf: 8x8 Grid, 10X Recompensas (5 Blocos).</span>
+                    </div>
+
+                    <!-- ENERGY UPGRADE -->
+                    <div class="shop-card-mecha">
+                        <div class="shop-row">
+                            <span class="u-inline-019">ENERGY_RECHARGE</span>
+                            <button class="btn-action-small" id="btn-buy-energy">10K SATS</button>
+                        </div>
+                        <span class="u-inline-016">Recarrega +3 energia.</span>
+                    </div>
+                    </section>
+
+                    <!-- CRATES (Fase 9: Loot Boxes) -->
+                    <section class="mechanic-section" id="section-upgrades-inventory" role="tabpanel" aria-labelledby="section-btn-upgrades-inventory" data-section-group="upgrades" data-section="inventory" hidden>
+                    <div class="shop-card-mecha u-inline-020">
+                        <div class="shop-row">
+                            <span class="u-inline-021">
+                                <span id="crate-icon"><svg class="ui-icon" aria-hidden="true"><use href="icons/ui-sprite.svg#icon-crate"></use></svg></span> CRATE
+                                <span class="u-inline-022" id="crate-free-count">(0 FREE)</span>
+                            </span>
+                            <div class="u-inline-023">
+                                <button class="btn-action-small" id="btn-open-crate-free">FREE</button>
+                                <button class="btn-action-small" id="btn-open-crate-buy">50K</button>
+                            </div>
+                        </div>
+                    </div>
+                    </section>
+
+                    <!-- DECODER (Fase 4: Decoder) -->
+                    <section class="mechanic-section" id="section-upgrades-tools" role="tabpanel" aria-labelledby="section-btn-upgrades-tools" data-section-group="upgrades" data-section="tools" hidden>
+                    <div class="shop-card-mecha u-inline-024">
+                        <div class="shop-row">
+                            <span class="u-inline-025">TX_DECODER</span>
+                            <button class="btn-action-small" id="btn-decoder-launch">LAUNCH</button>
+                        </div>
+                        <span class="u-inline-016">Decodifique TXs ocultas para bônus.</span>
+                    </div>
+                    </section>
+                </div>
+
+                <!-- ABA 3: COMPETIR — ranking, pools, missões e Sprint -->
+                <div class="tab-pane" id="tab-competir" role="tabpanel" aria-labelledby="tab-btn-competir" hidden>
+                    <div class="mechanic-subnav" role="tablist" aria-label="Seções competitivas" data-section-nav="competir">
+                        <button class="mechanic-subnav-btn active" id="section-btn-competir-ranking" type="button" role="tab" aria-selected="true" aria-controls="section-competir-ranking" data-section-group="competir" data-section="ranking">RANKING</button>
+                        <button class="mechanic-subnav-btn" id="section-btn-competir-missions" type="button" role="tab" aria-selected="false" aria-controls="section-competir-missions" data-section-group="competir" data-section="missions" tabindex="-1">MISSÕES</button>
+                        <button class="mechanic-subnav-btn" id="section-btn-competir-sprint" type="button" role="tab" aria-selected="false" aria-controls="section-competir-sprint" data-section-group="competir" data-section="sprint" tabindex="-1">SPRINT</button>
+                    </div>
+
+                    <!-- LEADERBOARD -->
+                    <section class="mechanic-section active" id="section-competir-ranking" role="tabpanel" aria-labelledby="section-btn-competir-ranking" data-section-group="competir" data-section="ranking">
+                    <div class="u-inline-026">TOP OPERATORS (EPOCH 2016):</div>
+                    <div class="u-inline-027" id="leaderboard-list"></div>
+
+                    <!-- POOLS -->
+                    <div class="u-inline-028">TOP POOLS:</div>
+                    <div class="u-inline-027" id="pool-list"></div>
+                    </section>
+
+                    <!-- MISSIONS (Fase 3: Missões) -->
+                    <section class="mechanic-section" id="section-competir-missions" role="tabpanel" aria-labelledby="section-btn-competir-missions" data-section-group="competir" data-section="missions" hidden>
+                    <div class="u-inline-028">MISSIONS:</div>
+                    <div id="missions-panel">
+                        <div id="missions-loading" class="spinner-mecha u-inline-029"></div>
+                        <div class="u-inline-027" id="missions-list"></div>
+                    </div>
+                    </section>
+
+                    <!-- SPRINT MODE (Fase 5: Sprint) -->
+                    <section class="mechanic-section" id="section-competir-sprint" role="tabpanel" aria-labelledby="section-btn-competir-sprint" data-section-group="competir" data-section="sprint" hidden>
+                    <div class="u-inline-028">SPRINT_MODE:</div>
+                    <div class="u-inline-042" id="sprint-timer-display">
+                        <button class="btn-action-small ui-icon-label" id="btn-sprint-mode"><svg class="ui-icon" aria-hidden="true"><use href="icons/ui-sprite.svg#icon-sprint"></use></svg> SPRINT</button>
+                        <span class="u-inline-043" id="sprint-timer-value">00:00</span>
+                    </div>
+                    <div class="u-inline-027" id="sprint-leaderboard-list"></div>
+                    </section>
+                </div>
+
+                <!-- ABA 4: PERFIL — progressão persistente do operador -->
+                <div class="tab-pane" id="tab-perfil" role="tabpanel" aria-labelledby="tab-btn-perfil" hidden>
+                    <div class="mechanic-subnav" role="tablist" aria-label="Seções do perfil" data-section-nav="perfil">
+                        <button class="mechanic-subnav-btn active" id="section-btn-perfil-overview" type="button" role="tab" aria-selected="true" aria-controls="section-perfil-overview" data-section-group="perfil" data-section="overview">VISÃO</button>
+                        <button class="mechanic-subnav-btn" id="section-btn-perfil-progression" type="button" role="tab" aria-selected="false" aria-controls="section-perfil-progression" data-section-group="perfil" data-section="progression" tabindex="-1">PROGRESSÃO</button>
+                        <button class="mechanic-subnav-btn" id="section-btn-perfil-collection" type="button" role="tab" aria-selected="false" aria-controls="section-perfil-collection" data-section-group="perfil" data-section="collection" tabindex="-1">COLEÇÃO</button>
+                        <button class="mechanic-subnav-btn" id="section-btn-perfil-economy" type="button" role="tab" aria-selected="false" aria-controls="section-perfil-economy" data-section-group="perfil" data-section="economy" tabindex="-1">ECONOMIA</button>
+                    </div>
+
+                    <!-- PROTOCOL INFO -->
+                    <section class="mechanic-section active" id="section-perfil-overview" role="tabpanel" aria-labelledby="section-btn-perfil-overview" data-section-group="perfil" data-section="overview">
+                    <div class="shop-card-mecha">
+                        <span class="u-inline-019">01. PROOF-OF-SEARCH</span>
+                        <span class="u-inline-016">Conecte as palavras BIP39 antes da rede esgotar o tempo.</span>
+                    </div>
+                    <div class="shop-card-mecha u-inline-044">
+                        <span class="u-inline-045">02. SLASHING</span>
+                        <span class="u-inline-016">3 erros seguidos debitam 5% do saldo da Cold Wallet.</span>
+                    </div>
+                    <div class="shop-card-mecha u-inline-024">
+                        <span class="u-inline-025">03. MEV OCULTO</span>
+                        <span class="u-inline-016">Hashes não listados valem +50k Sats ao serem encontrados.</span>
+                    </div>
+
+                    <div class="u-inline-028">ACHIEVEMENT_REGISTRY:</div>
+                    <button class="btn-action-small u-inline-056" id="btn-achievements" type="button">VER CONQUISTAS</button>
+                    </section>
+
+                    <!-- STAKING (Fase 7: Staking) -->
+                    <section class="mechanic-section" id="section-perfil-economy" role="tabpanel" aria-labelledby="section-btn-perfil-economy" data-section-group="perfil" data-section="economy" hidden>
+                    <div class="u-inline-028">STAKING_PROTOCOL:</div>
+                    <div id="staking-panel">
+                        <div class="u-inline-039" id="staking-form">
+                            <input type="number" class="input-mecha u-inline-031" id="staking-amount-input" placeholder="SATS">
+                            <select class="input-mecha u-inline-035" id="staking-duration">
+                                <option value="1">1 Block</option>
+                                <option value="10">10 Blocks</option>
+                                <option value="100">100 Blocks</option>
+                            </select>
+                            <div class="u-inline-046" id="staking-bonus"></div>
+                            <button class="btn-action-small" id="btn-stake">STAKE</button>
+                            <button class="btn-action-small u-inline-047" id="btn-cancel-stake">CANCEL</button>
+                        </div>
+                        <div class="u-inline-033" id="staking-timer"></div>
+                        <div class="u-inline-046" id="staking-active" hidden>
+                            DURAÇÃO ATIVA: <output id="staking-active-duration">--</output>
+                        </div>
+                        <div class="u-inline-048" id="staking-amount"></div>
+                        <div class="u-inline-041" id="staking-history-list"></div>
+                    </div>
+                    </section>
+
+                    <!-- SKILLS TREE (Fase 4: Skills) -->
+                    <section class="mechanic-section" id="section-perfil-progression" role="tabpanel" aria-labelledby="section-btn-perfil-progression" data-section-group="perfil" data-section="progression" hidden>
+                    <div class="u-inline-028">SKILL_MATRIX:</div>
+                    <div id="skills-panel">
+                        <div id="skills-loading" class="spinner-mecha u-inline-029"></div>
+                        <div class="u-inline-049" id="skills-header">
+                            <span>LEVEL: <span id="skills-level-value">1</span></span>
+                            <span>PTS: <span id="skills-points-value">0</span></span>
+                        </div>
+                        <div class="u-inline-027" id="skills-content"></div>
+                    </div>
+
+                    <!-- SEASON PASS (Fase 8: Season Pass) -->
+                    <div class="u-inline-028">SEASON_PROTOCOL:</div>
+                    <div id="season-panel">
+                        <div id="season-loading" class="spinner-mecha u-inline-029"></div>
+                        <div id="season-content">
+                            <div class="u-inline-050">
+                                <span>ID: <span id="season-id-value">1</span></span>
+                                <span>LVL: <span id="season-level-value">1</span></span>
+                                <span>XP: <span id="season-xp-value">0</span></span>
+                            </div>
+                            <div class="season-progress-bar" id="season-progress-bar">
+                                <div class="season-progress-fill u-inline-051" id="season-progress-fill"></div>
+                                <span class="season-progress-text" id="season-progress-text">0%</span>
+                            </div>
+                            <div class="u-inline-052" id="season-timer"></div>
+                            <div class="u-inline-053">
+                                <div class="u-inline-054" id="season-rewards-free"></div>
+                                <div class="u-inline-055" id="season-rewards-premium"></div>
+                            </div>
+                            <button class="btn-action-small u-inline-056" id="btn-buy-season-premium">PREMIUM 50K</button>
+                        </div>
+                    </div>
+                    </section>
+
+                    <!-- CARDS (Fase 9: Cards/Colecionáveis) -->
+                    <section class="mechanic-section" id="section-perfil-collection" role="tabpanel" aria-labelledby="section-btn-perfil-collection" data-section-group="perfil" data-section="collection" hidden>
+                    <div class="u-inline-028">CARD_VAULT:</div>
+                    <div id="cards-panel">
+                        <div id="cards-loading" class="spinner-mecha u-inline-029"></div>
+                        <div class="u-inline-050">
+                            <span>TOTAL: <span id="cards-total">0</span></span>
+                            <span>BONUS: <span id="cards-bonus">0</span></span>
+                        </div>
+                        <div class="u-inline-057">
+                            <span>COMMON: <span id="cards-common">0</span></span>
+                            <span>RARE: <span id="cards-rare">0</span></span>
+                            <span>EPIC: <span id="cards-epic">0</span></span>
+                            <span>LEGEND: <span id="cards-legendary">0</span></span>
+                        </div>
+                        <div class="u-inline-058" id="cards-grid"></div>
+                    </div>
+                    </section>
+                </div>
+
+                <!-- ABA 5: SOCIAL — comunicação e economia entre jogadores -->
+                <div class="tab-pane" id="tab-social" role="tabpanel" aria-labelledby="tab-btn-social" hidden>
+                    <div class="mechanic-subnav" role="tablist" aria-label="Seções sociais" data-section-nav="social">
+                        <button class="mechanic-subnav-btn active" id="section-btn-social-chat" type="button" role="tab" aria-selected="true" aria-controls="section-social-chat" data-section-group="social" data-section="chat">CHAT</button>
+                        <button class="mechanic-subnav-btn" id="section-btn-social-team" type="button" role="tab" aria-selected="false" aria-controls="section-social-team" data-section-group="social" data-section="team" tabindex="-1">EQUIPE</button>
+                        <button class="mechanic-subnav-btn" id="section-btn-social-market" type="button" role="tab" aria-selected="false" aria-controls="section-social-market" data-section-group="social" data-section="market" tabindex="-1">MERCADO</button>
+                    </div>
+
+                    <!-- CHAT -->
+                    <section class="mechanic-section active" id="section-social-chat" role="tabpanel" aria-labelledby="section-btn-social-chat" data-section-group="social" data-section="chat">
+                    <div class="u-inline-028">COMMS_CHANNEL:</div>
+                    <div class="u-inline-027" id="chat-panel">
+                        <div class="u-inline-030" id="chat-messages"></div>
+                        <div class="u-inline-023">
+                            <input type="text" class="input-mecha u-inline-031" id="chat-input" placeholder="Mensagem...">
+                            <button class="btn-action-small" id="chat-send-btn" type="button">ENVIAR</button>
+                        </div>
+                        <div class="chat-emoji-bar u-inline-032" id="chat-emoji-bar"></div>
+                        <div class="u-inline-033" id="chat-rate-info"></div>
+                    </div>
+                    </section>
+
+                    <!-- FRIENDS -->
+                    <section class="mechanic-section" id="section-social-team" role="tabpanel" aria-labelledby="section-btn-social-team" data-section-group="social" data-section="team" hidden>
+                    <div class="u-inline-028">SQUAD:</div>
+                    <div id="friends-panel">
+                        <div id="friends-loading" class="spinner-mecha u-inline-029"></div>
+                        <div class="u-inline-027" id="friends-list"></div>
+                        <div class="friends-add-row u-inline-034">
+                            <input type="text" class="input-mecha u-inline-035" id="friends-add-input" placeholder="Adicionar operador...">
+                            <button class="btn-action-small" id="btn-friends-add" type="button">ADICIONAR</button>
+                        </div>
+                        <div class="u-inline-036" id="friends-coop-bonus"></div>
+                    </div>
+                    </section>
+
+                    <!-- MARKET -->
+                    <section class="mechanic-section" id="section-social-market" role="tabpanel" aria-labelledby="section-btn-social-market" data-section-group="social" data-section="market" hidden>
+                    <div class="u-inline-028">MARKETPLACE:</div>
+                    <div id="market-panel">
+                        <div class="u-inline-037">
+                            <button class="btn-action-small u-inline-038" id="btn-market" type="button">COMPRAR</button>
+                            <button class="btn-action-small u-inline-038" id="btn-market-sell" type="button">VENDER</button>
+                            <button class="btn-action-small" id="btn-refresh-market" type="button" aria-label="Atualizar mercado">ATUALIZAR</button>
+                        </div>
+                        <div class="u-inline-039" id="market-browse"></div>
+                        <div class="u-inline-040" id="market-sell">
+                            <select class="input-mecha u-inline-035" id="market-sell-select"></select>
+                            <input type="number" class="input-mecha u-inline-035" id="market-sell-price" placeholder="Preço (SATS)">
+                        </div>
+                        <select class="input-mecha u-inline-035" id="market-filter-powerup" aria-label="Filtrar mercado por power-up">
+                            <option value="all">Todos os power-ups</option>
+                            <option value="scanner">Scanner</option>
+                            <option value="time_freeze">Time Freeze</option>
+                            <option value="magnet">Magnet</option>
+                            <option value="precision">Precision</option>
+                            <option value="double_combo">Double Combo</option>
+                        </select>
+                        <div class="u-inline-041" id="market-history"></div>
+                    </div>
+                    </section>
+                </div>
+            </aside>
+
+        </main>
+
+        <!-- FOOTER STATUS BAR -->
+        <footer class="hud-footer">
+            <div>
+                <span class="status-slot" id="connectivity-status">03/06</span>
+                <span id="ui-active-network">Desconectada</span>
+                <span id="ui-node-status">Escolha uma rede</span>
+            </div>
+            <div>
+                <span class="u-inline-012" id="game-status-footer">CONSENSUS_INACTIVE</span>
+                <button class="btn-action-small" id="btn-change-network" type="button">TROCAR REDE</button>
+            </div>
+        </footer>
+
+    </div>
+
+    <!-- MODAL AUTH / OPERATOR LOGIN -->
+    <div class="modal-wrap" id="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+        <form class="modal-mecha-box" id="auth-form">
+            <div class="u-inline-062" id="auth-title">> SYSTEM_AUTHENTICATION</div>
+            <p class="u-inline-063">Escolha a rede e identifique o operador.</p>
+            <label class="u-inline-063" for="network-select">REDE</label>
+            <select class="input-mecha" id="network-select"></select>
+            <div class="u-inline-033" id="network-status" role="status" aria-live="polite">Carregando redes...</div>
+            <label class="u-inline-063" for="miner-input">OPERADOR</label>
+            <input type="text" class="input-mecha" id="miner-input" placeholder="OPERATOR_ID" maxlength="16" autocomplete="nickname">
+            <label class="u-inline-063" for="pool-tag-input">POOL / GUILDA (OPCIONAL)</label>
+            <input type="text" class="input-mecha" id="pool-tag-input" placeholder="F2POOL" maxlength="20">
+            <button class="mecha-btn active u-inline-064" id="btn-start-session" type="submit">
+                <span>EXECUTE_NODE</span>
+            </button>
+        </form>
+    </div>
+
+    <!-- MODAL RESULTADO (BLOCK MINED / ORPHAN) -->
+    <div class="modal-wrap hidden" id="result-modal">
+        <div class="modal-mecha-box" id="result-box">
+            <div class="u-inline-065" id="result-title">BLOCK_MINED</div>
+            <p class="u-inline-066" id="result-text">Consenso atingido com sucesso.</p>
+
+            <button class="mecha-btn active u-inline-067" id="next-btn" type="button">
+                <span>PROCEED_NEXT_BLOCK</span>
+            </button>
         </div>
     </div>
 
-    <footer class="project-links" aria-label="Documentação do projeto">
-        <a href="/apresentacao.html">Apresentação</a>
-        <a href="/docs/">Documentação</a>
-        <a href="/docs/api.html">API técnica</a>
-    </footer>
+    <!-- MODAL BOSS DEFEAT -->
+    <div class="modal-wrap hidden" id="boss-defeat-modal">
+        <div class="modal-mecha-box u-inline-001">
+            <div class="u-inline-068" id="boss-defeat-title">BOSS_DEFEATED</div>
+            <p class="u-inline-066" id="boss-defeat-text">Boss block destruído. Recompensa 5× aplicada.</p>
+            <button class="mecha-btn active u-inline-064" id="boss-defeat-btn">
+                <span>COLLECT_REWARD</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL ACHIEVEMENTS -->
+    <div class="modal-wrap hidden" id="achievements-modal">
+        <div class="modal-mecha-box u-inline-069">
+            <div class="u-inline-070">> ACHIEVEMENT_REGISTRY</div>
+            <div class="u-inline-033" id="achievements-summary"></div>
+            <div class="u-inline-071" id="achievements-filters"></div>
+            <div class="u-inline-072" id="achievements-grid"></div>
+            <button class="mecha-btn active u-inline-064" id="btn-close-achievements">
+                <span>CLOSE</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL LIGHTNING ACTIVATION -->
+    <div class="modal-wrap hidden" id="lightning-modal">
+        <div class="modal-mecha-box u-inline-001">
+            <div class="u-inline-062">> L2_LIGHTNING_ACTIVATED</div>
+            <p class="u-inline-073" id="lightning-text">Modo Lightning ativado por 5 blocos. Grid 8x8, recompensas 10×.</p>
+            <button class="mecha-btn active u-inline-064" id="btn-close-lightning" type="button">
+                <span>ACKNOWLEDGE</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL TX DECODER -->
+    <div id="decoder-modal" class="modal-wrap hidden" role="dialog" aria-modal="true" aria-labelledby="decoder-title">
+        <div class="modal-mecha-box u-inline-001">
+            <div class="u-inline-059" id="decoder-title">> TX_DECODER</div>
+            <div class="u-inline-033" id="decoder-txid"></div>
+            <input type="text" class="input-mecha u-inline-012" id="decoder-input" placeholder="Decodifique...">
+            <div class="u-inline-060" id="decoder-hint-letter"></div>
+            <div class="u-inline-033" id="decoder-feedback"></div>
+            <div class="season-progress-bar" id="decoder-timer-bar">
+                <div class="season-progress-fill u-inline-061" id="decoder-timer-fill"></div>
+            </div>
+            <span class="u-inline-048" id="decoder-timer-text"></span>
+            <div class="u-inline-049">
+                <span>STREAK: <span id="decoder-streak">0</span></span>
+                <span>WINS: <span id="decoder-wins">0</span></span>
+            </div>
+            <div class="u-inline-023">
+                <button class="btn-action-small" id="btn-decoder-submit" type="button">SUBMIT</button>
+                <button class="btn-action-small u-inline-047" id="btn-close-decoder" type="button">CLOSE</button>
+            </div>
+        </div>
+    </div>
 
     <script src="game.js"></script>
 </body>

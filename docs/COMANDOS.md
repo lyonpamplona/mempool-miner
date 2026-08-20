@@ -8,6 +8,7 @@ Runbook para desenvolvimento e operação local.
 |---|---|---|
 | criar .env | Copy-Item .env.example .env | cp .env.example .env |
 | validar Compose | docker compose config --quiet | igual |
+| validar com Mainnet | docker compose --profile mainnet config --quiet | igual |
 | mostrar configuração | docker compose config | igual |
 
 Nunca cole a saída completa de docker compose config em tickets: ela pode
@@ -24,6 +25,12 @@ conter a credencial RPC resolvida.
     docker compose restart backend
     docker compose down
 
+Mainnet é opt-in:
+
+    docker compose --profile mainnet up -d bitcoin-mainnet ingestor-mainnet
+    docker compose --profile mainnet logs -f bitcoin-mainnet ingestor-mainnet
+    docker compose --profile mainnet stop ingestor-mainnet bitcoin-mainnet
+
 Atualização consciente de imagens:
 
     docker compose pull
@@ -34,48 +41,58 @@ Atualização consciente de imagens:
 
     docker compose logs --tail 200 backend
     docker compose logs -f backend
-    docker compose logs -f bitcoind redis
+    docker compose logs -f bitcoin-regtest bitcoin-signet ingestor-regtest ingestor-signet redis
     docker compose events
 
 ## Saúde
 
-    curl http://localhost:8010/api/health
+    curl http://localhost:8010/api/v1/health/live
+    curl http://localhost:8010/api/v1/networks
     docker compose exec redis redis-cli ping
-    docker compose exec bitcoind bitcoin-cli -regtest getblockchaininfo
-    docker compose exec bitcoind bitcoin-cli -regtest getmempoolinfo
+    docker compose exec bitcoin-regtest sh -lc 'bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" getblockchaininfo'
+    docker compose exec bitcoin-regtest sh -lc 'bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" getmempoolinfo'
+    docker compose exec bitcoin-signet sh -lc 'bitcoin-cli -signet -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" getblockchaininfo'
 
 No PowerShell, Invoke-RestMethod evita o alias histórico de curl:
 
-    Invoke-RestMethod http://localhost:8010/api/health
-    Invoke-RestMethod http://localhost:8010/api/leaderboard
+    Invoke-RestMethod http://localhost:8010/api/v1/health/live
+    Invoke-RestMethod http://localhost:8010/api/v1/networks/regtest/leaderboard
 
 ## Leaderboard
 
 PowerShell:
 
     $body = @{ username = "Miner_42"; score = 1200 } | ConvertTo-Json
-    Invoke-RestMethod -Method Post -Uri http://localhost:8010/api/leaderboard -ContentType application/json -Body $body
+    Invoke-RestMethod -Method Post -Uri http://localhost:8010/api/v1/networks/regtest/leaderboard -ContentType application/json -Body $body
 
 Bash:
 
-    curl -X POST http://localhost:8010/api/leaderboard \
+    curl -X POST http://localhost:8010/api/v1/networks/regtest/leaderboard \
       -H "Content-Type: application/json" \
       -d '{"username":"Miner_42","score":1200}'
 
 ## Bitcoin regtest
 
-    docker compose exec bitcoind bitcoin-cli -regtest createwallet miner
-    docker compose exec bitcoind bitcoin-cli -regtest -rpcwallet=miner getnewaddress
-    docker compose exec bitcoind bitcoin-cli -regtest generatetoaddress 101 ENDERECO
-    docker compose exec bitcoind bitcoin-cli -regtest -rpcwallet=miner sendtoaddress ENDERECO 0.001
-    docker compose exec bitcoind bitcoin-cli -regtest getrawmempool
-    docker compose exec bitcoind bitcoin-cli -regtest generatetoaddress 1 ENDERECO
+    docker compose exec bitcoin-regtest sh -lc 'bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" createwallet miner'
+    docker compose exec bitcoin-regtest sh -lc 'bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" -rpcwallet=miner getnewaddress'
+    docker compose exec bitcoin-regtest sh -lc 'bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" generatetoaddress 101 ENDERECO'
+    docker compose exec bitcoin-regtest sh -lc 'bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" -rpcwallet=miner sendtoaddress ENDERECO 0.001'
+    docker compose exec bitcoin-regtest sh -lc 'bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" getrawmempool'
+    docker compose exec bitcoin-regtest sh -lc 'bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" generatetoaddress 1 ENDERECO'
+
+## Signet e Mainnet
+
+    docker compose exec bitcoin-signet sh -lc 'bitcoin-cli -signet -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" getblockchaininfo'
+    docker compose --profile mainnet exec bitcoin-mainnet sh -lc 'bitcoin-cli -chain=main -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" getblockchaininfo'
+
+No retorno, observe `initialblockdownload`, `verificationprogress`, `pruned` e
+`pruneheight`. Mainnet só fica selecionável no jogo após sair do IBD.
 
 ## Redis
 
-    docker compose exec redis redis-cli ZREVRANGE global_leaderboard 0 9 WITHSCORES
-    docker compose exec redis redis-cli GET mempool_count
-    docker compose exec redis redis-cli PUBSUB NUMSUB game_events
+    docker compose exec redis redis-cli ZREVRANGE "mempool_miner:v2:{regtest}:leaderboard" 0 9 WITHSCORES
+    docker compose exec redis redis-cli GET "mempool_miner:v2:{regtest}:mempool_count"
+    docker compose exec redis redis-cli PUBSUB NUMSUB "mempool_miner:v2:{regtest}:events"
     docker compose exec redis redis-cli BGSAVE
 
 Não execute FLUSHALL fora de um ambiente descartável.
@@ -127,7 +144,7 @@ snapshot inconsistente.
 Os comandos abaixo apagam dados e exigem confirmação humana do alvo:
 
     docker compose down --volumes
-    docker volume rm mempool-miner_bitcoin_data
-    docker volume rm mempool-miner_redis_data
 
-Nunca os inclua automaticamente em scripts de CI ou setup.
+Evite `docker volume rm` manual: resolva primeiro os nomes com
+`docker volume ls` e mantenha backup. Nunca inclua remoção automaticamente em
+scripts de setup. A CI só usa `down --volumes` no projeto efêmero criado por ela.

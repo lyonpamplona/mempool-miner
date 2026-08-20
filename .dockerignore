@@ -1,17 +1,13 @@
-.git
-.github
-.env
-.env.*
-!.env.example
-**/__pycache__
-**/*.py[cod]
-.pytest_cache
-.ruff_cache
-.venv
-.audit-venv
-node_modules
-prototipo-*.html
-backend
-bitcoin
-docker-compose*.y*ml
-*.log
+# O contexto raiz é exclusivo da imagem pública de documentação.
+# Tudo começa bloqueado; apenas a allowlist abaixo é enviada ao daemon.
+**
+
+!docs/
+!docs/Dockerfile
+!docs/nginx.conf
+!docs/index.html
+!docs/api.html
+!docs/site.css
+!docs/assets/
+!docs/assets/*.svg
+!guia-apresentacao.html

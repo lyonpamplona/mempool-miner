@@ -3,6 +3,20 @@
 O roadmap parte do estado entregue, não do código original. Prioridade combina
 risco, dependências e valor de validação.
 
+## Progresso em 2026-08-14
+
+- [x] API desacoplada da ingestão ZMQ;
+- [x] um ingestor/volume/rede Redis por realm;
+- [x] Regtest + Signet no Compose padrão;
+- [x] Mainnet pruned sob profile opcional;
+- [x] catálogo, health, leaderboard e WebSocket por realm;
+- [x] frontend com troca transacional de sessão e heartbeat;
+- [x] epoch, dedupe de TXID e descarte de backlog em bloco;
+- [x] barreira de epoch, reconciliação periódica e lease singleton por realm;
+- [ ] validação real do Compose/build/smoke — Docker não está instalado no host;
+- [ ] `rpcauth`/secrets por rede e binário Mainnet verificado;
+- [ ] HA com dois nós da mesma arena e replay durável.
+
 ## Fase 0 — Antes do primeiro push
 
 Prazo sugerido: imediato. Esforço: pequeno.
@@ -23,13 +37,14 @@ O segundo comando retorna vazio.
 
 ### R0.2 Executar validação Docker
 
-- o workflow de CI já contém build, subida, health e smoke de Redis;
+- o workflow de CI já contém build, health, transação ZMQ e bloco Regtest;
 - instalar/iniciar Docker;
 - reproduzir config, build, up e smoke localmente e confirmar a primeira CI;
 - testar health, WS, seis transações e hashblock;
 - registrar versão/digest das imagens validadas.
 
-Aceite: quatro serviços healthy e tutorial regtest concluído.
+Aceite: topologia Regtest isolada healthy, catálogo correto e tutorial Regtest
+concluído; config do profile Mainnet validada separadamente.
 
 ### R0.3 Definir licença e proprietário
 
@@ -69,19 +84,36 @@ sessões concorrentes mantêm saldo consistente.
 
 Prazo sugerido: 1–2 sprints. Esforço: grande.
 
-### R2.1 Extrair ingestor singleton
+### R2.1 Extrair ingestor singleton — concluído
 
-Serviço dedicado Bitcoin → stream. API pode então escalar horizontalmente sem
-duplicar ZMQ.
+`python -m app.ingestor` é executado uma vez por realm. A API não abre ZMQ/RPC.
 
-### R2.2 Sequência e reconciliação
+### R2.2 Sequência e reconciliação — parcial
 
-- consumir tópico sequence;
-- armazenar sequência por tópico;
+- [x] ler sequence do frame ZMQ e identificar a sessão;
+- [x] associar evento a epoch e descartar backlog anterior ao bloco;
+- [x] deduplicar TXID dentro da epoch;
+- [x] reconciliar `mempool_count` periodicamente com `getmempoolinfo.size`;
+- [ ] consumir a semântica completa do tópico `sequence`;
+- [ ] armazenar sequência por tópico;
 - detectar saltos;
-- reconciliar com getrawmempool/getmempoolinfo;
-- associar evento a epoch/altura;
-- descartar backlog anterior ao bloco.
+- reconciliar a lista/identidade completa com `getrawmempool` após saltos;
+
+### R2.4 Multi-rede Docker — concluído, pendente smoke real
+
+- Regtest e Signet sobem por padrão com datadirs independentes;
+- Mainnet e seu ingestor compartilham `profiles: [mainnet]`;
+- Mainnet usa pruning configurável e não bloqueia a API quando ausente/IBD;
+- RPC/ZMQ ficam em redes de controle exclusivas de cada par nó/ingestor;
+- leaderboard, canal, contador, estado e epoch são isolados por realm.
+
+### R2.5 Multi-node HA por realm — futuro
+
+- [x] impedir dois publicadores acidentais com lease Redis por realm;
+- registro de dois ou mais nós para o mesmo realm;
+- eleição/failover com `stream_id` e epoch canônica;
+- dedupe de TXID/hash entre origens e tratamento de reorg;
+- log durável para replay e `resync_required` em descontinuidade.
 
 ### R2.3 Separar ingestão de sampling
 
@@ -132,7 +164,7 @@ rotação testada.
 
 Prazo sugerido: contínuo. Esforço: médio.
 
-- ampliar o smoke Redis + health existente para transações regtest em CI;
+- [x] ampliar o smoke para transação Regtest, contador e mudança de epoch;
 - testes WebSocket e shutdown;
 - concorrência de score;
 - carga ZMQ/fila;
@@ -173,8 +205,10 @@ Prazo sugerido: oportunístico. Esforço: pequeno/médio.
 | R0.1 | rotação e higiene Git | P0 | P | nenhuma |
 | R0.2 | smoke Docker | P0 | P | Docker |
 | R1.2 | score autoritativo | P1 | G | R1.1 |
-| R2.1 | ingestor separado | P1 | G | desenho de eventos |
-| R2.2 | sequência/reconciliação | P1 | G | R2.1 |
+| R2.1 | ingestor separado | concluído | — | — |
+| R2.2 | sequência/reconciliação completa | P1 | G | R2.1 |
+| R2.4 | smoke real multi-rede/profile | P0 | M | Docker disponível |
+| R2.5 | HA multi-node por realm | P1 | G | R2.2 + stream durável |
 | R1.3 | rate limit/authz | P1 | M | R1.1 |
 | R3.1 | rpcauth/secrets | P1 | M | infraestrutura |
 | R4 | integração/E2E | P2 | M | stack estável |

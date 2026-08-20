@@ -5,21 +5,24 @@
 ~~~mermaid
 sequenceDiagram
     participant C as Docker Compose
-    participant B as Bitcoin Core
+    participant B as Cores por realm
+    participant I as Ingestores
     participant R as Redis
     participant A as FastAPI
     participant N as Nginx
-    C->>B: inicia e aguarda getblockchaininfo
+    C->>B: inicia Regtest + Signet (Mainnet é profile)
     C->>R: inicia AOF e aguarda PING
-    C->>A: inicia 1 worker
+    C->>I: inicia um processo por nó healthy
+    I->>B: valida chain, RPC e abre ZMQ
+    I->>R: lease + estado/heartbeat por realm
+    C->>A: inicia API independente dos nós
     A->>R: PING
-    A->>B: getmempoolinfo
-    A->>A: cria listener ZMQ + consumidor
+    A->>R: migra leaderboard legado para Regtest
     C->>N: inicia após healthcheck da API
 ~~~
 
-Falha em Bitcoin/Redis mantém dependentes aguardando. Falha posterior aciona a
-política restart unless-stopped.
+Falha de um Core mantém somente seu ingestor aguardando. API e outros realms
+continuam disponíveis. IBD produz `syncing/playable=false`, não health failure.
 
 ## 2. Transação Bitcoin → navegador
 
@@ -34,19 +37,23 @@ sequenceDiagram
     participant U as Browser
     B-->>Z: rawtx + bytes
     Z->>Q: transação hexadecimal
-    Q->>E: item com backpressure
+    Q->>E: item da fila limitada
     E->>E: double SHA-256 + endian reverse
     E->>B: getmempoolentry(txid)
     B-->>E: vsize + fees.base
     E->>E: BIP39 + sats/vB + flags
-    E->>R: INCR + PUBLISH game_events
+    E->>R: lock de epoch + dedupe + INCR + PUBLISH do realm
     R-->>W: transaction_received
     W-->>U: JSON
     U->>U: deduplica por palavra até 6
 ~~~
 
-Se RPC falhar, a palavra continua com vsize padrão 250 e taxa zero. A falha é
-registrada. A fila limita memória, mas o produtor aguarda quando ela enche.
+Depois do RPC, a epoch é validada novamente sob o mesmo lock usado por blocos;
+assim uma resposta antiga não pode ser publicada depois de `block_mined`. Se o
+RPC falhar, a palavra continua com vsize padrão 250 e taxa zero. A fila limita
+memória; quando cheia, rawtx é descartada/medida sem bloquear hashblock. O
+heartbeat reconcilia o contador com `getmempoolinfo`. Eventos em IBD não viram
+partidas.
 
 ## 3. Construção da rodada
 
@@ -97,13 +104,14 @@ Multiplicadores:
 ~~~mermaid
 sequenceDiagram
     participant B as Bitcoin Core
-    participant A as Backend
+    participant I as Ingestor do realm
     participant R as Redis
     participant U as Browser
-    B-->>A: hashblock
-    A->>B: getmempoolinfo
-    A->>R: SET mempool_count
-    A->>R: PUBLISH block_mined
+    B-->>I: hashblock + sequence
+    I->>I: avança epoch e drena backlog antigo
+    I->>B: getmempoolinfo
+    I->>R: SET contador/epoch do realm
+    I->>R: PUBLISH block_mined do realm
     R-->>U: evento via WebSocket
     alt partida ativa
       U->>U: para cronômetro e marca derrota
@@ -112,13 +120,15 @@ sequenceDiagram
     end
 ~~~
 
-O backend não limpa a fila já enfileirada; essa ponta solta está no roadmap.
+Um bloco só afeta stream, contador, epoch e rodada da mesma arena; o leaderboard
+não é alterado. Notices com epoch anterior são descartados.
 
 ## 6. Leaderboard
 
 ### Envio
 
-O navegador envia nickname e saldo fictício. Pydantic normaliza o nome, rejeita
+O navegador envia nickname e saldo fictício ao endpoint do realm ativo.
+Pydantic normaliza o nome, rejeita
 caracteres fora de letras/números/hífen/sublinhado e limita score. Redis ZADD GT
 mantém atomicamente apenas o maior valor.
 
@@ -139,8 +149,10 @@ pode enviar um score dentro do intervalo permitido.
 
 Nenhuma dessas ações chama uma carteira, LND ou protocolo Lightning.
 
-## 8. Desconexão
+## 8. Descoberta, troca e desconexão
 
-O browser para o cronômetro, bloqueia a partida e mostra estado de conexão
-perdida. Não existe reconexão automática ou replay de Pub/Sub. O usuário deve
-recarregar; reconexão com backoff e snapshot íntegro pertence ao roadmap.
+O browser consulta o catálogo, habilita apenas `playable=true` e espera um
+`game_start` coerente. Toda sessão tem uma geração: ao trocar realm ou perder o
+heartbeat, socket, fetches, intervals e timeouts da geração anterior são
+invalidados antes de limpar a UI. Um callback antigo não pode encerrar a nova
+rodada. Pub/Sub ainda não oferece replay; o usuário escolhe novamente a rede.

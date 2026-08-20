@@ -2,7 +2,8 @@
 
 ## 1. Preparar
 
-Instale Docker Desktop no Windows ou Docker Engine + Compose v2 no Linux.
+Instale Docker Desktop no Windows ou Docker Engine + Compose 2.33.1 ou superior
+no Linux.
 Confirme:
 
     docker --version
@@ -18,52 +19,59 @@ Bash:
 
     cp .env.example .env
 
-Edite .env e troque RPC_PASSWORD. Para o primeiro teste, mantenha:
+Edite `.env` e troque `REGTEST_RPC_PASSWORD`, `SIGNET_RPC_PASSWORD` e
+`MAINNET_RPC_PASSWORD`. Para o primeiro teste, mantenha:
 
-    BITCOIN_NETWORK=regtest
-    RPC_PORT=18443
+    DEFAULT_REALM_ID=regtest
 
 ## 2. Validar e iniciar
 
     docker compose config --quiet
+    docker compose --profile mainnet config --quiet
     docker compose up -d --build
     docker compose ps
 
 Espere todos os serviços ficarem healthy. Acompanhe:
 
-    docker compose logs -f bitcoind redis backend frontend
+    docker compose logs -f bitcoin-regtest bitcoin-signet ingestor-regtest ingestor-signet redis backend frontend
 
 ## 3. Abrir o jogo
 
-Acesse http://localhost:8010, informe um nickname de até 12 caracteres e
-conecte. Em regtest a mempool começa vazia, portanto gere atividade.
+Acesse http://localhost:8010, escolha Regtest, informe um nickname de até 12
+caracteres e conecte. Signet pode aparecer sincronizando; Mainnet fica
+desativada no catálogo até seu profile ser iniciado. Em Regtest a mempool começa
+vazia, portanto gere atividade.
+
+Em navegadores compatíveis, o botão **Instalar app** adiciona o PWA ao sistema.
+O modo offline abre somente o shell e informa que uma conexão é necessária; ele
+não reutiliza eventos, rankings nem respostas da API em cache.
 
 ## 4. Criar transações em regtest
 
 Crie uma carteira de laboratório:
 
-    docker compose exec bitcoind bitcoin-cli -regtest createwallet miner
+    docker compose exec bitcoin-regtest sh -lc 'bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" createwallet miner'
 
 Obtenha um endereço:
 
-    docker compose exec bitcoind bitcoin-cli -regtest -rpcwallet=miner getnewaddress
+    docker compose exec bitcoin-regtest sh -lc 'bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" -rpcwallet=miner getnewaddress'
 
 Copie o endereço retornado e amadureça saldo de teste:
 
-    docker compose exec bitcoind bitcoin-cli -regtest generatetoaddress 101 ENDERECO
+    docker compose exec bitcoin-regtest sh -lc 'bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" generatetoaddress 101 ENDERECO'
 
 Gere pelo menos seis transações. Para cada uma, crie outro endereço e envie uma
 quantidade fictícia:
 
-    docker compose exec bitcoind bitcoin-cli -regtest -rpcwallet=miner getnewaddress
-    docker compose exec bitcoind bitcoin-cli -regtest -rpcwallet=miner sendtoaddress ENDERECO 0.001
+    docker compose exec bitcoin-regtest sh -lc 'bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" -rpcwallet=miner getnewaddress'
+    docker compose exec bitcoin-regtest sh -lc 'bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" -rpcwallet=miner sendtoaddress ENDERECO 0.001'
 
 Repita até o browser receber seis palavras únicas. Colisões são possíveis porque
 cada TXID usa apenas a primeira palavra de uma frase BIP39.
 
 Se createwallet informar que a carteira já existe:
 
-    docker compose exec bitcoind bitcoin-cli -regtest loadwallet miner
+    docker compose exec bitcoin-regtest sh -lc 'bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" loadwallet miner'
 
 ## 5. Jogar
 
@@ -76,14 +84,24 @@ Se createwallet informar que a carteira já existe:
 
 Para simular um bloco real vencendo a rodada, gere um bloco enquanto joga:
 
-    docker compose exec bitcoind bitcoin-cli -regtest generatetoaddress 1 ENDERECO
+    docker compose exec bitcoin-regtest sh -lc 'bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" generatetoaddress 1 ENDERECO'
 
 ## 6. Inspecionar
 
-- ranking: http://localhost:8010/api/leaderboard
-- healthcheck: http://localhost:8010/api/health
-- Swagger: http://localhost:8010/backend-docs
-- API visual: http://localhost:8010/docs/api.html
+- catálogo: http://localhost:8010/api/v1/networks
+- ranking Regtest: http://localhost:8010/api/v1/networks/regtest/leaderboard
+- healthcheck: http://localhost:8010/api/v1/health/live
+
+Para abrir a documentação pública sem misturá-la à imagem do jogo:
+
+    docker compose --profile docs up -d --build docs
+
+- portal: http://localhost:8020/
+- API visual sanitizada: http://localhost:8020/api/
+- apresentação: http://localhost:8020/apresentacao/
+
+Swagger e OpenAPI bruto não são publicados pelos proxies e ficam desabilitados
+por padrão no backend.
 
 ## 7. Encerrar
 
@@ -91,10 +109,23 @@ Preservando volumes:
 
     docker compose down
 
-Remover volumes apaga blockchain regtest, carteira e ranking. Use somente se
-essa perda for intencional:
+Remover volumes apaga as três blockchains locais, carteira Regtest e ranking.
+Use somente se essa perda for intencional:
 
     docker compose down --volumes
+
+## Mainnet opcional
+
+Antes de habilitar, revise disco, RAM e banda. O nó é podado, mas ainda executa
+o IBD completo:
+
+    docker compose --profile mainnet up -d bitcoin-mainnet ingestor-mainnet
+    docker compose --profile mainnet logs -f bitcoin-mainnet ingestor-mainnet
+
+O jogo só habilita Mainnet quando `playable=true`. Para desligar sem afetar as
+outras redes:
+
+    docker compose --profile mainnet stop ingestor-mainnet bitcoin-mainnet
 
 ## O que é real e o que é simulado
 
