@@ -300,6 +300,7 @@
             transition: background 0.1s, color 0.1s, transform 0.05s;
         }
         .cell:hover { color: var(--text-main); background: #323a48; }
+        .cell.selected,
         .cell.sel {
             background: rgba(0, 240, 255, 0.25);
             border-color: var(--neon-cyan);
