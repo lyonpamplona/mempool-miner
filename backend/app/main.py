@@ -111,6 +111,7 @@ PUBLIC_EVENT_FIELDS = {
     "transaction_received": frozenset(
         {
             "word",
+            "txid",
             "tx_stub",
             "is_golden",
             "is_high_fee",
@@ -1797,23 +1798,42 @@ async def upgrade_skill(realm_id: str, username: str, data: SkillUpgradeRequest)
 # Quando um WebSocket conecta, recebe eventos da fila do relay.
 
 _event_relays: dict[str, "EventRelay"] = {}
+# Contador de conexões WebSocket ativas por realm — usado para liberar o
+# relay persistente quando o último cliente desconecta (evita vazamento).
+_relay_connections: dict[str, int] = {}
 
 
 class EventRelay:
     """Relay persistente que subscreve ao canal PubSub do Redis e distribui eventos
-    para múltiplas conexões WebSocket simultâneas.
+    para múltiplas conexões WebSocket simultâneas (fan-out/broadcast).
 
     O relay é criado quando o primeiro WebSocket conecta e encerrado quando
-    o último desconecta. Eventos são armazenados em uma fila interna com
-    limite de 1000 itens para evitar consumo excessivo de memória.
+    o último desconecta. Cada evento é replicado para TODOS os ws_senders
+    conectados (não round-robin).
+
+    Cada ws_sender tem sua própria fila interna; o listener coloca cada evento
+    em todas as filas. Limite de 1000 itens por fila para evitar consumo excessivo.
     """
 
     def __init__(self, realm_id: str) -> None:
         self.realm_id = realm_id
-        self.queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1000)
+        self._queues: list[asyncio.Queue[str]] = []
         self.pubsub = redis_client.pubsub()
         self._listen_task: asyncio.Task[None] | None = None
         self._subscribed = False
+
+    def add_queue(self) -> asyncio.Queue[str]:
+        """Adiciona uma nova fila para um ws_sender e retorna referência."""
+        q: asyncio.Queue[str] = asyncio.Queue(maxsize=1000)
+        self._queues.append(q)
+        logger.info("Relay %s: nova fila adicionada (total=%d)", self.realm_id, len(self._queues))
+        return q
+
+    def remove_queue(self, q: asyncio.Queue[str]) -> None:
+        """Remove uma fila quando um ws_sender desconecta."""
+        if q in self._queues:
+            self._queues.remove(q)
+            logger.info("Relay %s: fila removida (total=%d)", self.realm_id, len(self._queues))
 
     async def start(self) -> None:
         """Subscreve ao canal de eventos e inicia o listener."""
@@ -1829,19 +1849,24 @@ class EventRelay:
         logger.info("Relay persistente iniciado para %s", self.realm_id)
 
     async def _listen(self) -> None:
-        """Escuta o canal PubSub e armazena eventos na fila interna."""
+        """Escuta o canal PubSub e replica eventos para TODAS as filas."""
         while True:
             try:
                 message = await self.pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
                 if message and message["type"] == "message":
-                    try:
-                        self.queue.put_nowait(message["data"])
-                        logger.debug("Relay %s: evento recebido (fila=%d)", self.realm_id, self.queue.qsize())
-                    except asyncio.QueueFull:
-                        logger.warning(
-                            "Fila do relay cheia para %s; evento descartado",
-                            self.realm_id,
-                        )
+                    data = message["data"]
+                    broadcast_count = 0
+                    for queue in self._queues:
+                        try:
+                            queue.put_nowait(data)
+                            broadcast_count += 1
+                        except asyncio.QueueFull:
+                            logger.warning(
+                                "Fila cheia para %s; evento descartado (fila=%d)",
+                                self.realm_id, queue.qsize(),
+                            )
+                    if broadcast_count:
+                        logger.debug("Relay %s: evento replicado para %d filas", self.realm_id, broadcast_count)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -1897,38 +1922,43 @@ async def ws_sender(
         heartbeat_interval: Intervalo em segundos para enviar heartbeat.
     """
     logger.info("ws_sender iniciado para %s", realm_id)
-    last_activity = asyncio.get_event_loop().time()
-    while True:
-        try:
-            # Aguarda evento da fila do relay com timeout para heartbeat
+    queue = relay.add_queue()
+    try:
+        last_activity = asyncio.get_event_loop().time()
+        while True:
             try:
-                raw_event = await asyncio.wait_for(relay.queue.get(), timeout=heartbeat_interval)
-            except asyncio.TimeoutError:
-                # Heartbeat: se não houve atividade há mais que o intervalo,
-                # envia ping para manter a conexão viva.
-                logger.info("ws_sender heartbeat para %s", realm_id)
+                # Aguarda evento da fila do relay com timeout para heartbeat
                 try:
-                    await websocket.send_text(
-                        json.dumps({"action": "heartbeat"}, separators=(",", ":"))
-                    )
-                except RuntimeError:
-                    # WebSocket já fechado — encerra o sender.
-                    logger.info("ws_sender WebSocket fechado para %s", realm_id)
-                    return
-                last_activity = asyncio.get_event_loop().time()
-                continue
+                    raw_event = await asyncio.wait_for(queue.get(), timeout=heartbeat_interval)
+                except asyncio.TimeoutError:
+                    # Heartbeat: se não houve atividade há mais que o intervalo,
+                    # envia ping para manter a conexão viva.
+                    logger.info("ws_sender heartbeat para %s", realm_id)
+                    try:
+                        await websocket.send_text(
+                            json.dumps({"action": "heartbeat"}, separators=(",", ":"))
+                        )
+                    except RuntimeError:
+                        # WebSocket já fechado — encerra o sender.
+                        logger.info("ws_sender WebSocket fechado para %s", realm_id)
+                        return
+                    last_activity = asyncio.get_event_loop().time()
+                    continue
 
-            last_activity = asyncio.get_event_loop().time()
-            serialized = serialize_public_event(raw_event, realm_id)
-            if serialized is None:
-                logger.debug("Evento Redis fora do contrato público foi ignorado")
-                continue
-            logger.info("ws_sender enviando evento para %s: %s", realm_id, raw_event[:100] if isinstance(raw_event, str) else str(raw_event)[:100])
-            await websocket.send_text(serialized)
-        except RuntimeError:
-            # WebSocket já fechado — encerra o sender.
-            logger.info("ws_sender RuntimeError para %s", realm_id)
-            return
+                last_activity = asyncio.get_event_loop().time()
+                serialized = serialize_public_event(raw_event, realm_id)
+                if serialized is None:
+                    logger.debug("Evento Redis fora do contrato público foi ignorado")
+                    continue
+                logger.info("ws_sender enviando evento para %s: %s", realm_id, raw_event[:100] if isinstance(raw_event, str) else str(raw_event)[:100])
+                await websocket.send_text(serialized)
+            except RuntimeError:
+                # WebSocket já fechado — encerra o sender.
+                logger.info("ws_sender RuntimeError para %s", realm_id)
+                return
+    finally:
+        relay.remove_queue(queue)
+        logger.info("ws_sender encerrado para %s", realm_id)
 
 
 async def ws_receiver(websocket: WebSocket, realm_id: str) -> None:
@@ -1999,6 +2029,7 @@ async def serve_websocket(websocket: WebSocket, realm_id: str) -> None:
 
     # Fase 1: Obter relay persistente (subscrição PubSub compartilhada)
     relay = await get_relay(definition.realm_id)
+    _relay_connections[definition.realm_id] = _relay_connections.get(definition.realm_id, 0) + 1
 
     try:
         snapshot = await network_snapshot(definition.realm_id, include_runtime_epoch=True)
@@ -2046,6 +2077,14 @@ async def serve_websocket(websocket: WebSocket, realm_id: str) -> None:
         for task in (sender_task, receiver_task):
             if task and not task.done():
                 task.cancel()
+        # Libera o relay persistente quando o último cliente desconecta
+        remaining = _relay_connections.get(definition.realm_id, 0) - 1
+        if remaining <= 0:
+            _relay_connections.pop(definition.realm_id, None)
+            await release_relay(definition.realm_id)
+            logger.info("Relay liberado para %s (última conexão encerrada)", definition.realm_id)
+        else:
+            _relay_connections[definition.realm_id] = remaining
 
 
 

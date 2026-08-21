@@ -48,9 +48,21 @@ não reutiliza eventos, rankings nem respostas da API em cache.
 
 ## 4. Criar transações em regtest
 
-Crie uma carteira de laboratório:
+O entrypoint do regtest (`bitcoin/entrypoint.sh`) já executa automaticamente:
+cria a wallet `miner`, gera 150 blocos e envia 10 transações ao mempool. Na
+maioria dos casos a grade já começa a receber palavras assim que o jogo
+conecta.
+
+Se a mempool estiver vazia (ex.: o RPC não ficou pronto a tempo no cold
+start), execute manualmente:
+
+Crie (ou carregue) uma carteira de laboratório:
 
     docker compose exec bitcoin-regtest sh -lc 'bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" createwallet miner'
+
+Se a carteira já existir, carregue-a:
+
+    docker compose exec bitcoin-regtest sh -lc 'bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" loadwallet miner'
 
 Obtenha um endereço:
 
@@ -68,10 +80,6 @@ quantidade fictícia:
 
 Repita até o browser receber seis palavras únicas. Colisões são possíveis porque
 cada TXID usa apenas a primeira palavra de uma frase BIP39.
-
-Se createwallet informar que a carteira já existe:
-
-    docker compose exec bitcoin-regtest sh -lc 'bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" loadwallet miner'
 
 ## 5. Jogar
 

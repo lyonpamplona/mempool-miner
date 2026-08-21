@@ -284,6 +284,10 @@
             height: 100%;
             gap: var(--grid-gap, 3px);
             touch-action: none;
+            /* Centraliza a grade quando o conteúdo (size × cell-size) é menor
+               que o hull — evita grade colada no canto superior esquerdo */
+            justify-content: center;
+            align-content: center;
         }
 
         .cell {
@@ -2428,5 +2432,60 @@
 
     .tab-pane {
         font-size: 1.08rem;
+        padding: 12px;
     }
+
+    /* ==========================================================================
+       Utilitários — hidden (adicionado para corrigir boss-hud, banners, toasts)
+       ========================================================================== */
+    .hidden { display: none !important; }
+}
+
+/* ==========================================================================
+   Word Bank — classes portadas de style.css para pixel.css (escopo global)
+   ========================================================================== */
+.word-item {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 9px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    font-size: 11px;
+}
+.word-item.found {
+    border-color: transparent;
+    background: transparent;
+    opacity: 0.38;
+    text-decoration: line-through;
+}
+.word-text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+    font-weight: 600;
+}
+.word-fee {
+    flex: 0 0 auto;
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-size: 8px;
+    font-weight: 800;
+}
+.fee-high {
+    border: 1px solid var(--high-fee);
+    background: rgba(168, 85, 247, 0.15);
+    color: var(--high-fee);
+}
+.fee-low {
+    background: rgba(100, 116, 139, 0.15);
+    color: var(--text-muted);
+}
+.fee-golden {
+    border: 1px solid var(--golden-hash);
+    background: rgba(234, 179, 8, 0.15);
+    color: var(--golden-hash);
+    box-shadow: 0 0 10px rgba(234, 179, 8, 0.3);
 }

@@ -23,6 +23,7 @@ from app.blockchain import BitcoinZMQListener
 from app.config import NodeConfig
 from app.engine import GameEngine
 from app.events import BlockNotice, RawTransactionNotice, event_envelope, utc_now_iso
+from app.global_events import GlobalEventType, get_active_event
 from app.storage import (
     PREFIX,
     cards_set_key,
@@ -451,6 +452,18 @@ class NodeIngestor:
         if metadata is None:
             return
 
+        # Fase 8: aplica efeitos de evento global ativo (Fee Spike, Golden Rush,
+        # Mempool Flood, Lightning Storm). O status é lido do Redis (publicado
+        # pelo GlobalEventScheduler do backend). Falha silenciosa: sem evento
+        # ativo, os metadados seguem inalterados.
+        try:
+            active_status = await get_active_event(self.redis, self.config.realm_id)
+            if active_status:
+                active_event_type = GlobalEventType(active_status.get("event_type"))
+                metadata = GameEngine.apply_event_effects(metadata, active_event_type)
+        except (ValueError, KeyError, TypeError, redis.RedisError):
+            logger.debug("Evento global não aplicado para %s", txid, exc_info=True)
+
         # RPC fora do lock para não bloquear handle_block e outras transações.
         reconciled_count = await self.engine.get_mempool_size()
 
@@ -703,7 +716,7 @@ class NodeIngestor:
             "mempool_count": str(mempool_count),
             "discarded_backlog": str(discarded_backlog),
             "block_number": str(self.last_info.get("blocks", 0) or 0),
-            "is_halving": str(
+            "is_halving_block": str(
                 (self.last_info.get("blocks", 0) or 0) % 210000 == 0
             ),
             "timestamp": utc_now_iso(),

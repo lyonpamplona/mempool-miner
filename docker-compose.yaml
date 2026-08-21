@@ -51,6 +51,7 @@ services:
     <<: *bitcoin-node
     environment:
       BITCOIN_NETWORK: regtest
+    entrypoint: ["/bin/bash", "/entrypoint.sh"]
     command:
       - -conf=/etc/bitcoin/bitcoin.conf
       - -datadir=/home/bitcoin/.bitcoin
@@ -62,6 +63,7 @@ services:
       - -printtoconsole=1
     volumes:
       - ./bitcoin/bitcoin.conf:/etc/bitcoin/bitcoin.conf:ro
+      - ./bitcoin/entrypoint.sh:/entrypoint.sh:ro
       - bitcoin_data:/home/bitcoin/.bitcoin
     networks:
       - btc_regtest
@@ -167,8 +169,8 @@ services:
       RPC_PORT: "18443"
       ZMQ_HOST: bitcoin-regtest
       ZMQ_PORT: "28332"
-      RPC_USER: ${REGTEST_RPC_USER:-${RPC_USER:?RPC_USER não definido}}
-      RPC_PASSWORD: ${REGTEST_RPC_PASSWORD:-${RPC_PASSWORD:?RPC_PASSWORD não definido}}
+      RPC_USER: ${REGTEST_RPC_USER:-mempool_regtest}
+      RPC_PASSWORD: ${REGTEST_RPC_PASSWORD:-Nakamoto1}
       GAME_MODE: ${GAME_MODE:-mempool}
       HIGH_FEE_RATE_SAT_VB: ${HIGH_FEE_RATE_SAT_VB:-20}
       TX_QUEUE_MAX_SIZE: ${TX_QUEUE_MAX_SIZE:-5000}
@@ -199,8 +201,8 @@ services:
       RPC_PORT: "38332"
       ZMQ_HOST: bitcoin-signet
       ZMQ_PORT: "28332"
-      RPC_USER: ${SIGNET_RPC_USER:-${RPC_USER:?RPC_USER não definido}}
-      RPC_PASSWORD: ${SIGNET_RPC_PASSWORD:-${RPC_PASSWORD:?RPC_PASSWORD não definido}}
+      RPC_USER: ${SIGNET_RPC_USER:-mempool_signet}
+      RPC_PASSWORD: ${SIGNET_RPC_PASSWORD:-Nakamoto2}
       GAME_MODE: ${GAME_MODE:-mempool}
       HIGH_FEE_RATE_SAT_VB: ${HIGH_FEE_RATE_SAT_VB:-20}
       TX_QUEUE_MAX_SIZE: ${TX_QUEUE_MAX_SIZE:-20000}

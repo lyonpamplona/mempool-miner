@@ -255,6 +255,9 @@ pontos = (500 + comprimento × 50) × combo
 
 ## 6. Mecânicas in-game
 
+> **Referência completa:** todas as mecânicas, valores e abas estão em
+> [MECANICAS.md](MECANICAS.md). Esta seção é um resumo.
+
 ### Loja de upgrades
 
 A loja oferece 3 tipos de upgrades simulados:
@@ -297,6 +300,47 @@ Ao trocar de rede (Regtest → Signet → Mainnet):
 3. Todos os timeouts e intervals são cancelados
 4. Saldo e upgrades **não** atravessam realms
 5. Nova conexão é estabelecida com o realm selecionado
+
+### RBF / bloco órfão
+
+Quando um bloco real encerra a rodada com palavras não encontradas, o jogador
+pode ativar **RBF** para resgatar o bloco: custa 100.000 sats, dá +15 s e tem
+janela de decisão de 3 s.
+
+### Boss block
+
+A cada 50 blocos, uma rodada de boss: grade 15×15, 10 palavras, 45 s,
+multiplicador ×5 e loot de 50.000 sats. O HUD mostra a barra de HP; cada
+palavra encontrada reduz o HP.
+
+### Eventos globais
+
+O `GlobalEventScheduler` dispara eventos aleatórios com aviso de 120 s:
+
+| Evento | Duração | Efeito |
+|---|---|---|
+| `fee_spike` | 10 min | todas High Fee (3×) |
+| `golden_rush` | 5 min | golden 3× mais frequente (5×) |
+| `mempool_flood` | 10 min | 2×; grade 15×15; +15 s |
+| `lightning_storm` | 3 min | 10×; grade 8×8; tempo 20 s |
+
+### Conquistas, missões e progressão
+
+- **28 conquistas** em 5 categorias (volume, raridade, velocidade, exploração,
+  social) com bônus permanentes.
+- **Missões:** 3 diárias rotativas + 1 semanal, com recompensa em sats.
+- **Nível/XP/rank:** XP por palavra (`comprimento×10 + combo×5`), curva
+  `nível×100`, 10 ranks temáticos e bônus passivos (tempo e desconto de dica).
+- **Season pass:** 28 dias, 20 níveis free + 20 premium, 100 XP/nível.
+- **Staking:** trava sats por 1/6/24 h (+5%/+15%/+30%), penalidade 10%.
+- **Energia:** máx 10, recarga a cada 30 min, compra de 3 por 2.000 sats.
+- **Crates:** 5.000 sats (ou 1 grátis a cada 10 blocos); drops de power-ups,
+  skins e block cards.
+- **Sprint:** 4 palavras em 30 s, recompensa 0,5×, leaderboard próprio.
+- **Decoder:** mini-game de 30 s (txid → palavra BIP39).
+- **Skill tree:** ramos mining/search/lightning.
+- **Social:** chat por realm, amigos (bônus de cooperação) e mercado P2P de
+  power-ups.
 
 ---
 

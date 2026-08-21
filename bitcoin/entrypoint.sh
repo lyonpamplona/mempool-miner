@@ -1,81 +1,102 @@
 #!/bin/bash
-# Script de entrada para Bitcoin Core com credenciais dinâmicas
+# Script de entrada para Bitcoin Core regtest
+# Cria wallet, gera blocos e envia transações para o mempool
+#
+# IMPORTANTE: este script NUNCA deve encerrar o container. Se o RPC demorar
+# a ficar pronto (cold start), ele continua aguardando em loop — o bitcoind
+# é o processo principal (wait $BITCOIND_PID) e o container só sai quando o
+# bitcoind sai.
 
-# Gera o arquivo de configuração com as credenciais corretas
-cat > /etc/bitcoin/bitcoin.conf << EOF
-# Configuração comum. Prune, dbcache e mempool são definidos por serviço.
-txindex=0
-maxconnections=40
+RPC_USER="${REGTEST_RPC_USER:-mempool_regtest}"
+RPC_PASSWORD="${REGTEST_RPC_PASSWORD:-Nakamoto1}"
+RPC_PORT=18443
 
-server=1
-rpcallowip=0.0.0.0/0
+# Função: executa bitcoin-cli com credenciais
+# Usa o PATH (bitcoin-cli está em /opt/bitcoin-31.1/bin no container)
+rpc() {
+    bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" -rpcport="$RPC_PORT" "$@"
+}
 
-zmqpubhashblock=tcp://0.0.0.0:28332
-zmqpubrawtx=tcp://0.0.0.0:28332
-zmqpubsequence=tcp://0.0.0.0:28332
-
-[regtest]
-rpcport=18443
-rpcuser=${REGTEST_RPC_USER:-mempool_regtest}
-rpcpassword=${REGTEST_RPC_PASSWORD:-Nakamoto1}
-
-[signet]
-rpcport=38332
-rpcuser=${SIGNET_RPC_USER:-mempool_signet}
-rpcpassword=${SIGNET_RPC_PASSWORD:-Nakamoto2}
-
-[main]
-rpcport=8332
-rpcuser=${MAINNET_RPC_USER:-mempool_mainnet}
-rpcpassword=${MAINNET_RPC_PASSWORD:-Nakamoto3}
-EOF
-
-# Para regtest: cria e carrega wallet automaticamente
-if [ "$BITCOIN_NETWORK" = "regtest" ]; then
-    echo "[entrypoint] Iniciando Bitcoin Core regtest..."
-
-    # Inicia o bitcoind em background para preparar a wallet
-    /entrypoint.sh -conf=/etc/bitcoin/bitcoin.conf -datadir=/home/bitcoin/.bitcoin -chain=regtest -daemon "$@"
-
-    # Aguarda RPC ficar disponivel
+# Função: aguarda RPC ficar disponível (até 300s, sem crashar)
+wait_for_rpc() {
     echo "[entrypoint] Aguardando RPC regtest..."
-    for i in $(seq 1 60); do
-        if /usr/bin/bitcoin-cli -regtest -rpcuser=${REGTEST_RPC_USER:-mempool_regtest} -rpcpassword=${REGTEST_RPC_PASSWORD:-Nakamoto1} -rpcport=18443 getblockcount >/dev/null 2>&1; then
-            echo "[entrypoint] RPC regtest disponivel"
-            break
+    for i in $(seq 1 150); do
+        if rpc getblockcount >/dev/null 2>&1; then
+            echo "[entrypoint] RPC regtest disponível (tentativa $i)"
+            return 0
         fi
         sleep 2
     done
+    echo "[entrypoint] RPC ainda não disponível após 300s — continuando a aguardar em background"
+    return 1
+}
 
-    # Cria wallet se nao existir
-    if ! /usr/bin/bitcoin-cli -regtest -rpcuser=${REGTEST_RPC_USER:-mempool_regtest} -rpcpassword=${REGTEST_RPC_PASSWORD:-Nakamoto1} -rpcport=18443 loadwallet miner 2>/dev/null | grep -q '"name"'; then
-        /usr/bin/bitcoin-cli -regtest -rpcuser=${REGTEST_RPC_USER:-mempool_regtest} -rpcpassword=${REGTEST_RPC_PASSWORD:-Nakamoto1} -rpcport=18443 createwallet miner 2>/dev/null
+echo "[entrypoint] Iniciando Bitcoin Core regtest..."
+
+# Inicia o bitcoind em background
+bitcoind -conf=/etc/bitcoin/bitcoin.conf -datadir=/home/bitcoin/.bitcoin -chain=regtest "$@" &
+BITCOIND_PID=$!
+echo "[entrypoint] bitcoind iniciado (PID $BITCOIND_PID)"
+
+# Aguarda RPC ficar disponível (sem crashar se demorar)
+if wait_for_rpc; then
+    # Cria wallet se não existir
+    if ! rpc listwallets 2>/dev/null | grep -q '"miner"'; then
+        rpc createwallet miner 2>/dev/null
         echo "[entrypoint] Wallet 'miner' criada"
     else
-        echo "[entrypoint] Wallet 'miner' carregada"
+        echo "[entrypoint] Wallet 'miner' já existe"
     fi
 
-    # Verifica se precisa gerar blocos (menos de 150)
-    BLOCKS=$(/usr/bin/bitcoin-cli -regtest -rpcuser=${REGTEST_RPC_USER:-mempool_regtest} -rpcpassword=${REGTEST_RPC_PASSWORD:-Nakamoto1} -rpcport=18443 -rpcwallet=miner getblockcount 2>/dev/null)
-    if [ "$BLOCKS" -lt 150 ] 2>/dev/null; then
+    # Carrega a wallet (Bitcoin Core 31 não carrega automaticamente)
+    rpc loadwallet miner 2>/dev/null || true
+
+    # Verifica se precisa gerar blocos (mínimo 150)
+    BLOCKS=$(rpc -rpcwallet=miner getblockcount 2>/dev/null)
+    if [ -n "$BLOCKS" ] && [ "$BLOCKS" -lt 150 ] 2>/dev/null; then
         echo "[entrypoint] Gerando blocos (atual: $BLOCKS)..."
-        /usr/bin/bitcoin-cli -regtest -rpcuser=${REGTEST_RPC_USER:-mempool_regtest} -rpcpassword=${REGTEST_RPC_PASSWORD:-Nakamoto1} -rpcport=18443 -rpcwallet=miner -generate $((150 - BLOCKS)) >/dev/null 2>&1
+        rpc -rpcwallet=miner generatetoaddress $((150 - BLOCKS)) "$(rpc -rpcwallet=miner getnewaddress 2>/dev/null)" >/dev/null 2>&1
         echo "[entrypoint] Blocos gerados"
+    else
+        echo "[entrypoint] Blocos suficientes (atual: $BLOCKS)"
     fi
 
-    # Envia transacoes para o mempool
-    ADDR=$(/usr/bin/bitcoin-cli -regtest -rpcuser=${REGTEST_RPC_USER:-mempool_regtest} -rpcpassword=${REGTEST_RPC_PASSWORD:-Nakamoto1} -rpcport=18443 -rpcwallet=miner getnewaddress 2>/dev/null)
+    # Envia transações para o mempool
+    ADDR=$(rpc -rpcwallet=miner getnewaddress 2>/dev/null)
     if [ -n "$ADDR" ]; then
-        echo "[entrypoint] Enviando transacoes para o mempool..."
+        echo "[entrypoint] Enviando transações para o mempool..."
         for i in $(seq 1 10); do
-            /usr/bin/bitcoin-cli -regtest -rpcuser=${REGTEST_RPC_USER:-mempool_regtest} -rpcpassword=${REGTEST_RPC_PASSWORD:-Nakamoto1} -rpcport=18443 -rpcwallet=miner sendtoaddress "$ADDR" 0.001 "" "" false >/dev/null 2>&1
+            rpc -rpcwallet=miner sendtoaddress "$ADDR" 0.001 "" "" false >/dev/null 2>&1
         done
-        echo "[entrypoint] 10 transacoes enviadas"
+        echo "[entrypoint] 10 transações enviadas"
     fi
-
-    # Mantem o bitcoind rodando (ja esta em daemon)
-    wait
 else
-    # Executa o bitcoind normalmente para signet/mainnet
-    exec /entrypoint.sh -conf=/etc/bitcoin/bitcoin.conf -datadir=/home/bitcoin/.bitcoin -chain=$BITCOIN_NETWORK "$@"
+    # RPC não ficou pronto a tempo — tenta em background sem bloquear o container
+    echo "[entrypoint] Tenta configurar wallet/blocos em background..."
+    (
+        # Aguarda mais 5 min em background
+        for i in $(seq 1 150); do
+            if rpc getblockcount >/dev/null 2>&1; then
+                rpc listwallets 2>/dev/null | grep -q '"miner"' || rpc createwallet miner 2>/dev/null
+                rpc loadwallet miner 2>/dev/null || true
+                BLOCKS=$(rpc -rpcwallet=miner getblockcount 2>/dev/null)
+                if [ -n "$BLOCKS" ] && [ "$BLOCKS" -lt 150 ] 2>/dev/null; then
+                    rpc -rpcwallet=miner generatetoaddress $((150 - BLOCKS)) "$(rpc -rpcwallet=miner getnewaddress 2>/dev/null)" >/dev/null 2>&1
+                fi
+                ADDR=$(rpc -rpcwallet=miner getnewaddress 2>/dev/null)
+                if [ -n "$ADDR" ]; then
+                    for i in $(seq 1 10); do
+                        rpc -rpcwallet=miner sendtoaddress "$ADDR" 0.001 "" "" false >/dev/null 2>&1
+                    done
+                fi
+                echo "[entrypoint] Configuração concluída em background"
+                break
+            fi
+            sleep 2
+        done
+    ) &
 fi
+
+# Mantém o container vivo aguardando o bitcoind (child process)
+echo "[entrypoint] Aguardando bitcoind..."
+wait "$BITCOIND_PID"

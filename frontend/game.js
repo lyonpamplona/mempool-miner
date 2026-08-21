@@ -1059,7 +1059,7 @@ nextButtonEl.addEventListener('click', () => {
 document.getElementById('btn-change-network').addEventListener('click', () => {
     teardownSession('user-network-change');
     overlayEl.classList.remove('hidden');
-    const loaderText = overlayEl.querySelector('.loader-text');
+    const loaderText = overlayEl.querySelector('#tx-loading');
     if (loaderText) loaderText.innerText = 'Escolha uma rede para iniciar uma nova sessão.';
     setModalState(document.getElementById('auth-modal'), true);
     void loadNetworkCatalog();
@@ -1236,13 +1236,13 @@ async function startSession(realmIdOverride = null) {
             reconnectAttempt = 0;
             announceGameStatus('Conexão ao jogo perdida. Troque a rede para reconectar.');
             overlayEl.classList.remove('hidden');
-            const loaderText = overlayEl.querySelector('.loader-text');
+            const loaderText = overlayEl.querySelector('#tx-loading');
             if (loaderText) loaderText.innerText = "Conexão perdida. Use Trocar rede para reconectar.";
         } else {
             // Reconexão automática para quedas de rede/temporárias
             announceGameStatus('Conexão perdida. Tentando reconectar...');
             overlayEl.classList.remove('hidden');
-            const loaderText = overlayEl.querySelector('.loader-text');
+            const loaderText = overlayEl.querySelector('#tx-loading');
             if (loaderText) loaderText.innerText = "Reconectando...";
 
             const maxReconnectAttempts = 5;
@@ -1301,7 +1301,7 @@ async function startSession(realmIdOverride = null) {
             if (!sessionReady) {
                 teardownSession('network-not-playable');
                 overlayEl.classList.remove('hidden');
-                const loaderText = overlayEl.querySelector('.loader-text');
+                const loaderText = overlayEl.querySelector('#tx-loading');
                 if (loaderText) loaderText.innerText = describeNetwork(data);
                 setModalState(document.getElementById('auth-modal'), true);
                 catalogRetryTimeout = setTimeout(loadNetworkCatalog, 10000);
@@ -1334,7 +1334,7 @@ async function startSession(realmIdOverride = null) {
             if (data.playable === false) {
                 teardownSession('network-unavailable');
                 overlayEl.classList.remove('hidden');
-                const loaderText = overlayEl.querySelector('.loader-text');
+                const loaderText = overlayEl.querySelector('#tx-loading');
                 if (loaderText) loaderText.innerText = describeNetwork(data);
                 setModalState(document.getElementById('auth-modal'), true);
                 void loadNetworkCatalog();
@@ -1359,7 +1359,7 @@ async function startSession(realmIdOverride = null) {
             if (txBuffer.length < WORDS_PER_BLOCK) {
                 if (!txBuffer.find(t => t.word === data.word)) {
                     txBuffer.push({ word: data.word, isHighFee: data.is_high_fee, isGolden: data.is_golden, vsize: data.vsize, isMev: data.is_mev, multiplier: data.multiplier });
-                    const loadingText = document.getElementById('tx-loading');
+                    const loadingText = document.getElementById('tx-loading-bank');
                     if (loadingText) loadingText.innerText = `Aguardando transações (${txBuffer.length}/${WORDS_PER_BLOCK})...`;
                     if (txBuffer.length === WORDS_PER_BLOCK && !isTransitioning) {
                         cancelSessionTimeout(pendingBuildTimeout);
@@ -1377,7 +1377,7 @@ async function startSession(realmIdOverride = null) {
             cancelSessionTimeout(pendingBuildTimeout);
             pendingBuildTimeout = undefined;
             txBuffer = [];
-            const loadingText = document.getElementById('tx-loading');
+            const loadingText = document.getElementById('tx-loading-bank');
             if (loadingText) {
                 loadingText.innerText = `Aguardando transações (0/${WORDS_PER_BLOCK})...`;
             }
@@ -1519,7 +1519,7 @@ async function pollNetworkHealth(realmId, generation) {
         if (network.playable !== true) {
             teardownSession('heartbeat-expired');
             overlayEl.classList.remove('hidden');
-            const loaderText = overlayEl.querySelector('.loader-text');
+            const loaderText = overlayEl.querySelector('#tx-loading');
             if (loaderText) loaderText.innerText = describeNetwork(network);
             setModalState(document.getElementById('auth-modal'), true);
             void loadNetworkCatalog();
@@ -1848,7 +1848,7 @@ function prepareNextBlock() {
     isPlaying = false; txBuffer = []; wordsFoundInBlock = 0; currentRoundEarnings = 0; networkTimePassed = 0; netProgressEl.style.width = '0%';
     netProgressEl.setAttribute('aria-valuenow', '0');
     netProgressEl.setAttribute('aria-valuetext', 'Aguardando uma rodada');
-    bankEl.innerHTML = `<div class="loading-state" id="tx-loading">Aguardando transacoes (0/6)...</div>`;
+    bankEl.innerHTML = `<div class="loading-state" id="tx-loading-bank">Aguardando transacoes (0/6)...</div>`;
     overlayEl.classList.remove('hidden'); updateStoreUI();
     consecutiveErrors = 0; /* Fase 1: reseta erros entre rodadas */
     announceGameStatus('Aguardando seis transacoes da rede ativa.');
@@ -1915,7 +1915,7 @@ function buildPlayableBlock(buildAttempt = 0) {
         }
         isPlaying = false;
         overlayEl.classList.remove('hidden');
-        const loaderText = overlayEl.querySelector('.loader-text');
+        const loaderText = overlayEl.querySelector('#tx-loading');
         if (loaderText) loaderText.innerText = "Falha ao montar a grade. Aguarde o próximo conjunto.";
         return;
     }
@@ -2945,7 +2945,7 @@ function handleBossBlock(data, generation) {
     window._bossWordsRequired = bossWordsRequired;
 
     // Atualiza o loading text para refletir o boss
-    const loadingText = document.getElementById('tx-loading');
+    const loadingText = document.getElementById('tx-loading-bank');
     if (loadingText) {
         loadingText.innerText = `Aguardando transações do boss (0/${bossWordsRequired})...`;
     }
@@ -3002,7 +3002,7 @@ function handleBossTransaction(data) {
         isBoss: true, // flag especial para palavras do boss
     });
 
-    const loadingText = document.getElementById('tx-loading');
+    const loadingText = document.getElementById('tx-loading-bank');
     if (loadingText) {
         loadingText.innerText = `Aguardando transações do boss (${txBuffer.length}/${bossWordsRequired})...`;
     }
@@ -3094,7 +3094,7 @@ function buildBossPlayableBlock() {
         if (!retryPlaced) {
             isPlaying = false;
             overlayEl.classList.remove('hidden');
-            const loaderText = overlayEl.querySelector('.loader-text');
+            const loaderText = overlayEl.querySelector('#tx-loading');
             if (loaderText) loaderText.innerText = "Falha ao montar a grade do boss. Aguarde o próximo conjunto.";
             return;
         }

@@ -3,6 +3,66 @@
 Este arquivo segue o formato Keep a Changelog. O projeto ainda não definiu uma
 política formal de versionamento.
 
+## 2026-08-20 — Correções de pipeline BIP39, fan-out e infraestrutura
+
+### Adicionado
+
+- `EventRelay` persistente com fan-out: cada evento PubSub é replicado para
+  TODAS as filas de clientes WebSocket conectados (antes, um único cliente
+  recebia cada evento);
+- contador de conexões por realm (`_relay_connections`) para liberar o relay
+  quando o último cliente desconecta;
+- `txid` completo no payload público de `transaction_received`;
+- aplicação de eventos globais (`apply_event_effects`) no ingestor —
+  `fee_spike` (todas High Fee, 3×), `golden_rush` (golden 3× mais frequente,
+  5×), `mempool_flood` (2×, grade 15×15) e `lightning_storm` (10×, grade 8×8)
+  agora afetam as transações publicadas;
+- `is_mev` calculado uma única vez em `get_tx_metadata` e reutilizado no
+  `multiplier` (critério unificado: `int(txid[:8], 16) % 100 < 15`);
+- `scripts/test_bip39_pipeline.py` — teste de ponta a ponta do pipeline
+  (TX regtest → ZMQ → ingestor → Redis → WebSocket);
+- entrypoint robusto do regtest (`bitcoin/entrypoint.sh`): aguarda o RPC com
+  retry de 300 s, cria a wallet `miner`, gera 150 blocos e envia 10
+  transações ao mempool; nunca encerra o container em falha.
+
+### Corrigido
+
+- fan-out do relay: antes da correção, o `ws_sender` consumia o evento de uma
+  única fila (round-robin), então com 2+ clientes cada um recebia apenas uma
+  fração dos eventos;
+- vazamento de relays: `release_relay()` nunca era chamado; agora o relay é
+  encerrado e removido quando o contador de conexões do realm chega a zero;
+- `is_halving` → `is_halving_block` no card data do ingestor (campo não
+  existia, quebrando o script Lua de reconciliação);
+- credenciais RPC dos ingestores: os defaults `${RPC_USER:?...}` exigiam
+  variáveis globais que não existem no `.env`; agora cada ingestor usa
+  `REGTEST_RPC_USER`/`SIGNET_RPC_USER` com fallback para as credenciais
+  declaradas no `bitcoin.conf` (`mempool_regtest`/`mempool_signet`);
+- entrypoint do regtest: usava `/usr/bin/bitcoin-cli` (caminho inexistente na
+  imagem; o binário está em `/opt/bitcoin-31.1/bin`); agora usa o `PATH`;
+- entrypoint do regtest: `exit 1` quando o RPC demorava a subir no cold start
+  causava loop de recriação do container; agora o script loga o erro e o
+  bitcoind segue rodando;
+- frontend: selector `.loader-text` inexistente no DOM (mensagens de falha da
+  grade nunca apareciam) → `#tx-loading`;
+- frontend: ID duplicado `#tx-loading` (o word bank criava um segundo
+  elemento com o mesmo ID) → `#tx-loading-bank`;
+- frontend: classes do word bank (`.word-item`, `.word-text`, `.word-fee`,
+  `.fee-low/high/golden`) estavam presas em `@media (min-width: 1200px)` →
+  movidas para o escopo global;
+- frontend: `.hidden` ausente do `pixel.css` (boss-hud, banners e toasts não
+  escondiam) → classe utilitária adicionada;
+- frontend: `.word-grid` sem centralização → `justify-content: center` +
+  `align-content: center`;
+- `docker-compose.yaml`: `entrypoint.sh` não era montado no regtest → volume
+  `./bitcoin/entrypoint.sh:/entrypoint.sh:ro` + `command: ["/entrypoint.sh"]`.
+
+### Removido
+
+- `frontend/style.css` (105 KB): arquivo morto, não referenciado por
+  `index.html`, `game.js` nem `nginx.conf`; o tema ativo é `pixel.css`.
+  Removido também do `COPY` do `frontend/Dockerfile`.
+
 ## 2026-08-16 — Correções de estabilidade e UX
 
 ### Adicionado

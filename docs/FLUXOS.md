@@ -42,8 +42,9 @@ sequenceDiagram
     E->>B: getmempoolentry(txid)
     B-->>E: vsize + fees.base
     E->>E: BIP39 + sats/vB + flags
+    E->>E: aplica evento global ativo (multiplier)
     E->>R: lock de epoch + dedupe + INCR + PUBLISH do realm
-    R-->>W: transaction_received
+    R-->>W: transaction_received (fan-out para todos os clientes)
     W-->>U: JSON
     U->>U: deduplica por palavra até 6
 ~~~
@@ -54,6 +55,9 @@ RPC falhar, a palavra continua com vsize padrão 250 e taxa zero. A fila limita
 memória; quando cheia, rawtx é descartada/medida sem bloquear hashblock. O
 heartbeat reconcilia o contador com `getmempoolinfo`. Eventos em IBD não viram
 partidas.
+
+O `EventRelay` do realm replica cada evento para todas as filas de clientes
+conectados; o relay é liberado quando o último cliente desconecta.
 
 ## 3. Construção da rodada
 
@@ -115,6 +119,7 @@ sequenceDiagram
     R-->>U: evento via WebSocket
     alt partida ativa
       U->>U: para cronômetro e marca derrota
+      U->>U: oferece RBF (100.000 sats → +15 s, janela 3 s)
     else coleta
       U->>U: descarta buffer antigo e reinicia coleta
     end
@@ -122,6 +127,58 @@ sequenceDiagram
 
 Um bloco só afeta stream, contador, epoch e rodada da mesma arena; o leaderboard
 não é alterado. Notices com epoch anterior são descartados.
+
+### RBF (resgate de bloco órfão)
+
+Se a rodada termina por bloco com palavras não encontradas, o browser oferece
+o RBF: pagar 100.000 sats (`RBF_PRICE`) dá +15 s (`RBF_TIME_BONUS`) para
+continuar. A decisão tem janela de 3 s; saldo insuficiente ou expiração marca
+derrota. O uso de RBF alimenta a estatística `rbf_used` (missões/conquistas).
+
+## 5.1 Boss block
+
+A cada 50 blocos, o script Lua de reconciliação publica `boss_block`:
+
+~~~mermaid
+sequenceDiagram
+    participant R as Redis (Lua)
+    participant U as Browser
+    R-->>U: boss_block (hp=10, grade 15×15, 10 palavras, 45 s, ×5, loot 50k)
+    U->>U: monta grade de boss e mostra boss-hud
+    loop cada palavra encontrada
+      U->>U: reduz boss_hp
+    end
+    alt boss_hp = 0
+      U->>U: vitória + loot (50.000 sats)
+    else timeout
+      U->>U: derrota (modal boss-defeat)
+    end
+~~~
+
+## 5.2 Eventos globais
+
+~~~mermaid
+sequenceDiagram
+    participant S as GlobalEventScheduler
+    participant R as Redis
+    participant I as Ingestor
+    participant U as Browser
+    S->>R: PUBLISH event_preannounce (120 s antes)
+    R-->>U: banner de aviso
+    S->>R: PUBLISH event_started
+    R-->>U: banner ativo (contagem regressiva)
+    Note over I: apply_event_effects no multiplier
+    I->>R: PUBLISH transaction_received (multiplier ajustado)
+    S->>R: PUBLISH event_ended
+    R-->>U: encerra banner
+~~~
+
+| Evento | Duração | Efeito no multiplier/grade |
+|---|---|---|
+| `fee_spike` | 10 min | todas High Fee (3×; Golden+HighFee 15×) |
+| `golden_rush` | 5 min | golden 3× mais frequente (5×) |
+| `mempool_flood` | 10 min | 2×; grade 15×15; +15 s |
+| `lightning_storm` | 3 min | 10×; grade 8×8; tempo 20 s |
 
 ## 6. Leaderboard
 

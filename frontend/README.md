@@ -11,7 +11,7 @@ WebSocket. Documentação e apresentação usam outra imagem/profile.
 | Arquivo | Papel |
 |---|---|
 | index.html | Semântica da interface, painéis e modais |
-| style.css | Tema mobile-first, áreas seguras, grade, animações e breakpoints progressivos |
+| pixel.css | Tema pixel-art 8-bit (mobile-first), grade, word bank, animações e breakpoints progressivos |
 | game.js | Catálogo multi-rede, lifecycle da sessão, PWA, partida e entrada pointer/teclado |
 | manifest.webmanifest | identidade, escopo e instalação do PWA |
 | service-worker.js | cache exclusivo do shell e ciclo de atualização |

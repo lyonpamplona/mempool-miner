@@ -23,8 +23,15 @@ Causas frequentes:
 
 ## “Aguardando transações” não termina
 
-Em regtest nada acontece sozinho. Siga [TUTORIAL.md](TUTORIAL.md) para criar
-carteira, minerar 101 blocos e enviar transações.
+Em regtest o entrypoint (`bitcoin/entrypoint.sh`) já cria a wallet `miner`,
+gera 150 blocos e envia 10 transações ao mempool automaticamente. Se a mempool
+estiver vazia, verifique os logs do entrypoint:
+
+    docker compose logs --tail 50 bitcoin-regtest | grep entrypoint
+
+Se o RPC não ficou pronto a tempo (cold start), o script loga o erro mas o
+bitcoind segue rodando — execute manualmente os passos do
+[TUTORIAL.md](TUTORIAL.md) (loadwallet, generatetoaddress, sendtoaddress).
 
 Outras causas:
 
@@ -59,7 +66,7 @@ números, hífen e sublinhado e têm até 12 caracteres.
 
 ## Grade cortada
 
-Recarregue após redimensionar e confirme que style.css/game.js não estão em
+Recarregue após redimensionar e confirme que pixel.css/game.js não estão em
 cache. O código calcula célula por viewport. Em telas muito estreitas o layout
 se torna vertical e a página permite rolagem.
 

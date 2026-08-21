@@ -194,19 +194,19 @@ class GameEngine:
                 logger.debug("TX %s não encontrada (sem mempoolentry e sem hex)", txid[:8])
                 return None
 
+        # MEV: critério unificado — ~15% de chance baseado nos primeiros 8 hex chars do txid
+        is_mev = int(txid[:8], 16) % 100 < 15
+
         return {
             "word": self.tx_to_word(txid),
             "is_golden": is_golden,
             "is_high_fee": is_high_fee,
             "vsize": vsize,
             "fee_rate_sat_vb": round(fee_rate_sat_vb, 2),
-            # Fase 6: MEV Secreto — ~10% de chance de ser palavra oculta
-            "is_mev": int(txid[:8], 16) % 100 < 15,
-            # Fase 2: Dynamic Block Size — sinal para expandir matriz
+            "is_mev": is_mev,
             "expand_grid": vsize > 1000,
-            # Fase 3: Recompensa calculada no backend
             "base_reward": 500,
-            "multiplier": self._calculate_multiplier(is_golden, is_high_fee, int(txid[:8], 16) % 100 < 15),
+            "multiplier": self._calculate_multiplier(is_golden, is_high_fee, is_mev),
         }
 
     @staticmethod

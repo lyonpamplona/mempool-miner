@@ -73,6 +73,10 @@ Bash:
 
 ## Bitcoin regtest
 
+O entrypoint (`bitcoin/entrypoint.sh`) já cria a wallet `miner`, gera 150
+blocos e envia 10 transações ao mempool automaticamente. Os comandos abaixo
+servem para inspeção e para recriar a atividade manualmente:
+
     docker compose exec bitcoin-regtest sh -lc 'bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" createwallet miner'
     docker compose exec bitcoin-regtest sh -lc 'bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" -rpcwallet=miner getnewaddress'
     docker compose exec bitcoin-regtest sh -lc 'bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" generatetoaddress 101 ENDERECO'

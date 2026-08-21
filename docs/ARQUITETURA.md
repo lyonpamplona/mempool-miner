@@ -66,6 +66,10 @@ GameEngine:
 3. calcula taxa efetiva em satoshis por vbyte;
 4. classifica raridade e tamanho.
 
+O ingestor aplica os efeitos de eventos globais ativos (`fee_spike`,
+`golden_rush`, `mempool_flood`, `lightning_storm`) antes de publicar a
+transação: o `multiplier` do evento já reflete o bônus do evento em curso.
+
 A taxa de consumo é configurável por ingestor. A epoch muda em cada bloco e o
 backlog antigo é descartado. Uma barreira serializa TX, reconciliação e bloco;
 scripts Redis só confirmam a mutação se a lease ainda pertencer à instância.
@@ -89,6 +93,14 @@ FastAPI publica catálogo/health/leaderboard por realm e o WebSocket
 `/ws/v1/game/{realm_id}`. Ele não conhece credenciais RPC nem abre ZMQ. Cada
 cliente recebe `game_start` e somente o canal do realm escolhido. Os aliases
 `/api/leaderboard` e `/ws/game` apontam temporariamente para Regtest.
+
+Cada realm mantém um `EventRelay` persistente: uma única assinatura PubSub no
+Redis que distribui cada evento para **todas** as filas de clientes WebSocket
+conectados (fan-out/broadcast). O relay é criado quando o primeiro cliente
+conecta e encerrado quando o último desconecta (contador de conexões por
+realm). Antes da correção de 20/08/2026, o `ws_sender` consumia o evento de
+uma única fila (round-robin), então com dois ou mais clientes cada um
+recebia apenas uma fração dos eventos.
 
 ### Apresentação e publicação
 

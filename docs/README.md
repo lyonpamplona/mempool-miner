@@ -18,7 +18,7 @@ Swagger nem OpenAPI bruto. Relatórios de trabalho locais devem usar
   [TUTORIAL.md](TUTORIAL.md) → [COMANDOS.md](COMANDOS.md).
 - Quero desenvolver: [ARQUITETURA.md](ARQUITETURA.md) →
   [MULTI_REDE.md](MULTI_REDE.md) → [FLUXOS.md](FLUXOS.md) →
-  [MODULOS.md](MODULOS.md) → [API.md](API.md).
+  [MECANICAS.md](MECANICAS.md) → [MODULOS.md](MODULOS.md) → [API.md](API.md).
 - Quero corrigir riscos: [SEGURANCA.md](SEGURANCA.md) →
   [AUDITORIA.md](AUDITORIA.md) → [ROADMAP.md](ROADMAP.md).
 - Estou com erro: [TROUBLESHOOTING.md](TROUBLESHOOTING.md).

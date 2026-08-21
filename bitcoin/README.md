@@ -6,6 +6,24 @@ O nó fornece a fonte de eventos do jogo. O arquivo bitcoin.conf contém apenas
 parâmetros não secretos; usuário e senha RPC vêm do arquivo .env no momento em
 que o Compose inicia o contêiner.
 
+## Entrypoint do regtest
+
+O serviço `bitcoin-regtest` monta `bitcoin/entrypoint.sh` em `/entrypoint.sh`
+(somente leitura) e o executa como comando do container. O script:
+
+1. aguarda o RPC ficar disponível (retry de até 300 s, 2 s entre tentativas);
+2. cria a wallet `miner` (ou carrega se já existir);
+3. gera 150 blocos com `generatetoaddress`;
+4. envia 10 transações ao mempool para alimentar o jogo.
+
+Se qualquer etapa falhar (ex.: RPC lento no cold start), o script loga o erro
+e **não** encerra o container — o bitcoind segue rodando e o healthcheck
+continua válido. Nesse caso, execute os passos manualmente conforme
+[TUTORIAL.md](../docs/TUTORIAL.md).
+
+O script usa `bitcoin-cli` do `PATH` (na imagem `bitcoin/bitcoin:31.1` o
+binário está em `/opt/bitcoin-31.1/bin`, não em `/usr/bin`).
+
 ## Tópicos configurados
 
 | Tópico | Corpo | Uso |

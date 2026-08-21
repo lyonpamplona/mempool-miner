@@ -91,6 +91,7 @@ armazenados no cache offline.
 | [Arquitetura](docs/ARQUITETURA.md) | Camadas, decisões, limites e implantação |
 | [Multi-rede](docs/MULTI_REDE.md) | Relatório Regtest/Signet/Mainnet, migração e aceite |
 | [Fluxos](docs/FLUXOS.md) | Inicialização, transação, bloco, jogo e ranking |
+| [Mecânicas](docs/MECANICAS.md) | Todas as mecânicas por aba: boss, eventos globais, RBF, conquistas, missões, season, staking, energia, crates, sprint, decoder, skill tree, social |
 | [Módulos](docs/MODULOS.md) | Arquivos, classes, funções e responsabilidades |
 | [API](docs/API.md) | REST, WebSocket, esquemas e erros |
 | [Configuração](docs/CONFIGURACAO.md) | Ambiente, redes e parâmetros |
@@ -104,24 +105,25 @@ armazenados no cache offline.
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Diagnóstico dos erros mais comuns |
 | [Apresentação](guia-apresentacao.html) | Página visual completa do projeto |
 
-## Mudanças recentes (16/08/2026)
+## Mudanças recentes (20/08/2026)
 
-Quatro fases de correção foram aplicadas em agosto de 2026:
+Quatro fases de correção foram aplicadas em 20/08/2026 após auditoria completa
+(backend, frontend e infraestrutura):
 
-- **Persistência de sessão** — `saveSessionState`/`loadSessionState`/`clearSessionState`
-  com `sessionStorage`; `startSession()` aceita `realmIdOverride` para reconexão
-  automática; estado salvo em 9 pontos críticos (saldo, hardware, lightning, RBF,
-  resultado); sessão restaurada ao recarregar a página (F5).
-- **Responsividade** — font-size adaptativo com `clamp(12px, 2.5vw, 14px)`;
-  z-index do `.floating-text` corrigido para 170; `.grid-wrapper` com
-  `min-height: min(480px, 80vh)`; `.modal-content` considera `safe-area-inset`;
-  main-layout em 2 colunas para gap 560–760px.
-- **Estabilidade do ingestor** — retry RPC com backoff exponencial; buffer
-  aumentado para 50 000 transações.
-- **Sincronização de epoch** — verificação de epoch no frontend com reconexão
-  automática quando o backend avança de epoch.
-- **Loop RBF** — `btn.onclick = null` adicionado em ambos os fluxos para
-  impedir re-disparo infinito do botão de RBF.
+- **Fan-out do relay** — `EventRelay` persistente replica cada evento PubSub
+  para todos os clientes WebSocket conectados (antes, um único cliente
+  recebia cada evento); o relay é liberado quando o último cliente
+  desconecta.
+- **Pipeline BIP39** — `txid` completo no payload público; eventos globais
+  (`fee_spike`, `golden_rush`, `mempool_flood`, `lightning_storm`) aplicados
+  no ingestor; `is_mev` unificado em `get_tx_metadata`.
+- **Frontend** — seletores corrigidos (`.loader-text` → `#tx-loading`), ID
+  duplicado resolvido, classes do word bank movidas para o escopo global,
+  `.hidden` adicionada, grade centralizada; `style.css` morto removido.
+- **Infraestrutura** — entrypoint do regtest robusto (caminho correto do
+  `bitcoin-cli`, sem crash no cold start, wallet + 150 blocos + 10 TXs
+  automáticas); credenciais RPC dos ingestores alinhadas com o
+  `bitcoin.conf`.
 
 Leia [CHANGELOG.md](CHANGELOG.md) para o histórico completo.
 
