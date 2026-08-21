@@ -5,7 +5,7 @@
       "h": 900
     },
     "wordGrid": {
-      "x": 270,
+      "x": 264,
       "y": 233,
       "w": 506,
       "h": 506,
@@ -16,7 +16,7 @@
       "visibility": "visible"
     },
     "gridHull": {
-      "x": 262,
+      "x": 256,
       "y": 225,
       "w": 522,
       "h": 522,
@@ -27,11 +27,11 @@
       "visibility": "visible"
     },
     "bossHud": {
-      "x": 264,
-      "y": 227,
-      "w": 518,
-      "h": 76,
-      "display": "flex",
+      "x": 0,
+      "y": 0,
+      "w": 0,
+      "h": 0,
+      "display": "none",
       "position": "absolute",
       "zIndex": "25",
       "overflow": "visible",
@@ -74,8 +74,8 @@
     "cellCount": 144,
     "cellSize": "38px",
     "hiddenExample": "none",
-    "varHighFee": "UNDEFINED",
-    "varGoldenHash": "UNDEFINED",
+    "varHighFee": "#f7931a",
+    "varGoldenHash": "#ffcc00",
     "varCellSize": "UNDEFINED"
   },
   "1024x768": {
@@ -84,7 +84,7 @@
       "h": 768
     },
     "wordGrid": {
-      "x": 169,
+      "x": 163,
       "y": 226,
       "w": 368,
       "h": 368,
@@ -95,7 +95,7 @@
       "visibility": "visible"
     },
     "gridHull": {
-      "x": 161,
+      "x": 155,
       "y": 218,
       "w": 384,
       "h": 384,
@@ -106,11 +106,11 @@
       "visibility": "visible"
     },
     "bossHud": {
-      "x": 163,
-      "y": 220,
-      "w": 380,
-      "h": 76,
-      "display": "flex",
+      "x": 0,
+      "y": 0,
+      "w": 0,
+      "h": 0,
+      "display": "none",
       "position": "absolute",
       "zIndex": "25",
       "overflow": "visible",
@@ -151,10 +151,10 @@
       "visibility": "visible"
     },
     "cellCount": 144,
-    "cellSize": "26px",
+    "cellSize": "27px",
     "hiddenExample": "none",
-    "varHighFee": "UNDEFINED",
-    "varGoldenHash": "UNDEFINED",
+    "varHighFee": "#f7931a",
+    "varGoldenHash": "#ffcc00",
     "varCellSize": "UNDEFINED"
   },
   "1920x1080": {
@@ -230,10 +230,10 @@
       "visibility": "visible"
     },
     "cellCount": 144,
-    "cellSize": "38px",
+    "cellSize": "58px",
     "hiddenExample": "none",
-    "varHighFee": "UNDEFINED",
-    "varGoldenHash": "UNDEFINED",
+    "varHighFee": "#f7931a",
+    "varGoldenHash": "#ffcc00",
     "varCellSize": "UNDEFINED"
   },
   "768x1024": {
@@ -242,7 +242,7 @@
       "h": 1024
     },
     "wordGrid": {
-      "x": 78,
+      "x": 72,
       "y": 195,
       "w": 624,
       "h": 624,
@@ -253,7 +253,7 @@
       "visibility": "visible"
     },
     "gridHull": {
-      "x": 70,
+      "x": 64,
       "y": 187,
       "w": 640,
       "h": 640,
@@ -264,11 +264,11 @@
       "visibility": "visible"
     },
     "bossHud": {
-      "x": 72,
-      "y": 189,
-      "w": 636,
-      "h": 76,
-      "display": "flex",
+      "x": 0,
+      "y": 0,
+      "w": 0,
+      "h": 0,
+      "display": "none",
       "position": "absolute",
       "zIndex": "25",
       "overflow": "visible",
@@ -276,9 +276,9 @@
     },
     "bossHudClasses": "boss-hud hidden",
     "txList": {
-      "x": 34,
+      "x": 22,
       "y": 1052,
-      "w": 712,
+      "w": 724,
       "h": 0,
       "display": "flex",
       "position": "static",
@@ -287,9 +287,9 @@
       "visibility": "visible"
     },
     "tabJogo": {
-      "x": 34,
+      "x": 22,
       "y": 1034,
-      "w": 712,
+      "w": 724,
       "h": 320,
       "display": "flex",
       "position": "static",
@@ -298,9 +298,9 @@
       "visibility": "visible"
     },
     "sidebar": {
-      "x": 22,
+      "x": 10,
       "y": 906,
-      "w": 736,
+      "w": 748,
       "h": 460,
       "display": "flex",
       "position": "relative",
@@ -309,10 +309,10 @@
       "visibility": "visible"
     },
     "cellCount": 144,
-    "cellSize": "38px",
+    "cellSize": "48px",
     "hiddenExample": "none",
-    "varHighFee": "UNDEFINED",
-    "varGoldenHash": "UNDEFINED",
+    "varHighFee": "#f7931a",
+    "varGoldenHash": "#ffcc00",
     "varCellSize": "UNDEFINED"
   }
 }

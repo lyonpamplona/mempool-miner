@@ -320,6 +320,13 @@ let pendingBuildTimeout;
 let lastFoundTime = 0;
 let comboMultiplier = 1;
 
+/* Power-ups: efeitos ativos na rodada (time_freeze em segundos restantes; demais = ativo na rodada) */
+let powerupEffects = { time_freeze: 0, scanner: false, double_combo: false, magnet: false, precision: false };
+/* Power-ups ativados entre rodadas: aplicados no início da próxima rodada */
+let pendingPowerups = new Set();
+/* Inventário pessoal de power-ups (carregado de powerups/{username}) */
+let powerupsInventoryData = null;
+
 /* Variaveis de estado para modulos */
 let chatHistoryLoaded = false;
 let marketLoaded = false;
@@ -357,8 +364,124 @@ let nextButtonAction = null;
 /**
  * Notificacao visual para o usuario (toast inline no game-status).
  */
-function loadPowerupsInventory() {
-    return loadMarketInventory();
+// Carrega o inventário PESSOAL de power-ups (não o mercado)
+async function loadPowerupsInventory() {
+    try {
+        const response = await fetch(activeNetworkApiUrl(`powerups/${encodeURIComponent(minerName)}`), {
+            headers: { 'X-Abort-After': '5000' }
+        });
+        if (!response.ok) throw new Error('Falha ao carregar inventário de power-ups');
+        powerupsInventoryData = await response.json();
+        renderPowerupsPanel();
+    } catch (error) {
+        console.error('Erro ao carregar inventário de power-ups:', error);
+    }
+}
+
+// Renderiza o painel de power-ups (inventário pessoal + efeitos ativos)
+function renderPowerupsPanel() {
+    if (!powerupsActiveEl || !powerupsInventoryData) return;
+
+    const inventory = powerupsInventoryData.inventory || {};
+    const definitions = powerupsInventoryData.definitions || [];
+
+    let html = '';
+    for (const def of definitions) {
+        const count = inventory[def.id] || 0;
+        const iconName = POWERUP_ICON_NAMES[def.id] || 'bolt';
+        const active = powerupEffects[def.id];
+        html += `
+            <div class="powerup-item ${active ? 'active' : ''}">
+                <div class="powerup-item-icon">${iconSvg(iconName)}</div>
+                <div class="powerup-item-info">
+                    <div class="powerup-item-name">${def.name} <span class="powerup-item-count">x${count}</span></div>
+                    <div class="powerup-item-desc">${def.description}</div>
+                </div>
+                <button type="button" class="powerup-item-btn" data-powerup-id="${def.id}" ${count <= 0 ? 'disabled' : ''}>${active ? 'ATIVO' : 'ATIVAR'}</button>
+            </div>
+        `;
+    }
+    powerupsActiveEl.innerHTML = html;
+
+    powerupsActiveEl.querySelectorAll('.powerup-item-btn').forEach(btn => {
+        btn.addEventListener('click', () => activatePowerup(btn.dataset.powerupId));
+    });
+}
+
+// Ativa um power-up do inventário e aplica o efeito
+async function activatePowerup(powerupId) {
+    try {
+        const response = await fetch(activeNetworkApiUrl('powerups/activate'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: minerName, powerup_id: powerupId })
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            showNotification(error.detail || 'Falha ao ativar power-up', 'error');
+            return;
+        }
+        playSound('buy');
+        applyPowerupEffect(powerupId);
+        await loadPowerupsInventory();
+    } catch (error) {
+        console.error('Erro ao ativar power-up:', error);
+        showNotification('Erro ao ativar power-up', 'error');
+    }
+}
+
+// Aplica o efeito do power-up (imediatamente se houver rodada, senão na próxima)
+function applyPowerupEffect(powerupId) {
+    if (isPlaying) {
+        if (powerupId === 'time_freeze') {
+            powerupEffects.time_freeze += 5;
+            announceGameStatus('Time Freeze: cronômetro pausado por 5s.');
+        } else if (powerupId === 'scanner') {
+            powerupEffects.scanner = true;
+            revealWordDirection();
+        } else {
+            powerupEffects[powerupId] = true;
+            announceGameStatus(`${POWERUP_NAMES[powerupId] || powerupId} ativo nesta rodada.`);
+        }
+    } else {
+        pendingPowerups.add(powerupId);
+        announceGameStatus(`${POWERUP_NAMES[powerupId] || powerupId} será aplicado na próxima rodada.`);
+    }
+}
+
+// Scanner: revela a direção de uma palavra (célula inicial + direção)
+function revealWordDirection() {
+    const unfound = blockWords.find(w => !w.found && !w.hinted);
+    if (!unfound) return;
+    unfound.hinted = true;
+    const cell = grid[unfound.startY]?.[unfound.startX]?.element;
+    if (cell) cell.classList.add('hint-glow');
+    announceGameStatus('Scanner: uma palavra foi revelada (célula inicial destacada).');
+}
+
+// Aplica power-ups pendentes no início da rodada
+function applyPendingPowerups() {
+    if (pendingPowerups.size === 0) return;
+    for (const id of pendingPowerups) {
+        if (id === 'time_freeze') {
+            powerupEffects.time_freeze += 5;
+        } else if (id === 'scanner') {
+            powerupEffects.scanner = true;
+            revealWordDirection();
+        } else {
+            powerupEffects[id] = true;
+        }
+    }
+    pendingPowerups.clear();
+    if (powerupsActiveEl) renderPowerupsPanel();
+}
+
+// Reseta os efeitos de rodada ao preparar a próxima rodada
+function resetRoundPowerups() {
+    powerupEffects.scanner = false;
+    powerupEffects.double_combo = false;
+    powerupEffects.magnet = false;
+    powerupEffects.precision = false;
 }
 
 
@@ -826,6 +949,11 @@ function teardownSession(reason = 'realm-switch') {
     lightningBlocksRemaining = 0;
     announceGameStatus('Sessao encerrada. Escolha uma rede para continuar.');
     updateStoreUI();
+    /* Fase 3: limpa o estado salvo apenas quando NÃO é page-hide
+       (page-hide preserva para restauração no próximo load) */
+    if (reason !== 'page-hide') {
+        clearSessionState();
+    }
     return sessionGeneration;
 }
 
@@ -883,15 +1011,18 @@ document.addEventListener('keydown', event => {
  * Ajusta células e trilhas da grade à dificuldade e à largura disponível.
  */
 function configureGridSize(size) {
-    const preferredSize = size === 15 ? 28 : 38;
     const compactLayout = window.matchMedia('(max-width: 559px)').matches;
     const gap = compactLayout ? 2 : 4;
     const wrapperWidth = gridWrapperEl.clientWidth || window.innerWidth;
-    // Subtrai padding (6px*2) + border (2px*2) do .grid-hull
-    const hullOverhead = 16;
-    const availableWidth = Math.max(220, Math.min(620, wrapperWidth - hullOverhead));
+    // clientWidth do .grid-hull inclui o padding (6px*2); o grid ocupa a caixa de
+    // conteúdo, então subtraímos só o padding para a grade preencher o hull.
+    const hullOverhead = 12;
+    const availableWidth = Math.max(220, wrapperWidth - hullOverhead);
     const responsiveSize = Math.floor((availableWidth - ((size - 1) * gap)) / size);
-    const cellSize = Math.max(13, Math.min(preferredSize, responsiveSize));
+    // Teto de 72px evita células gigantes em telas 4K; piso de 13px em telas pequenas.
+    // (antes: teto fixo de 38/28px + largura limitada a 620px, que deixava a grade
+    //  "incompleta" — não preenchendo o hull em telas grandes)
+    const cellSize = Math.max(13, Math.min(72, responsiveSize));
     gridEl.style.setProperty('--grid-gap', `${gap}px`);
     gridEl.style.setProperty('--cell-size', `${cellSize}px`);
     gridEl.style.gridTemplateColumns = `repeat(${size}, var(--cell-size))`;
@@ -1385,7 +1516,11 @@ async function startSession(realmIdOverride = null) {
             if (data.is_halving_block) {
                 announceGameStatus('HALVING! A recompensa da rede será cortada pela metade!');
                 document.body.classList.add('halving-flash');
-                setTimeout(() => document.body.classList.remove('halving-flash'), 2000);
+                scheduleForSession(() => document.body.classList.remove('halving-flash'), 2000);
+            }
+            /* Fase 2: Cards — credita o card do bloco na coleção do jogador */
+            if (data.block_hash) {
+                void creditBlockCard(data.block_hash);
             }
             if (isPlaying) {
                 isPlaying = false;
@@ -1425,16 +1560,17 @@ async function startSession(realmIdOverride = null) {
         }
 
         // Fase 8: Eventos Globais — handlers para eventos de evento global
+        // O backend envia event_started_at / event_ends_at (não started_at/ends_at)
         if (data.action === 'event_preannounce') {
-            handleGlobalEventMessage({ event_type: data.event_type, action: 'preannounce', ends_at: data.ends_at, started_at: data.started_at });
+            handleGlobalEventMessage({ event_type: data.event_type, action: 'preannounce', ends_at: data.event_ends_at, started_at: data.event_started_at });
             return;
         }
         if (data.action === 'event_started') {
-            handleGlobalEventMessage({ event_type: data.event_type, action: 'started', ends_at: data.ends_at, started_at: data.started_at });
+            handleGlobalEventMessage({ event_type: data.event_type, action: 'started', ends_at: data.event_ends_at, started_at: data.event_started_at });
             return;
         }
         if (data.action === 'event_ended') {
-            handleGlobalEventMessage({ event_type: data.event_type, action: 'ended', ends_at: data.ends_at, started_at: data.started_at });
+            handleGlobalEventMessage({ event_type: data.event_type, action: 'ended', ends_at: data.event_ends_at, started_at: data.event_started_at });
             return;
         }
 
@@ -1760,10 +1896,12 @@ function updateStoreUI() {
  * Compra e aplica uma dica à primeira palavra ainda não encontrada.
  */
 function buyHint() {
-    if (balanceSatoshis >= HINT_PRICE && isPlaying) {
+    /* Fase 7: usa preço com desconto de conquistas/skill tree */
+    const price = getHintPrice();
+    if (balanceSatoshis >= price && isPlaying) {
         const unfound = blockWords.find(w => !w.found && !w.hinted);
         if (unfound) {
-            balanceSatoshis -= HINT_PRICE; document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString(); playSound('buy');
+            balanceSatoshis -= price; document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString(); playSound('buy');
             unfound.hinted = true;
             grid[unfound.startY][unfound.startX].element.classList.add('hint-glow');
             updateStoreUI(); submitScore();
@@ -1848,10 +1986,11 @@ function prepareNextBlock() {
     isPlaying = false; txBuffer = []; wordsFoundInBlock = 0; currentRoundEarnings = 0; networkTimePassed = 0; netProgressEl.style.width = '0%';
     netProgressEl.setAttribute('aria-valuenow', '0');
     netProgressEl.setAttribute('aria-valuetext', 'Aguardando uma rodada');
-    bankEl.innerHTML = `<div class="loading-state" id="tx-loading-bank">Aguardando transacoes (0/6)...</div>`;
+    bankEl.innerHTML = `<div class="loading-state" id="tx-loading-bank">Aguardando transacoes (0/${WORDS_PER_BLOCK})...</div>`;
     overlayEl.classList.remove('hidden'); updateStoreUI();
     consecutiveErrors = 0; /* Fase 1: reseta erros entre rodadas */
-    announceGameStatus('Aguardando seis transacoes da rede ativa.');
+    resetRoundPowerups(); /* Power-ups: reseta efeitos de rodada entre rodadas */
+    announceGameStatus(`Aguardando ${WORDS_PER_BLOCK} transacoes da rede ativa.`);
 }
 
 /**
@@ -1872,7 +2011,28 @@ function buildPlayableBlock(buildAttempt = 0) {
     // Análise Dinâmica de Tamanho (vsize)
     const maxVsize = Math.max(...txBuffer.map(t => t.vsize));
 
-    if (isLightningMode) {
+    /* Fase 3: Eventos Globais — sobrepõem grade/tempo/recompensa */
+    const globalEventType = activeGlobalEvent?.type || null;
+    let globalRewardMultiplier = 1;
+    if (globalEventType === 'lightning_storm') {
+        currentGridSize = 8; // Condensado
+        networkTimeLimit = 20; // Ultra rápido
+        globalRewardMultiplier = 10;
+    } else if (globalEventType === 'mempool_flood') {
+        currentGridSize = 15; // Grade pesada obrigatória
+        networkTimeLimit = 75 + networkTimeBonus;
+        globalRewardMultiplier = 2;
+    } else if (globalEventType === 'fee_spike') {
+        globalRewardMultiplier = 3;
+        if (isLightningMode) { currentGridSize = 8; networkTimeLimit = 20; }
+        else if (maxVsize > 1000) { currentGridSize = 15; networkTimeLimit = 75 + networkTimeBonus; }
+        else { currentGridSize = 12; networkTimeLimit = 60 + networkTimeBonus; }
+    } else if (globalEventType === 'golden_rush') {
+        globalRewardMultiplier = 5;
+        if (isLightningMode) { currentGridSize = 8; networkTimeLimit = 20; }
+        else if (maxVsize > 1000) { currentGridSize = 15; networkTimeLimit = 75 + networkTimeBonus; }
+        else { currentGridSize = 12; networkTimeLimit = 60 + networkTimeBonus; }
+    } else if (isLightningMode) {
         currentGridSize = 8; // Condensado
         networkTimeLimit = 20; // Ultra rápido
     } else if (maxVsize > 1000) {
@@ -1887,7 +2047,7 @@ function buildPlayableBlock(buildAttempt = 0) {
     networkTimeLimit = Math.max(networkTimeLimit - halvingPenalty, 15); // Mínimo 15s
     // Fase 2: Halving Protocol — baseReward decresce 2% a cada 10 blocos
     const halvingRewardFactor = Math.max(1 - (Math.floor(roundNumber / 10) * 0.02), 0.5); // Mínimo 50%
-    effectiveBaseReward = Math.floor(baseReward * halvingRewardFactor);
+    effectiveBaseReward = Math.floor(baseReward * halvingRewardFactor * globalRewardMultiplier);
 
     configureGridSize(currentGridSize);
 
@@ -1930,6 +2090,8 @@ function buildPlayableBlock(buildAttempt = 0) {
 
     updateStoreUI();
     announceGameStatus('Rodada iniciada. Arraste nas letras ou use setas e Enter.');
+    /* Power-ups: aplica efeitos pendentes no início da rodada */
+    applyPendingPowerups();
     startNetworkRace();
 }
 
@@ -2055,11 +2217,19 @@ function renderWordBank() {
 
 
 function renderBankWord(word, isHighFee, isGolden) {
+    // Evita duplicar itens quando a mesma palavra aparece mais de uma vez
+    // no bloco (ex.: duas transações com a mesma palavra BIP39).
+    if (bankEl.querySelector(`.word-item[data-word="${word}"]`)) {
+        return;
+    }
     const item = document.createElement('div');
     const wordText = document.createElement('span');
     const tag = document.createElement('span');
     item.className = 'word-item';
-    item.id = `bank-${word}`;
+    // ID único: suporta palavras repetidas no mesmo bloco (antes era
+    // `bank-${word}`, que gerava IDs duplicados no DOM).
+    item.id = `bank-${word}-${bankEl.children.length}`;
+    item.dataset.word = word;
     wordText.className = 'word-text';
     wordText.textContent = word;
     tag.className = 'word-fee fee-low';
@@ -2267,7 +2437,9 @@ function endSelection() {
         consecutiveErrors = 0; /* Fase 1: reseta contador de erros ao acertar */
 
         const now = Date.now();
-        if (lastFoundTime !== 0 && now - lastFoundTime < 8000) { comboMultiplier = Math.min(comboMultiplier + 0.5, 4.0); }
+        /* Power-up Double Combo: teto de combo sobe de 4× para 6× */
+        const comboCap = powerupEffects.double_combo ? 6.0 : 4.0;
+        if (lastFoundTime !== 0 && now - lastFoundTime < 8000) { comboMultiplier = Math.min(comboMultiplier + 0.5, comboCap); }
         else { comboMultiplier = 1.0; }
         lastFoundTime = now;
         document.getElementById('ui-combo').innerText = `${comboMultiplier.toFixed(1)}×`;
@@ -2277,6 +2449,10 @@ function endSelection() {
         const backendMultiplier = match.multiplier || 1.0;
         points *= backendMultiplier;
         if (isLightningMode) points *= 10;
+        /* Power-up Magnet: +50% de sats nas palavras da rodada */
+        if (powerupEffects.magnet) points *= 1.5;
+        /* Fase 7: Bônus de conquistas (recompensa %) */
+        points = applyAchievementBonus(points);
 
         /* Boss Battles: multiplicador 5× e dano ao boss */
         if (isBossActive && !match.isMev) {
@@ -2288,11 +2464,11 @@ function endSelection() {
             const bossHpBar = document.getElementById('boss-hp-bar');
             if (bossHpBar) {
                 bossHpBar.classList.add('boss-hp-damage');
-                setTimeout(() => bossHpBar.classList.remove('boss-hp-damage'), 300);
+                scheduleForSession(() => bossHpBar.classList.remove('boss-hp-damage'), 300);
             }
             // Tremor na tela a cada dano
             document.body.classList.add('boss-shake');
-            setTimeout(() => document.body.classList.remove('boss-shake'), 500);
+            scheduleForSession(() => document.body.classList.remove('boss-shake'), 500);
 
             // Boss derrotado — todas as palavras encontradas
             if (bossHp <= 0 && !bossDefeatHandled) {
@@ -2330,6 +2506,11 @@ function endSelection() {
         trackWordFound(match.isGolden, match.isHighFee, match.isMev);
         trackCombo(comboMultiplier);
 
+        /* Fase 2: XP — nível do jogador e season pass (100% do XP da palavra) */
+        const wordXP = calculateWordXP(match.word, comboMultiplier);
+        void addXP(wordXP);
+        void addSeasonXP(wordXP);
+
         const firstCell = selectedCells[0].cell;
         showFloatingText(firstCell, points, match.isHighFee, match.isGolden);
         drawAnimatedLine(selectedCells[0].cell, selectedCells[selectedCells.length - 1].cell);
@@ -2341,7 +2522,7 @@ function endSelection() {
             c.cell.setAttribute('aria-selected', 'false');
             c.cell.setAttribute('aria-label', `${c.cell.getAttribute('aria-label')}. Palavra encontrada`);
         });
-        document.getElementById(`bank-${match.word}`)?.classList.add('found');
+        document.querySelector(`.word-item[data-word="${match.word}"]`)?.classList.add('found');
         /* Fase 6: mensagem MEV já foi mostrada acima, usa mensagem genérica apenas para palavras normais */
         if (!match.isMev) {
             announceGameStatus(
@@ -2372,8 +2553,8 @@ function endSelection() {
         announceGameStatus('A selecao nao corresponde a uma transacao pendente.');
         comboMultiplier = 1.0; document.getElementById('ui-combo').innerText = `1.0×`;
 
-        /* Se 3+ erros consecutivos, debita 5% do saldo (slashing) */
-        if (consecutiveErrors >= SLASHING_THRESHOLD) {
+        /* Se 3+ erros consecutivos, debita 5% do saldo (slashing) — Power-up Precision isenta a rodada */
+        if (consecutiveErrors >= SLASHING_THRESHOLD && !powerupEffects.precision) {
             const penalty = Math.floor(balanceSatoshis * SLASHING_PENALTY);
             if (penalty > 0) {
                 balanceSatoshis -= penalty;
@@ -2384,7 +2565,7 @@ function endSelection() {
             }
             /* Flash vermelho na tela */
             document.body.classList.add('slashing-flash');
-            setTimeout(() => document.body.classList.remove('slashing-flash'), 600);
+            scheduleForSession(() => document.body.classList.remove('slashing-flash'), 600);
             consecutiveErrors = 0; /* Reseta contador após slashing para evitar penalidade cumulativa */
         }
     }
@@ -2447,6 +2628,14 @@ function startNetworkRace() {
             clearInterval(networkInterval);
             return;
         }
+        /* Power-up Time Freeze: pausa o cronômetro por N segundos */
+        if (powerupEffects.time_freeze > 0) {
+            powerupEffects.time_freeze--;
+            netProgressEl.classList.add('time-frozen');
+            netProgressEl.setAttribute('aria-valuetext', `Time Freeze ativo: ${powerupEffects.time_freeze}s restantes`);
+            return;
+        }
+        netProgressEl.classList.remove('time-frozen');
         networkTimePassed++;
         const percent = (networkTimePassed / networkTimeLimit) * 100;
         netProgressEl.style.width = `${percent}%`;
@@ -2482,6 +2671,8 @@ function showResult(success, message) {
         roundNumber++;
         /* Fase 7: Tracking — bloco completado */
         trackBlockCompleted();
+        /* Crates grátis: 1 a cada 10 blocos minerados */
+        void claimFreeCrates();
     } else {
         title.innerText = "Rodada encerrada"; title.style.color = "var(--error-red)";
         text.innerText = message; btn.innerText = "Tentar nova rodada";
@@ -2743,9 +2934,9 @@ function showAchievementToast(ach) {
     if (achievementToastTimeout) {
         clearTimeout(achievementToastTimeout);
     }
-    achievementToastTimeout = setTimeout(() => {
+    achievementToastTimeout = scheduleForSession(() => {
         toast.classList.remove('visible');
-        setTimeout(() => { toast.hidden = true; }, 400);
+        scheduleForSession(() => { toast.hidden = true; }, 400);
     }, 4000);
 
     playSound('success');
@@ -2921,9 +3112,9 @@ function handleBossBlock(data, generation) {
 
     // Efeitos visuais dramáticos
     document.body.classList.add('boss-flash', 'boss-active');
-    setTimeout(() => document.body.classList.remove('boss-flash'), 1500);
+    scheduleForSession(() => document.body.classList.remove('boss-flash'), 1500);
     document.body.classList.add('boss-shake');
-    setTimeout(() => document.body.classList.remove('boss-shake'), 500);
+    scheduleForSession(() => document.body.classList.remove('boss-shake'), 500);
 
     // Mostra HUD do boss
     const bossHud = document.getElementById('boss-hud');
@@ -2937,12 +3128,6 @@ function handleBossBlock(data, generation) {
     // Limpa buffer e prepara para coletar palavras do boss
     txBuffer = [];
     wordsFoundInBlock = 0;
-
-    // Ajusta WORDS_PER_BLOCK temporariamente para o boss
-    const originalWordsPerBlock = WORDS_PER_BLOCK;
-    // Sobrescreve a constante para esta rodada — o boss precisa de mais palavras
-    // Usamos um flag para controlar isso
-    window._bossWordsRequired = bossWordsRequired;
 
     // Atualiza o loading text para refletir o boss
     const loadingText = document.getElementById('tx-loading-bank');
@@ -3071,6 +3256,7 @@ function buildBossPlayableBlock() {
         // Tenta reconstruir a grade do boss
         gridEl.innerHTML = '';
         svgEl.innerHTML = '';
+        bankEl.replaceChildren(); // limpa itens do word bank da 1ª tentativa (evita duplicados)
         grid = [];
         blockWords = [];
         for (let y = 0; y < currentGridSize; y++) {
@@ -3176,8 +3362,8 @@ function showBossResult(success, message) {
 
     if (success) {
         title.innerText = 'Boss Derrotado!';
-        title.style.color = "var(--error-red)";
-        text.innerHTML = message;
+        title.style.color = "var(--success-green)";
+        text.innerText = message;
         btn.innerText = "Continuar";
         roundNumber++;
     } else {
@@ -3187,6 +3373,8 @@ function showBossResult(success, message) {
         btn.innerText = "Tentar novamente";
         comboMultiplier = 1.0;
         document.getElementById('ui-combo').innerText = '1.0×';
+        /* Fase 3: reseta o estado do boss na derrota por timeout — evita rodadas de boss fantasma em cadeia */
+        resetBossState();
     }
     setNextButtonAction(prepareNextBlock);
 }
@@ -3203,7 +3391,6 @@ function resetBossState() {
     bossWordsRequired = 10;
     bossTimer = 45;
     bossDefeatHandled = false;
-    window._bossWordsRequired = null;
 
     // Esconde HUD do boss
     const bossHud = document.getElementById('boss-hud');
@@ -4286,6 +4473,16 @@ document.querySelectorAll('.staking-duration-btn').forEach(btn => {
     });
 });
 
+// Fase 3: sincroniza o <select> de duração com selectedStakeDuration (1h/6h/24h)
+if (stakingDurationEl) {
+    stakingDurationEl.addEventListener('change', () => {
+        const hours = parseInt(stakingDurationEl.value, 10);
+        if ([1, 6, 24].includes(hours)) {
+            selectedStakeDuration = hours;
+        }
+    });
+}
+
 // Limpa estado de staking ao encerrar sessão
 const originalTeardownForStaking = teardownSession;
 teardownSession = function(reason) {
@@ -4587,11 +4784,12 @@ async function loadSkillTree() {
 function renderSkillTree() {
     if (!skillTreeData || !skillsContentEl) return;
 
-    const { branches, points_remaining, level } = skillTreeData;
+    // O backend retorna { player_level, points_remaining, branches: { key: { name, current_level, max_level, nodes: [{ level, name, description, unlocked }] } } }
+    const { branches, points_remaining, player_level } = skillTreeData;
 
     // Atualiza header
     if (skillsPointsValueEl) skillsPointsValueEl.textContent = points_remaining;
-    if (skillsLevelValueEl) skillsLevelValueEl.textContent = level;
+    if (skillsLevelValueEl) skillsLevelValueEl.textContent = player_level;
 
     // Limpa conteúdo anterior
     skillsContentEl.innerHTML = '';
@@ -4609,7 +4807,7 @@ function renderSkillTree() {
 
         const branchDesc = document.createElement('p');
         branchDesc.className = 'skill-branch-desc';
-        branchDesc.textContent = branchDef.description;
+        branchDesc.textContent = branchDef.description || '';
         branchEl.appendChild(branchDesc);
 
         const nodesContainer = document.createElement('div');
@@ -4619,11 +4817,13 @@ function renderSkillTree() {
             const nodeEl = document.createElement('div');
             nodeEl.className = 'skill-node';
             if (node.unlocked) nodeEl.classList.add('unlocked');
-            if (node.available) nodeEl.classList.add('available');
+            // O próximo nível do ramo é o nó clicável (o backend não envia "available")
+            const isNext = !node.unlocked && node.level === (branchDef.current_level || 0) + 1;
+            if (isNext && points_remaining > 0) nodeEl.classList.add('available');
 
             const nodeIcon = document.createElement('span');
             nodeIcon.className = 'skill-node-icon';
-            setSvgIcon(nodeIcon, node.unlocked ? 'check' : (node.available ? 'bolt' : 'circle'));
+            setSvgIcon(nodeIcon, node.unlocked ? 'check' : (isNext ? 'bolt' : 'circle'));
             nodeEl.appendChild(nodeIcon);
 
             const nodeInfo = document.createElement('div');
@@ -4636,13 +4836,13 @@ function renderSkillTree() {
 
             const nodeEffect = document.createElement('span');
             nodeEffect.className = 'skill-node-effect';
-            nodeEffect.textContent = node.effect;
+            nodeEffect.textContent = node.description || node.name || '';
             nodeInfo.appendChild(nodeEffect);
 
             nodeEl.appendChild(nodeInfo);
 
-            if (node.available) {
-                nodeEl.addEventListener('click', () => unlockSkill(branchKey, node.level));
+            if (isNext && points_remaining > 0) {
+                nodeEl.addEventListener('click', () => unlockSkill(branchKey));
             }
 
             nodesContainer.appendChild(nodeEl);
@@ -4655,15 +4855,15 @@ function renderSkillTree() {
     skillsContentEl.hidden = false;
 }
 
-// Desbloqueia uma habilidade
-async function unlockSkill(branchKey, level) {
+// Desbloqueia a próxima habilidade de um ramo
+async function unlockSkill(branchKey) {
     if (!skillTreeData || skillTreeData.points_remaining <= 0) return;
 
     try {
         const response = await fetch(activeNetworkApiUrl(`skills/${encodeURIComponent(minerName)}/upgrade`), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ branch: branchKey, level })
+            body: JSON.stringify({ username: minerName, branch: branchKey })
         });
 
         if (!response.ok) {
@@ -4745,7 +4945,7 @@ async function loadEnergyState() {
 function updateEnergyUI() {
     if (!uiEnergyBarEl || !uiEnergyCountEl) return;
 
-    const { current, max, nextRefill } = energyState;
+    const { current, max, next_refill_at } = energyState;
     const percent = (current / max) * 100;
 
     // Atualiza barra
@@ -4763,9 +4963,9 @@ function updateEnergyUI() {
     // Atualiza contador
     uiEnergyCountEl.textContent = `${current}/${max}`;
 
-    // Atualiza timer de regeneração
-    if (nextRefill && uiEnergyTimerEl) {
-        const refillTime = new Date(nextRefill);
+    // Atualiza timer de regeneração (next_refill_at é timestamp UNIX em segundos)
+    if (next_refill_at && uiEnergyTimerEl) {
+        const refillTime = new Date(next_refill_at * 1000);
         const now = new Date();
         const diff = refillTime - now;
 
@@ -4902,6 +5102,31 @@ async function loadSeasonData() {
     } catch (error) {
         console.error('Erro ao carregar temporada:', error);
         if (seasonLoadingEl) seasonLoadingEl.textContent = 'Erro ao carregar temporada.';
+    }
+}
+
+// Adiciona XP à temporada (chamado a cada palavra encontrada)
+async function addSeasonXP(xpAmount) {
+    if (!xpAmount || xpAmount <= 0) return;
+    try {
+        const response = await fetch(activeNetworkApiUrl(`season/${encodeURIComponent(minerName)}/add-xp`), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ xp: xpAmount })
+        });
+        if (!response.ok) return;
+        const result = await response.json();
+        // Atualiza estado local da temporada
+        if (seasonData) {
+            seasonData.level = result.level;
+            seasonData.xp = result.xp;
+            renderSeasonUI();
+        }
+        if (result.leveled_up) {
+            showNotification(`Temporada: nível ${result.level} alcançado!`, 'success');
+        }
+    } catch (error) {
+        console.error('Erro ao adicionar XP de temporada:', error);
     }
 }
 
@@ -5146,19 +5371,26 @@ async function loadCardsData() {
 function renderCardsUI() {
     if (!cardsData) return;
 
-    const { cards, totals, by_rarity, collection_bonus } = cardsData;
+    // O backend retorna { cards, total, by_rarity, collection_bonus: { raridade: { owned, required, complete, bonus } } }
+    const { cards, total, by_rarity, collection_bonus } = cardsData;
 
     // Atualiza stats
-    if (cardsTotalEl) cardsTotalEl.textContent = totals;
+    if (cardsTotalEl) cardsTotalEl.textContent = total;
     if (cardsCommonEl) cardsCommonEl.textContent = by_rarity.common || 0;
     if (cardsRareEl) cardsRareEl.textContent = by_rarity.rare || 0;
     if (cardsEpicEl) cardsEpicEl.textContent = by_rarity.epic || 0;
     if (cardsLegendaryEl) cardsLegendaryEl.textContent = by_rarity.legendary || 0;
 
-    // Atualiza bônus
+    // Atualiza bônus (collection_bonus é um objeto por raridade)
     if (cardsBonusEl && collection_bonus) {
-        cardsBonusEl.innerHTML = iconSvg('gift');
-        cardsBonusEl.append(document.createTextNode(` Bônus: ${collection_bonus}`));
+        const complete = Object.values(collection_bonus).filter(b => b.complete);
+        if (complete.length > 0) {
+            cardsBonusEl.innerHTML = iconSvg('gift');
+            cardsBonusEl.append(document.createTextNode(` Bônus: ${complete.length} coleção(ões) completa(s)`));
+        } else {
+            cardsBonusEl.innerHTML = iconSvg('gift');
+            cardsBonusEl.append(document.createTextNode(' Bônus: -'));
+        }
     }
 
     // Renderiza grid
@@ -5270,7 +5502,7 @@ function showCardPullAnimation(card) {
     document.body.appendChild(overlay);
 
     // Remove após 3 segundos
-    setTimeout(() => {
+    scheduleForSession(() => {
         overlay.classList.add('hidden');
         overlay.remove();
     }, 3000);
@@ -5280,6 +5512,26 @@ function showCardPullAnimation(card) {
 registerSessionInitializer('cards', async () => {
     await loadCardsData();
 });
+
+// Credita o card de um bloco minerado na coleção do jogador
+async function creditBlockCard(blockHash) {
+    if (!blockHash || !minerName) return;
+    try {
+        const response = await fetch(activeNetworkApiUrl(`cards/${encodeURIComponent(minerName)}/credit`), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: minerName, block_hash: blockHash })
+        });
+        if (!response.ok) return; // card global ainda não existe ou já processado
+        const result = await response.json();
+        if (result.new && result.card) {
+            showCardPullAnimation(result.card);
+            await loadCardsData();
+        }
+    } catch (error) {
+        console.error('Erro ao creditar card:', error);
+    }
+}
 
 // ============================================
 // Fase 9: Mercado de Power-ups — Player-to-Player
@@ -5744,7 +5996,14 @@ async function loadActiveGlobalEvent() {
         const data = await response.json();
 
         if (data.active_event) {
-            activeGlobalEvent = data.active_event;
+            // Normaliza o shape do REST (event_type/event_started_at/event_ends_at)
+            // para o shape interno (type/startedAt/endsAt) usado pelo buildPlayableBlock
+            activeGlobalEvent = {
+                type: data.active_event.event_type,
+                startedAt: data.active_event.event_started_at,
+                endsAt: data.active_event.event_ends_at,
+                preannounced: data.active_event.event_preannounced === true,
+            };
             renderGlobalEventBanner(activeGlobalEvent, false);
         }
     } catch (error) {
@@ -6233,7 +6492,7 @@ async function openCrate(isFree = true) {
         const response = await fetch(activeNetworkApiUrl('crates/open'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: minerName, is_free: isFree })
+            body: JSON.stringify({ username: minerName, use_free: isFree })
         });
 
         if (!response.ok) {
@@ -6255,7 +6514,10 @@ async function openCrate(isFree = true) {
 
 // Mostra resultado da crate com animação
 function showCrateResult(result) {
-    const { item, rarity, value } = result;
+    // O backend retorna { item: {type, rarity, name, icon, description, value?}, crates_remaining, legendary_bonus }
+    const item = result.item || {};
+    const rarity = item.rarity || 'common';
+    const value = item.value;
 
     // Cria overlay
     const overlay = document.createElement('div');
@@ -6271,14 +6533,15 @@ function showCrateResult(result) {
     };
 
     const rarityInfo = rarityMap[rarity] || rarityMap['common'];
+    const itemName = item.name || 'Item';
 
     overlay.innerHTML = `
         <div class="crate-modal-content">
             <div class="crate-icon">${iconSvg(rarityInfo.iconName)}</div>
             <div class="crate-result-title">Crate Aberta!</div>
-            <div class="crate-result-item">${item}</div>
+            <div class="crate-result-item">${itemName}</div>
             <div class="crate-result-rarity ${rarityInfo.class}">${rarityInfo.label}</div>
-            ${value ? `<div class="crate-result-value">+${value} sats</div>` : ''}
+            ${value ? `<div class="crate-result-value">+${Number(value).toLocaleString()} sats</div>` : ''}
             <button class="crate-close-btn" id="btn-close-crate">Fechar</button>
         </div>
     `;
@@ -6287,7 +6550,7 @@ function showCrateResult(result) {
 
     // Animação de revelação
     const crateIcon = overlay.querySelector('.crate-icon');
-    setTimeout(() => {
+    scheduleForSession(() => {
         crateIcon.classList.add('revealed');
     }, 500);
 
@@ -6308,7 +6571,7 @@ function showCrateResult(result) {
     playSound('success');
 
     // Notificação
-    showNotification(`Crate aberta: ${item} (${rarityInfo.label})`, rarity === 'legendary' ? 'success' : 'info');
+    showNotification(`Crate aberta: ${itemName} (${rarityInfo.label})`, rarity === 'legendary' ? 'success' : 'info');
 }
 
 // Event listeners para crates
@@ -6318,6 +6581,25 @@ if (btnOpenCrateFree) {
 
 if (btnOpenCrateBuy) {
     btnOpenCrateBuy.addEventListener('click', () => openCrate(false));
+}
+
+// Reclama crates grátis acumuladas (1 a cada 10 blocos minerados)
+async function claimFreeCrates() {
+    try {
+        const response = await fetch(activeNetworkApiUrl('crates/claim'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: minerName, blocks_mined: blocksCompletedTotal })
+        });
+        if (!response.ok) return;
+        const result = await response.json();
+        if (result.crates_awarded > 0) {
+            showNotification(`+${result.crates_awarded} crate(s) grátis!`, 'success');
+        }
+        await loadCrateInventory();
+    } catch (error) {
+        console.error('Erro ao reclamar crates grátis:', error);
+    }
 }
 
 
@@ -6450,7 +6732,7 @@ async function addXP(xpAmount) {
             // Animação de level-up
             if (levelValueEl) {
                 levelValueEl.classList.add('leveled-up');
-                setTimeout(() => levelValueEl.classList.remove('leveled-up'), 600);
+                scheduleForSession(() => levelValueEl.classList.remove('leveled-up'), 600);
             }
         }
 

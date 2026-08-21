@@ -3494,6 +3494,68 @@ async def get_player_cards(realm_id: str, username: str) -> dict[str, Any]:
     return await _get_player_cards(definition.realm_id, username)
 
 
+class CardCreditRequest(BaseModel):
+    """Solicitação de crédito de card na coleção do jogador."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    username: Username
+    block_hash: str = Field(min_length=1, max_length=128)
+
+
+@app.post("/api/v1/networks/{realm_id}/cards/{username}/credit", tags=["Cards"])
+async def credit_player_card(realm_id: str, username: str, data: CardCreditRequest) -> dict[str, Any]:
+    """Credita o card de um bloco na coleção do jogador.
+
+    O card é gerado globalmente pelo ingestor (cards:global + card_detail_key
+    global). Este endpoint adiciona o hash ao conjunto do jogador, desde que o
+    card global exista. Retorna os detalhes do card (para a animação de pull) e
+    se foi um card novo para o jogador.
+
+    Args:
+        realm_id: Identificador do realm.
+        username: Nome do minerador.
+        data: Payload com ``username`` e ``block_hash``.
+
+    Returns:
+        Dict com ``card`` (detalhes), ``new`` (bool) e ``total``.
+    """
+    definition = get_network_definition(realm_id)
+    block_hash = data.block_hash
+
+    # Verifica se o card global existe (gerado pelo ingestor)
+    global_detail_key = card_detail_key(definition.realm_id, "global", block_hash)
+    raw = await redis_client.hgetall(global_detail_key)
+    if not raw:
+        raise HTTPException(status_code=404, detail="Card não encontrado para este bloco")
+
+    # Adiciona ao conjunto do jogador
+    player_cards_key = cards_set_key(definition.realm_id, username)
+    was_new = await redis_client.sadd(player_cards_key, block_hash)
+    await redis_client.expire(player_cards_key, 86400 * 30)
+
+    # Copia o detalhe para o jogador (para leitura direta sem fallback global)
+    player_detail_key = card_detail_key(definition.realm_id, username, block_hash)
+    if not await redis_client.exists(player_detail_key):
+        await redis_client.hset(player_detail_key, mapping=raw)
+        await redis_client.expire(player_detail_key, 86400 * 30)
+
+    total = int(await redis_client.scard(player_cards_key) or 0)
+
+    return {
+        "card": {
+            "block_hash": block_hash,
+            "rarity": raw.get("rarity", "common"),
+            "block_number": int(raw.get("block_number", 0)),
+            "mempool_count": int(raw.get("mempool_count", 0)),
+            "timestamp": raw.get("timestamp", ""),
+        },
+        "new": bool(was_new),
+        "total": total,
+    }
+
+
+
 # ==========================================================================
 # Fase 10: Mempool Crates — loot boxes
 # ==========================================================================
@@ -3502,13 +3564,13 @@ async def get_player_cards(realm_id: str, username: str) -> dict[str, Any]:
 CRATE_PRICES = {"crate": 5000}  # preço em sats
 CRATE_FREE_INTERVAL = 10  # blocos entre crates grátis
 
-# Power-ups disponíveis como drop
+# Power-ups disponíveis como drop (IDs devem existir em POWERUP_DEFINITIONS)
 CRATE_POWERUPS = [
-    {"id": "speed_boost", "name": "Speed Boost", "icon": "⚡", "description": "Reduz tempo de cooldown em 20%"},
-    {"id": "golden_eye", "name": "Golden Eye", "icon": "👁️", "description": "Próxima palavra golden garantida"},
-    {"id": "combo_lock", "name": "Combo Lock", "icon": "🔒", "description": "Trava combo 2× por 3 blocos"},
-    {"id": "extra_time", "name": "Extra Time", "icon": "⏱️", "description": "+15s no próximo bloco"},
-    {"id": "double_sats", "name": "Double Sats", "icon": "💰", "description": "Recompensa 2× no próximo bloco"},
+    {"id": "time_freeze", "name": "Time Freeze", "icon": "⏸️", "description": "Pausa o timer por 5 segundos"},
+    {"id": "scanner", "name": "Scanner", "icon": "🔍", "description": "Revela a direção de uma palavra"},
+    {"id": "double_combo", "name": "Double Combo", "icon": "💎", "description": "Combo sobe até 6× por 1 rodada"},
+    {"id": "magnet", "name": "Magnet", "icon": "🧲", "description": "+50% de sats por 1 rodada"},
+    {"id": "precision", "name": "Precision", "icon": "🎯", "description": "Sem slashing por 1 rodada"},
 ]
 
 # Skins exclusivas
@@ -3662,6 +3724,12 @@ async def open_crate(realm_id: str, data: CrateOpenRequest) -> dict[str, Any]:
         await redis_client.hset(player_key, "balance", str(new_balance))
         await redis_client.expire(player_key, 86400)
         item["balance"] = new_balance
+
+    # Se for power-up, credita 1 unidade no inventário do jogador
+    if item["type"] == "powerup":
+        pu_key = powerups_key(definition.realm_id, data.username)
+        await redis_client.hincrby(pu_key, item["powerup_id"], 1)
+        await redis_client.expire(pu_key, 86400)
 
     # Se for legendário, acumula bônus permanente
     if item["type"] == "legendary":

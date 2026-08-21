@@ -153,15 +153,19 @@ compra e níveis.
 
 ### INVENTÁRIO — Power-ups
 
-Power-ups obtidos por crates/season e ativáveis na partida:
+Power-ups obtidos por crates/season e ativáveis na partida
+(`POWERUP_DEFINITIONS` no backend; efeitos aplicados em `game.js`):
 
-| ID | Nome | Efeito |
-|---|---|---|
-| `speed_boost` | Speed Boost | Reduz tempo de cooldown em 20% |
-| `golden_eye` | Golden Eye | Próxima palavra golden garantida |
-| `combo_lock` | Combo Lock | Trava combo 2× por 3 blocos |
-| `extra_time` | Extra Time | +15 s no próximo bloco |
-| `double_sats` | Double Sats | Recompensa 2× no próximo bloco |
+| ID | Nome | Efeito | Preço |
+|---|---|---|---|
+| `time_freeze` | Time Freeze | Congela o timer por 10s | 500 sats |
+| `scanner` | Scanner | Revela 3 palavras por 15s | 800 sats |
+| `double_combo` | Double Combo | Dobra o multiplicador de combo por 20s | 1200 sats |
+| `magnet` | Magnet | Atrai palavras para o centro por 12s | 1000 sats |
+| `precision` | Precision | +10% de XP em palavras por 30s | 600 sats |
+
+O inventário é **pessoal** (Redis `powerups:{username}`): cada crate aberta
+credita o item ao jogador e o consumo decrementa o estoque.
 
 ### UTILITÁRIOS — Mini-game Decoder
 
@@ -210,7 +214,10 @@ Corrida relâmpago: **4 palavras** (`SPRINT_WORD_COUNT`) em **30 s**
 
 ### VISÃO
 
-Resumo do jogador: nickname, realm, saldo, nível, rank e estatísticas.
+Painel de boas-vindas da aba PERFIL: três cards de regras do jogo
+(Proof-of-Search, Slashing, MEV Oculto) e o botão **VER CONQUISTAS**
+(`btn-achievements`), que abre o modal de conquistas. O resumo do jogador
+(nickname, realm, saldo, nível, rank) fica no HUD global, não nesta seção.
 
 ### PROGRESSÃO — Nível, XP e Rank
 
@@ -220,7 +227,7 @@ Resumo do jogador: nickname, realm, saldo, nível, rank e estatísticas.
 - **Bônus passivos por nível:**
   - `time_bonus_seconds` = `min(nível, 10)` (máx +10 s);
   - `hint_discount_percent` = `min((nível // 3) × 10, 30)` (máx 30%).
-- **Ranks temáticos** (10 tiers):
+- **Ranks temáticos** (11 tiers, `RANK_DEFINITIONS`):
 
 | Níveis | Rank |
 |---|---|
@@ -234,6 +241,7 @@ Resumo do jogador: nickname, realm, saldo, nível, rank e estatísticas.
 | 70–79 | Hash Rate Lord |
 | 80–89 | Block King |
 | 90–99 | Bitcoin Legend |
+| 100+ | Satoshi |
 
 ### COLEÇÃO — Cards
 
@@ -289,7 +297,7 @@ valida saldo e propriedade.
 
 ### Conquistas (Achievements)
 
-**28 conquistas** em 5 categorias, desbloqueadas por estatísticas acumuladas
+**30 conquistas** em 5 categorias, desbloqueadas por estatísticas acumuladas
 e que concedem bônus permanentes:
 
 | Categoria | Exemplos | Bônus típico |
@@ -329,8 +337,9 @@ Os bônus são somados (`applyAchievementBonus`) e aplicados à pontuação.
 | Preço | 5.000 sats (`CRATE_PRICES`) |
 | Grátis | 1 a cada 10 blocos (`CRATE_FREE_INTERVAL`) |
 
-Drops: power-ups (`CRATE_POWERUPS`), skins (`CRATE_SKINS`: Neon Grid, Retro
-Terminal, Golden Hash) e block cards.
+Drops: power-ups (`CRATE_POWERUPS`: `time_freeze`, `scanner`,
+`double_combo`, `magnet`, `precision`), skins (`CRATE_SKINS`: Neon Grid,
+Retro Terminal, Golden Hash, Dark Matter) e block cards. Itens le...[truncated]
 
 ### Skill Tree
 
@@ -384,3 +393,28 @@ upgrades **não** atravessam realms.
 - [Fluxos](FLUXOS.md) — sequências de inicialização, transação, bloco
 - [Módulos](MODULOS.md) — funções e responsabilidades por arquivo
 - [Arquitetura](ARQUITETURA.md) — camadas e decisões
+- [Auditoria de mecânicas](AUDITORIA-MECANICAS-2026-08-21.md) — diagnóstico das pontas soltas após a migração de design
+- [Fechamento das correções](FECHAMENTO-CORRECOES-2026-08-21.md) — registro das correções aplicadas (Fases 1–4)
+
+## Registro de correções (2026-08-21)
+
+Ajustes aplicados ao código após a migração de design, refletidos neste
+documento:
+
+| # | Correção | Fase |
+|---|---|---|
+| 1 | Payload de crates: `is_free` → `use_free`; `showCrateResult` lê `item` (objeto) | 1 |
+| 2 | Skill tree: payload `{username, branch}`; nó clicável = próximo nível | 1 |
+| 3 | Crates grátis: `claimFreeCrates()` chamada em `showResult` após `trackBlockCompleted` | 1 |
+| 4 | Power-ups: inventário pessoal (Redis `powerups:{username}`); IDs corrigidos para `time_freeze`, `scanner`, `double_combo`, `magnet`, `precision` | 1 |
+| 5 | XP: 100% da palavra vai para nível **e** season (antes: só nível) | 2 |
+| 6 | Conquistas: contagem corrigida de 28 → 30 | 2 |
+| 7 | Cards: `creditBlockCard` chamado em `showResult` após `trackBlockCompleted` | 2 |
+| 8 | Energia: `ENERGY_MAX=10`, recarga 30 min, compra 2.000 sats → 3 pontos | 2 |
+| 9 | Boss: reset de HP/grade/timer ao iniciar nova rodada | 3 |
+| 10 | Eventos globais: `apply_event_effects` no ingestor antes da publicação | 3 |
+| 11 | Staking: `STAKE_BONUS_TABLE` + penalidade 10% por cancelamento | 3 |
+| 12 | Sessão: `clearSessionState()` no `teardownSession` (preserva em `page-hide`) | 3 |
+| 13 | CSS: 91 classes/keyframes/variáveis adicionadas ao `pixel.css` | 4 |
+| 14 | Ranks: 10 → 11 tiers (adicionado "Satoshi" no nível 100) | 4 |
+| 15 | `CACHE_VERSION` bump v17 → v20 | 4 |

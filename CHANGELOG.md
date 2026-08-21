@@ -3,6 +3,71 @@
 Este arquivo segue o formato Keep a Changelog. O projeto ainda não definiu uma
 política formal de versionamento.
 
+## 2026-08-20 — Correções de layout da UI (grade, boss HUD, word bank)
+
+### Corrigido
+
+- **correções de UI não apareciam no navegador após rebuild** (reportado pelo
+  usuário em 20/08/2026): o service worker do shell PWA usa estratégia
+  cache-first para `pixel.css`/`game.js`/`index.html` e o `CACHE_VERSION`
+  nunca era incrementado — quem já tinha o shell instalado continuava
+  recebendo os assets antigos do cache `mempool-miner-shell-v17`. Versão
+  incrementada para `v18` (o novo worker apaga o cache antigo no `activate`);
+  procedimento documentado em `docs/TROUBLESHOOTING.md` ("Correção não
+  aparece após rebuild");
+- **Boss HUD sobreposto ao painel de palavras** (bug reportado): a classe
+  `.hidden` estava presa dentro de `@media (min-width: 1920px)`, então em
+  qualquer viewport menor o `#boss-hud` (e o banner de evento global, as
+  seções do mercado, o botão do decoder e o nome do minerador) nunca ficava
+  oculto. A regra foi movida para escopo global (`.hidden { display: none
+  !important; }`);
+- **Grade de palavras não preenchia o hull** (bug reportado):
+  `configureGridSize` limitava a grade a 620 px de largura e 38 px de célula
+  enquanto o `.grid-hull` crescia até 1040 px — em 1920×1080 a grade ocupava
+  só 484 px de um hull de 756 px. A grade agora dimensiona a célula pelo
+  espaço disponível (teto de 72 px) e preenche o hull;
+- `--high-fee` e `--golden-hash` usados nas tags do word bank e nos textos
+  flutuantes mas nunca definidos no `:root` — agora definidos
+  (`#f7931a` / `#ffcc00`);
+- retry do boss: o word bank não era limpado na reconstrução da grade,
+  duplicando itens — agora `bankEl.replaceChildren()` no retry;
+- `renderBankWord`: IDs duplicados (`bank-${word}`) quando a mesma palavra
+  chegava 2× no bloco — agora sufixo por índice + `data-word` + dedupe;
+- marcação de palavra encontrada (`classList.add('found')`) atualizada para o
+  novo seletor `data-word`;
+- overlay de card pull (`showCardPullAnimation`) não tinha nenhum CSS —
+  criado `.card-pull-overlay`/`.card-pull-card` com `position:fixed`,
+  z-index 2000 e cores por raridade (espelhando `CARD_RARITIES` do backend);
+- cor do título no sucesso do boss: `--error-red` → `--success-green` e
+  `innerHTML` → `innerText` (unificado com o caso de falha);
+- `setTimeout` "cru" dos efeitos do boss (flash/shake/dano) migrado para
+  `scheduleForSession` (cancelado no `teardownSession`);
+- texto de loading hardcodeado `(0/6)` → `(0/${WORDS_PER_BLOCK})`;
+- fórmula do hull em ≥1920 px alinhada com a base
+  (`calc(100vw - clamp(320px, 28vw, 520px) - 64px)` em vez de `584px`
+  hardcoded);
+- `setTimeout` "cru" restante migrado para `scheduleForSession` após a
+  auditoria independente: `halving-flash`, `slashing-flash`, achievement
+  toast (4 s + 400 ms), overlay de card pull (3 s), revelação de crate
+  (500 ms) e animação de level-up (600 ms) — agora cancelados no
+  `teardownSession` via `sessionTimeouts`.
+
+### Removido
+
+- código morto: `originalWordsPerBlock` (capturado e nunca usado) e
+  `window._bossWordsRequired` (setado e nunca lido);
+- regra CSS morta `.grid-wrapper` (o elemento usa `class="grid-hull"`);
+- `frontend/game.js.docker` (cópia antiga fora do build, risco de deploy do
+  arquivo errado).
+
+### Adicionado
+
+- `docs/audit-ui-layout-2026-08-20.md` — auditoria completa com causa raiz,
+  evidência ao vivo e plano de correção em 3 fases;
+- `scripts/repro_ui_bugs.py`, `scripts/validate_f2.py`,
+  `scripts/validate_f3.py`, `scripts/validate_bank_ids.py` — reprodução e
+  validação ao vivo (Playwright, 4 viewports).
+
 ## 2026-08-20 — Correções de pipeline BIP39, fan-out e infraestrutura
 
 ### Adicionado

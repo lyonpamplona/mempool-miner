@@ -46,6 +46,8 @@ playwright-report/
 .claude/
 .codex/
 .agents/
+.hermes/
+audit-shots/
 .DS_Store
 Thumbs.db
 desktop.ini

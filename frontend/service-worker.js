@@ -1,7 +1,10 @@
 'use strict';
 
 const CACHE_PREFIX = 'mempool-miner-shell-';
-const CACHE_VERSION = 'v17';
+// IMPORTANTE: incrementar a cada deploy que altere pixel.css, game.js,
+// index.html ou service-worker.js — senão o cache-first serve a versão
+// antiga para quem já tem o shell PWA instalado (bug de layout 20/08/2026).
+const CACHE_VERSION = 'v20';
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const SHELL_ASSETS = [
     './',

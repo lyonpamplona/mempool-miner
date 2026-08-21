@@ -55,7 +55,8 @@ def test_session_mechanics_use_registered_initializers_without_stubs() -> None:
     assert not re.search(r"^startSession\s*=", javascript, flags=re.MULTILINE)
     assert "function registerSessionInitializer(" in javascript
     assert "await runSessionInitializers();" in javascript
-    assert "return loadMarketInventory();" in javascript
+    # Fase 1.4: power-ups usam o inventário PESSOAL (não o stub que devolvia o mercado)
+    assert "powerups/${encodeURIComponent(minerName)}" in javascript
     assert "currentRoundWords.forEach" in javascript
 
 
@@ -217,7 +218,8 @@ def test_service_worker_cache_version_tracks_phase4_assets() -> None:
     """O navegador não pode continuar servindo o CSS anterior ao redesign."""
     service_worker = SERVICE_WORKER.read_text(encoding="utf-8")
 
-    assert "const CACHE_VERSION = 'v17';" in service_worker
+    # Fase 4: bump para v20 (migração de design + itens dinâmicos + keyframes)
+    assert "const CACHE_VERSION = 'v20';" in service_worker
 
 
 def test_ui_uses_local_svg_icons_instead_of_emoji_glyphs() -> None:

@@ -47,6 +47,14 @@
             --neon-magenta: #f000ff;
             --neon-gold: #ffcc00;
             --success-green: var(--neon-green);
+            /* Cores de destaque de transações (word bank + textos flutuantes).
+               Antes usavam var(--high-fee)/var(--golden-hash) sem definição. */
+            --high-fee: var(--neon-amber);
+            --golden-hash: var(--neon-gold);
+            /* Cores de estado usadas em flashes, RBF e Lightning (Fase 4) */
+            --error-red: var(--neon-red);
+            --lightning-blue: #0ea5e9;
+            --warning-orange: #f97316;
 
             --f-tech: 'JetBrains Mono', monospace;
             --f-pixel: 'Press Start 2P', monospace;
@@ -1290,8 +1298,6 @@
 
 .global-event-timer { flex-shrink: 0; }
 
-.grid-wrapper { min-height: 470px; padding: 18px; }
-
 .halving { color: var(--text-main); }
 
 .halving-flash { animation: halvingFlash 2s ease-out; }
@@ -2419,7 +2425,7 @@
     }
 
     .grid-hull {
-        width: min(70dvh, calc(100vw - 584px), 1040px);
+        width: min(70dvh, calc(100vw - clamp(320px, 28vw, 520px) - 64px), 1040px);
     }
 
     .race-box {
@@ -2434,11 +2440,78 @@
         font-size: 1.08rem;
         padding: 12px;
     }
+}
 
-    /* ==========================================================================
-       Utilitários — hidden (adicionado para corrigir boss-hud, banners, toasts)
-       ========================================================================== */
-    .hidden { display: none !important; }
+/* ==========================================================================
+   Utilitários — hidden (escopo global: precisa valer em TODOS os viewports,
+   senão boss-hud, banners e market-sections ficam visíveis em telas <1920px)
+   ========================================================================== */
+.hidden { display: none !important; }
+
+/* ==========================================================================
+   Card Pull — overlay de animação ao ganhar um card (criado via JS em
+   showCardPullAnimation). Antes não tinha nenhum CSS: ficava invisível.
+   ========================================================================== */
+.card-pull-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(14, 17, 23, 0.72);
+    backdrop-filter: blur(3px);
+    animation: card-pull-fade 0.3s ease-out;
+}
+.card-pull-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    padding: 32px 40px;
+    min-width: 240px;
+    border-radius: 10px;
+    background: var(--hull-panel);
+    border: 2px solid var(--border-hi);
+    box-shadow: 0 0 30px rgba(0, 0, 0, 0.6);
+    animation: card-pull-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.card-pull-icon {
+    width: 64px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.card-pull-icon svg { width: 56px; height: 56px; }
+.card-pull-rarity {
+    font-family: var(--f-pixel);
+    font-size: 14px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+.card-pull-hash {
+    font-family: var(--f-data);
+    font-size: 13px;
+    color: var(--text-dim);
+    word-break: break-all;
+    text-align: center;
+}
+/* Cores por raridade (espelham CARD_RARITIES do backend) */
+.card-pull-card.common    { border-color: rgba(148, 163, 184, 0.5); }
+.card-pull-card.common    .card-pull-rarity { color: #94a3b8; }
+.card-pull-card.uncommon  { border-color: rgba(34, 197, 94, 0.5); }
+.card-pull-card.uncommon  .card-pull-rarity { color: #22c55e; }
+.card-pull-card.rare      { border-color: rgba(168, 85, 247, 0.55); }
+.card-pull-card.rare      .card-pull-rarity { color: #a855f7; }
+.card-pull-card.epic      { border-color: rgba(249, 115, 22, 0.55); }
+.card-pull-card.epic      .card-pull-rarity { color: #f97316; }
+.card-pull-card.legendary { border-color: rgba(255, 204, 0, 0.6); }
+.card-pull-card.legendary .card-pull-rarity { color: #ffcc00; }
+@keyframes card-pull-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes card-pull-pop {
+    0%   { transform: scale(0.6); opacity: 0; }
+    100% { transform: scale(1);   opacity: 1; }
 }
 
 /* ==========================================================================
@@ -2488,4 +2561,596 @@
     background: rgba(234, 179, 8, 0.15);
     color: var(--golden-hash);
     box-shadow: 0 0 10px rgba(234, 179, 8, 0.3);
+}
+
+/* ==========================================================================
+   FASE 4 — Itens dinâmicos gerados pelo JS (migração de design)
+   Coerente com o design system mecha sci-fi: cantos retos, fontes mono,
+   bordas --border-hi, painéis --hull-surface, acentos neon.
+   ========================================================================== */
+
+/* --- Texto flutuante de recompensa (anexado ao body, posicionado na célula) --- */
+.floating-text {
+    position: fixed;
+    z-index: 600;
+    pointer-events: none;
+    font-family: var(--f-pixel);
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+    animation: floatUp 1.2s ease-out forwards;
+}
+
+/* --- Leaderboard / Pools (rank-item + top-N) --- */
+.rank-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-dim);
+    font-size: 12px;
+}
+.rank-item:last-child { border-bottom: none; }
+.rank-item span:first-child { color: var(--text-main); font-weight: 600; }
+.rank-item span:last-child { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.rank-item.top-1 { background: rgba(255, 204, 0, 0.08); border-left: 2px solid var(--neon-gold); }
+.rank-item.top-1 span:first-child { color: var(--neon-gold); }
+.rank-item.top-2 { background: rgba(148, 163, 184, 0.08); border-left: 2px solid #94a3b8; }
+.rank-item.top-3 { background: rgba(247, 147, 26, 0.08); border-left: 2px solid var(--neon-amber); }
+
+/* --- Loot do boss (modal de derrota) --- */
+.boss-loot-text {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 6px 10px;
+    border: 1px solid var(--neon-gold);
+    background: rgba(255, 204, 0, 0.1);
+    color: var(--neon-gold);
+    font-weight: 700;
+    font-size: 13px;
+}
+
+/* --- Block Cards (coleção) --- */
+.block-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 12px 8px;
+    background: var(--hull-surface);
+    border: 1px solid var(--border-hi);
+    cursor: default;
+}
+.block-card-icon { width: 32px; height: 32px; color: var(--text-dim); }
+.block-card-icon svg { width: 100%; height: 100%; }
+.block-card-rarity {
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+.block-card-hash {
+    font-family: var(--f-data);
+    font-size: 14px;
+    color: var(--text-dim);
+}
+.block-card-stats {
+    font-size: 10px;
+    color: var(--text-muted);
+}
+.block-card-tooltip {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    min-width: 180px;
+    padding: 8px 10px;
+    background: var(--hull-dark);
+    border: 1px solid var(--border-hi);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+    font-size: 10px;
+    line-height: 1.5;
+    color: var(--text-main);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.15s ease;
+    z-index: 30;
+    pointer-events: none;
+}
+.block-card:hover .block-card-tooltip { opacity: 1; visibility: visible; }
+/* Raridades (mesma paleta do card-pull) */
+.block-card.common    { border-color: rgba(148, 163, 184, 0.4); }
+.block-card.common    .block-card-rarity { color: #94a3b8; }
+.block-card.uncommon  { border-color: rgba(34, 197, 94, 0.45); }
+.block-card.uncommon  .block-card-rarity { color: #22c55e; }
+.block-card.rare      { border-color: rgba(168, 85, 247, 0.5); }
+.block-card.rare      .block-card-rarity { color: #a855f7; }
+.block-card.epic      { border-color: rgba(249, 115, 22, 0.5); }
+.block-card.epic      .block-card-rarity { color: #f97316; }
+.block-card.legendary { border-color: rgba(255, 204, 0, 0.55); box-shadow: 0 0 12px rgba(255, 204, 0, 0.15); }
+.block-card.legendary .block-card-rarity { color: #ffcc00; }
+
+/* --- Chat (mensagens) --- */
+.chat-message {
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border-dim);
+    animation: chatMsgIn 0.2s ease-out;
+}
+.chat-message:last-child { border-bottom: none; }
+.chat-message-header {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+.chat-message-username {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--neon-cyan);
+}
+.chat-message-time {
+    font-size: 9px;
+    color: var(--text-muted);
+}
+.chat-message-text {
+    font-size: 12px;
+    color: var(--text-main);
+    overflow-wrap: anywhere;
+}
+@keyframes chatMsgIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+/* --- Amigos (lista) --- */
+.friend-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-dim);
+}
+.friend-item:last-child { border-bottom: none; }
+.friend-status {
+    width: 8px;
+    height: 8px;
+    flex: 0 0 auto;
+    background: var(--text-dark);
+    box-shadow: 0 0 6px rgba(0, 0, 0, 0.4);
+}
+.friend-item.online .friend-status { background: var(--neon-green); box-shadow: 0 0 6px rgba(0, 255, 136, 0.5); }
+.friend-item.offline .friend-name { color: var(--text-dim); }
+.friend-info { flex: 1 1 auto; min-width: 0; }
+.friend-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-main);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.friend-meta {
+    font-size: 10px;
+    color: var(--text-muted);
+}
+.friend-remove-btn {
+    flex: 0 0 auto;
+    padding: 4px 8px;
+    background: transparent;
+    border: 1px solid var(--border-hi);
+    color: var(--text-dim);
+    font-family: var(--f-tech);
+    font-size: 10px;
+    cursor: pointer;
+}
+.friend-remove-btn:hover { border-color: var(--neon-red); color: var(--neon-red); }
+.friends-empty {
+    padding: 16px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+/* --- Mercado P2P (listagens + histórico) --- */
+.market-listing {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid var(--border-dim);
+    background: var(--hull-surface);
+    margin-bottom: 8px;
+}
+.market-listing-icon { width: 28px; height: 28px; flex: 0 0 auto; color: var(--neon-cyan); }
+.market-listing-icon svg { width: 100%; height: 100%; }
+.market-listing-info { flex: 1 1 auto; min-width: 0; }
+.market-listing-name {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-main);
+}
+.market-listing-seller {
+    font-size: 10px;
+    color: var(--text-muted);
+}
+.market-listing-price {
+    flex: 0 0 auto;
+    text-align: right;
+}
+.market-listing-price-value {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--neon-green);
+    font-variant-numeric: tabular-nums;
+}
+.market-listing-price-label {
+    font-size: 8px;
+    color: var(--text-muted);
+    letter-spacing: 0.08em;
+}
+.market-listing-buy-btn {
+    flex: 0 0 auto;
+    padding: 6px 10px;
+    background: var(--hull-dark);
+    border: 1px solid var(--neon-cyan);
+    color: var(--neon-cyan);
+    font-family: var(--f-tech);
+    font-size: 10px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.market-listing-buy-btn:hover { background: rgba(0, 240, 255, 0.12); }
+.market-history-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border-dim);
+    font-size: 11px;
+}
+.market-history-item:last-child { border-bottom: none; }
+.market-history-type {
+    flex: 0 0 auto;
+    padding: 2px 6px;
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    border: 1px solid var(--neon-green);
+    color: var(--neon-green);
+}
+.market-history-type.sell { border-color: var(--neon-amber); color: var(--neon-amber); }
+.market-history-powerup { flex: 1 1 auto; min-width: 0; color: var(--text-main); display: inline-flex; align-items: center; gap: 4px; }
+.market-history-powerup svg { width: 14px; height: 14px; }
+.market-history-price { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.market-history-time { color: var(--text-muted); font-size: 10px; }
+.market-empty {
+    padding: 16px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+/* --- Season Pass (recompensas) --- */
+.season-reward-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-dim);
+    background: var(--hull-surface);
+    margin-bottom: 6px;
+    opacity: 0.55;
+}
+.season-reward-item.unlocked,
+.season-reward-item.available { opacity: 1; }
+.season-reward-item.claimed { opacity: 0.4; }
+.season-reward-item.available { border-color: var(--neon-cyan); }
+.season-reward-icon { width: 24px; height: 24px; flex: 0 0 auto; color: var(--text-dim); }
+.season-reward-icon svg { width: 100%; height: 100%; }
+.season-reward-item.unlocked .season-reward-icon,
+.season-reward-item.available .season-reward-icon { color: var(--neon-cyan); }
+.season-reward-item.claimed .season-reward-icon { color: var(--neon-green); }
+.season-reward-info { flex: 1 1 auto; min-width: 0; }
+.season-reward-level {
+    font-size: 9px;
+    color: var(--text-muted);
+    letter-spacing: 0.06em;
+}
+.season-reward-name {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-main);
+}
+.season-reward-type {
+    font-size: 9px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+}
+.season-reward-claim {
+    flex: 0 0 auto;
+    padding: 5px 10px;
+    background: transparent;
+    border: 1px solid var(--neon-cyan);
+    color: var(--neon-cyan);
+    font-family: var(--f-tech);
+    font-size: 10px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.season-reward-claim:hover { background: rgba(0, 240, 255, 0.12); }
+
+/* --- Skill Tree (ramos + nós) --- */
+.skill-branch {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-dim);
+}
+.skill-branch:last-child { border-bottom: none; }
+.skill-branch-title {
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--text-main);
+    letter-spacing: 0.04em;
+}
+.skill-branch-desc {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin: 2px 0 8px;
+}
+.skill-nodes {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 8px;
+}
+.skill-node {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    border: 1px solid var(--border-dim);
+    background: var(--hull-surface);
+    opacity: 0.5;
+}
+.skill-node.unlocked { opacity: 1; border-color: var(--neon-green); }
+.skill-node.available {
+    opacity: 1;
+    border-color: var(--neon-cyan);
+    cursor: pointer;
+    animation: pulseHint 1s infinite alternate;
+}
+.skill-node-icon { width: 20px; height: 20px; flex: 0 0 auto; color: var(--text-dim); }
+.skill-node-icon svg { width: 100%; height: 100%; }
+.skill-node.unlocked .skill-node-icon { color: var(--neon-green); }
+.skill-node.available .skill-node-icon { color: var(--neon-cyan); }
+.skill-node-info { flex: 1 1 auto; min-width: 0; }
+.skill-node-level {
+    display: block;
+    font-size: 9px;
+    color: var(--text-muted);
+    letter-spacing: 0.06em;
+}
+.skill-node-effect {
+    display: block;
+    font-size: 10px;
+    color: var(--text-main);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* --- Conquistas (interior do card + resumo) --- */
+.achievement-icon { width: 28px; height: 28px; color: var(--text-dim); }
+.achievement-icon svg { width: 100%; height: 100%; }
+.achievement-card.unlocked .achievement-icon { color: var(--neon-gold); }
+.achievement-name {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-main);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.achievement-progress-bar {
+    height: 4px;
+    background: var(--hull-dark);
+    border: 1px solid var(--border-dim);
+    overflow: hidden;
+}
+.achievement-progress-fill {
+    height: 100%;
+    background: var(--neon-cyan);
+    transition: width 0.4s ease;
+}
+.achievement-card.unlocked .achievement-progress-fill { background: var(--neon-gold); }
+.achievement-progress-text {
+    font-size: 9px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+.achievement-tooltip {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    min-width: 160px;
+    max-width: 220px;
+    padding: 8px 10px;
+    background: var(--hull-dark);
+    border: 1px solid var(--border-hi);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+    font-size: 10px;
+    line-height: 1.5;
+    color: var(--text-main);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.15s ease;
+    z-index: 30;
+    pointer-events: none;
+}
+.achievement-card:hover .achievement-tooltip,
+.achievement-card:focus .achievement-tooltip { opacity: 1; visibility: visible; }
+.achievement-tooltip-desc { color: var(--text-main); }
+.achievement-tooltip-bonus { color: var(--neon-green); margin-top: 4px; }
+.summary-count {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-main);
+}
+.summary-bonus {
+    font-size: 11px;
+    color: var(--neon-green);
+}
+
+/* --- Crates (modal de resultado) --- */
+.crate-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(14, 17, 23, 0.85);
+    backdrop-filter: blur(4px);
+    animation: card-pull-fade 0.3s ease-out;
+}
+.crate-modal-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 28px 32px;
+    min-width: 280px;
+    background: var(--hull-panel);
+    border: 1px solid var(--border-hi);
+    box-shadow: 0 0 40px rgba(0, 240, 255, 0.15);
+    animation: card-pull-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.crate-modal-content .crate-icon { width: 56px; height: 56px; color: var(--neon-cyan); }
+.crate-modal-content .crate-icon svg { width: 100%; height: 100%; }
+.crate-modal-content .crate-icon.revealed { animation: crateReveal 0.5s ease-out; }
+.crate-result-title {
+    font-family: var(--f-pixel);
+    font-size: 12px;
+    color: var(--text-main);
+    letter-spacing: 0.06em;
+}
+.crate-result-item {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-main);
+}
+.crate-result-rarity {
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+.rarity-common    { color: #94a3b8; }
+.rarity-uncommon  { color: #22c55e; }
+.rarity-rare      { color: #a855f7; }
+.rarity-epic      { color: #f97316; }
+.rarity-legendary { color: #ffcc00; text-shadow: 0 0 8px rgba(255, 204, 0, 0.5); }
+.crate-close-btn {
+    margin-top: 8px;
+    padding: 8px 20px;
+    background: transparent;
+    border: 1px solid var(--neon-cyan);
+    color: var(--neon-cyan);
+    font-family: var(--f-tech);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.crate-close-btn:hover { background: rgba(0, 240, 255, 0.12); }
+@keyframes crateReveal {
+    0% { transform: scale(0.6) rotate(-8deg); opacity: 0.4; }
+    60% { transform: scale(1.15) rotate(4deg); }
+    100% { transform: scale(1) rotate(0); opacity: 1; }
+}
+
+/* --- Staking (histórico) --- */
+.staking-history-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border-dim);
+    font-size: 11px;
+}
+.staking-history-item:last-child { border-bottom: none; }
+.staking-history-type {
+    flex: 0 0 auto;
+    padding: 2px 6px;
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    border: 1px solid var(--neon-cyan);
+    color: var(--neon-cyan);
+}
+.stake-created .staking-history-type { border-color: var(--neon-cyan); color: var(--neon-cyan); }
+.stake-unstake .staking-history-type { border-color: var(--neon-amber); color: var(--neon-amber); }
+.stake-expired .staking-history-type { border-color: var(--text-dim); color: var(--text-dim); }
+.staking-history-amount { flex: 1 1 auto; color: var(--text-main); font-variant-numeric: tabular-nums; }
+.staking-history-date { color: var(--text-muted); font-size: 10px; }
+
+/* ==========================================================================
+   FASE 4 — Keyframes de efeito (referenciados mas nunca definidos)
+   ========================================================================== */
+
+/* Flash de entrada do boss (aplicado no body) */
+@keyframes bossFlash {
+    0% { box-shadow: inset 0 0 0 0 rgba(239, 68, 68, 0); }
+    30% { box-shadow: inset 0 0 120px 20px rgba(239, 68, 68, 0.35); }
+    100% { box-shadow: inset 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+/* Tremor na entrada/dano do boss (aplicado no body) */
+@keyframes bossShake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-6px); }
+    40% { transform: translateX(5px); }
+    60% { transform: translateX(-4px); }
+    80% { transform: translateX(3px); }
+}
+
+/* Dano na barra de HP do boss */
+@keyframes bossHpDamage {
+    0% { filter: brightness(2.2); }
+    100% { filter: brightness(1); }
+}
+
+/* Pulso do ícone do boss */
+@keyframes bossIconPulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.15); opacity: 0.8; }
+}
+
+/* Pulso do modal de derrota do boss */
+@keyframes bossDefeatPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    50% { box-shadow: 0 0 30px 4px rgba(239, 68, 68, 0.4); }
+}
+
+/* Flash de halving (aplicado no body) */
+@keyframes halvingFlash {
+    0% { box-shadow: inset 0 0 0 0 rgba(255, 204, 0, 0); }
+    25% { box-shadow: inset 0 0 140px 30px rgba(255, 204, 0, 0.3); }
+    100% { box-shadow: inset 0 0 0 0 rgba(255, 204, 0, 0); }
+}
+
+/* Flash de slashing (aplicado no body) */
+@keyframes slashingFlash {
+    0% { box-shadow: inset 0 0 0 0 rgba(255, 51, 85, 0); }
+    30% { box-shadow: inset 0 0 100px 20px rgba(255, 51, 85, 0.35); }
+    100% { box-shadow: inset 0 0 0 0 rgba(255, 51, 85, 0); }
+}
+
+/* Pulso do timer crítico da corrida (barra de progresso) */
+@keyframes rbfPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+}
+
+/* Pulso do level-up (referenciado em .leveled-up, nunca definido) */
+@keyframes levelUpPulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.25); color: var(--neon-gold); }
+    100% { transform: scale(1); }
 }
