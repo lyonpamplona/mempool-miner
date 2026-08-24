@@ -5,16 +5,28 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
-
 from app.storage import (
     LEGACY_LEADERBOARD_KEY,
     LEGACY_MEMPOOL_COUNT_KEY,
     MIGRATE_COUNTER_SCRIPT,
     MIGRATE_LEADERBOARD_SCRIPT,
-    migrate_legacy_default,
+    energy_key,
+    energy_round_key,
     leaderboard_key,
     mempool_count_key,
+    migrate_legacy_default,
 )
+
+
+def test_energy_round_key_shares_realm_slot_and_isolates_rounds() -> None:
+    energy = energy_key("signet", "MinerQA")
+    first = energy_round_key("signet", "MinerQA", "round-a")
+    second = energy_round_key("signet", "MinerQA", "round-b")
+
+    assert "{signet}" in energy
+    assert "{signet}" in first
+    assert first != second
+    assert first.endswith(":MinerQA:round-a")
 
 
 @pytest.mark.asyncio

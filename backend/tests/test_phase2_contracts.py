@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from app import main as main_module
 from app import season_pass
-
 
 
 def _key(realm_id: str, username: str) -> str:
@@ -172,20 +171,21 @@ async def test_market_purchase_keeps_escrowed_seller_inventory_unchanged(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Comprar não pode remover outra unidade do vendedor após o escrow no sell."""
+    listing_id = "123e4567-e89b-12d3-a456-426614174000"
     listing = {
+        "listing_id": listing_id,
         "seller": "Seller",
         "powerup_id": "scanner",
         "price": 1000,
     }
     redis_client = AsyncMock()
-    redis_client.zpopmin.return_value = [(json.dumps(listing), 1000.0)]
-    redis_client.hget.return_value = "2000"
+    redis_client.zrange.return_value = [(json.dumps(listing), 1000.0)]
     redis_client.eval.return_value = "ok"
     monkeypatch.setattr(main_module, "redis_client", redis_client)
 
     result = await main_module.buy_from_market(
         "regtest",
-        main_module.MarketBuyRequest(username="Buyer"),
+        main_module.MarketBuyRequest(username="Buyer", listing_id=listing_id),
     )
 
     assert result["status"] == "purchased"
@@ -194,6 +194,145 @@ async def test_market_purchase_keeps_escrowed_seller_inventory_unchanged(
     script_keys = eval_args[2 : 2 + key_count]
     assert main_module.powerups_key("regtest", "Seller") not in script_keys
     assert "powerups_seller" not in eval_args[0]
+
+
+@pytest.mark.asyncio
+async def test_market_purchase_selects_listing_and_removes_it_atomically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Clique deve comprar o listing indicado sem janela de pop/rollback."""
+    listing_id = "123e4567-e89b-12d3-a456-426614174000"
+    other_listing = {
+        "listing_id": "123e4567-e89b-12d3-a456-426614174001",
+        "seller": "OtherSeller",
+        "powerup_id": "magnet",
+        "price": 500,
+    }
+    selected_listing = {
+        "listing_id": listing_id,
+        "seller": "SelectedSeller",
+        "powerup_id": "scanner",
+        "price": 1000,
+    }
+    redis_client = AsyncMock()
+    redis_client.zrange.return_value = [
+        (json.dumps(other_listing), 500.0),
+        (json.dumps(selected_listing), 1000.0),
+    ]
+    redis_client.eval.return_value = "ok"
+    monkeypatch.setattr(main_module, "redis_client", redis_client)
+
+    result = await main_module.buy_from_market(
+        "regtest",
+        main_module.MarketBuyRequest(username="Buyer", listing_id=listing_id),
+    )
+
+    assert result["status"] == "purchased"
+    assert result["seller"] == "SelectedSeller"
+    redis_client.zpopmin.assert_not_awaited()
+    redis_client.zadd.assert_not_awaited()
+    eval_args = redis_client.eval.await_args.args
+    key_count = eval_args[1]
+    script_keys = eval_args[2 : 2 + key_count]
+    assert main_module.market_list_key("regtest") in script_keys
+    assert "zrem" in eval_args[0].lower()
+
+
+@pytest.mark.asyncio
+async def test_market_purchase_publishes_sale_event_for_online_seller(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Vendedor conectado deve receber listing e saldo atualizados via WS."""
+    listing_id = "123e4567-e89b-12d3-a456-426614174000"
+    listing = {
+        "listing_id": listing_id,
+        "seller": "Seller",
+        "powerup_id": "scanner",
+        "price": 1000,
+    }
+    redis_client = AsyncMock()
+    redis_client.zrange.return_value = [(json.dumps(listing), 1000.0)]
+    redis_client.eval.return_value = "ok"
+    monkeypatch.setattr(main_module, "redis_client", redis_client)
+
+    await main_module.buy_from_market(
+        "regtest",
+        main_module.MarketBuyRequest(username="Buyer", listing_id=listing_id),
+    )
+
+    redis_client.publish.assert_awaited_once()
+    channel, raw_event = redis_client.publish.await_args.args
+    event = json.loads(raw_event)
+    assert channel == main_module.events_channel("regtest")
+    assert event["action"] == "market_sale"
+    assert event["realm_id"] == "regtest"
+    assert event["listing_id"] == listing_id
+    assert event["seller"] == "Seller"
+    assert event["buyer"] == "Buyer"
+    assert event["seller_earnings"] == 950
+
+
+@pytest.mark.asyncio
+async def test_market_purchase_stays_successful_when_sale_broadcast_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PubSub é best-effort e não pode desfazer semanticamente um commit Lua."""
+    listing_id = "123e4567-e89b-12d3-a456-426614174000"
+    listing = {
+        "listing_id": listing_id,
+        "seller": "Seller",
+        "powerup_id": "scanner",
+        "price": 1000,
+    }
+    redis_client = AsyncMock()
+    redis_client.zrange.return_value = [(json.dumps(listing), 1000.0)]
+    redis_client.eval.return_value = "ok"
+    redis_client.publish.side_effect = RuntimeError("pubsub indisponível")
+    monkeypatch.setattr(main_module, "redis_client", redis_client)
+
+    result = await main_module.buy_from_market(
+        "regtest",
+        main_module.MarketBuyRequest(username="Buyer", listing_id=listing_id),
+    )
+
+    assert result["status"] == "purchased"
+    assert result["buyer"] == "Buyer"
+    assert result["seller"] == "Seller"
+
+
+@pytest.mark.asyncio
+async def test_skill_upgrade_checks_and_mutates_in_one_redis_script(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ponto disponível e nível máximo não podem sofrer race TOCTOU."""
+    redis_client = MagicMock()
+    redis_client.eval = AsyncMock(return_value=["ok", 1, 0])
+    redis_client.hgetall = AsyncMock(
+        return_value={"points_remaining": "1", "mining_level": "0"}
+    )
+    redis_client.hget = AsyncMock(return_value="10")
+    pipe = MagicMock()
+    pipe.hincrby.return_value = pipe
+    pipe.expire.return_value = pipe
+    pipe.execute = AsyncMock(return_value=[1, 0, True])
+    redis_client.pipeline.return_value = pipe
+    monkeypatch.setattr(main_module, "redis_client", redis_client)
+    monkeypatch.setattr(
+        main_module,
+        "get_skills",
+        AsyncMock(return_value={"branches": {}, "points_remaining": 0}),
+    )
+
+    result = await main_module.upgrade_skill(
+        "regtest",
+        "Miner",
+        main_module.SkillUpgradeRequest(username="Miner", branch="mining"),
+    )
+
+    assert result["points_remaining"] == 0
+    redis_client.eval.assert_awaited_once()
+    redis_client.pipeline.assert_not_called()
+    redis_client.hgetall.assert_not_awaited()
 
 
 def test_stats_update_accepts_fields_used_by_daily_missions() -> None:

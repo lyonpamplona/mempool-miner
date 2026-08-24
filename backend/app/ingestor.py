@@ -83,9 +83,11 @@ COMMIT_BLOCK_SCRIPT = """
 if redis.call('get', KEYS[1]) ~= ARGV[1] then
   return 0
 end
+local current_epoch = redis.call('get', KEYS[2])
+local epoch_changed = (current_epoch ~= ARGV[2])
 redis.call('set', KEYS[2], ARGV[2])
 redis.call('set', KEYS[3], ARGV[3])
-if ARGV[4] ~= '' then
+if epoch_changed and ARGV[4] ~= '' then
   redis.call('publish', KEYS[4], ARGV[4])
 end
 return 1

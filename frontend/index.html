@@ -130,7 +130,11 @@
                 <div class="race-box">
                     <div class="race-header">
                         <span>LOCAL_NODE_DECRYPT</span>
-                        <span class="u-inline-009">GLOBAL_NETWORK_LIMIT</span>
+                        <!-- Fase 7 (pontas soltas): limite efetivo da rodada —
+                             antes o HUD só mostrava "GLOBAL_NETWORK_LIMIT"
+                             genérico e o jogador não via por que o tempo
+                             "acelerava" (Lightning=20s, RBF=15s, Halving -30s). -->
+                        <span class="u-inline-009" id="race-limit-label">GLOBAL_NETWORK_LIMIT</span>
                     </div>
                     <div class="race-chute">
                         <div class="race-bar" id="race-fill"></div>
@@ -482,6 +486,13 @@
                         <div class="u-inline-040" id="market-sell">
                             <select class="input-mecha u-inline-035" id="market-sell-select"></select>
                             <input type="number" class="input-mecha u-inline-035" id="market-sell-price" placeholder="Preço (SATS)">
+                            <!-- Fase 8 (pontas soltas): CTA quando o inventário
+                                 está vazio — antes a aba VENDER era um
+                                 "botão morto" (select vazio + botão inerte). -->
+                            <p class="market-empty market-empty-cta" id="market-sell-empty" hidden>
+                                <span class="market-empty-msg">Você não tem power-ups para vender.</span>
+                                <span class="market-empty-hint">Jogue para ganhar power-ups (crates, conquistas, season pass) e volte aqui.</span>
+                            </p>
                         </div>
                         <select class="input-mecha u-inline-035" id="market-filter-powerup" aria-label="Filtrar mercado por power-up">
                             <option value="all">Todos os power-ups</option>

@@ -65,17 +65,9 @@
       return items
   ```
 
-### C-04: Handler duplo no botão `next-btn` (addEventListener + onclick)
-- **Tipo:** Função quebrada
-- **Localização:** `game.js:634-637` + `game.js:1886-1920`
-- **Descrição:** O botão `#next-btn` tem um `addEventListener('click')` permanente (linha 634) que chama `prepareNextBlock()`. Simultaneamente, `showOrphanBlockSalvage()` define `btn.onclick = rbfHandler` (linha 1920). Quando o modo RBF é ativo, o `addEventListener` verifica `isRbfMode` e retorna — OK. Porém, quando o usuário clica e **não tem saldo suficiente** para RBF (linha 1914-1917), `isRbfMode` é setado para `false` e `showResult(false, ...)` é chamado via `scheduleForSession`. Se o usuário clicar novamente antes dos 500ms, o `addEventListener` original chama `prepareNextBlock()` enquanto `showResult` ainda está pendente — estado inconsistente.
-- **Impacto:** Em cenários de saldo insuficiente, o jogador pode pular o modal de resultado e ir direto para a próxima rodada sem feedback adequado.
-- **Sugestão:** Usar um único mecanismo de handler. Remover o `addEventListener` do `next-btn` e gerenciar todos os estados via `onclick` com um estado machine claro:
-  ```js
-  // Remover game.js:634-637
-  // document.getElementById('next-btn').addEventListener('click', ...);
-  // Gerenciar tudo via btn.onclick em showResult e showOrphanBlockSalvage
-  ```
+### C-04: Handler do botão `next-btn` — **RESOLVIDO**
+- O frontend atual usa `setNextButtonAction()` como máquina de ação única. O listener permanente consome e limpa `nextButtonAction`; RBF e resultado apenas substituem essa ação.
+- A flag write-only `isRbfMode` foi removida na Fase 5 porque não participava mais do controle de concorrência.
 
 ---
 

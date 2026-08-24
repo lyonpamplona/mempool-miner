@@ -117,7 +117,10 @@ async def get_season_data(
 
     raw = await redis_client.hgetall(sk_key)
     current_level = int(raw.get("level", 0))
-    current_xp = int(raw.get("xp", 0))
+    # Fase 4 (pontas soltas): int(float(...)) tolera valores legados gravados
+    # como "67.5" — antes, int("67.5") lançava ValueError e o endpoint
+    # respondia 500 ("invalid literal for int() with base 10: '67.5'").
+    current_xp = int(float(raw.get("xp", 0)))
     is_premium = raw.get("premium", "0") == "1"
     claimed_rewards = (
         json.loads(raw.get("claimed_rewards", "[]"))
@@ -180,6 +183,9 @@ async def add_season_xp(
     get_network_definition_fn,
 ) -> dict[str, Any]:
     """Adiciona XP à temporada do jogador."""
+    # Fase 4 (pontas soltas): coerção para int — o frontend pode enviar float
+    # (ex.: 67.5) se o Math.round não estiver aplicado; grava str(int) no Redis.
+    xp_amount = int(float(xp_amount))  # tolera int, float e string decimal ("67.5")
     if xp_amount <= 0:
         raise ValueError("XP deve ser positivo")
 
@@ -187,7 +193,8 @@ async def add_season_xp(
     sk_key = season_key_fn(definition.realm_id, username)
     raw = await redis_client.hgetall(sk_key)
     current_level = int(raw.get("level", 0))
-    current_xp = int(raw.get("xp", 0))
+    # Fase 4: int(float(...)) tolera valores legados gravados como "67.5".
+    current_xp = int(float(raw.get("xp", 0)))
 
     new_xp = current_xp + xp_amount
     new_level = current_level

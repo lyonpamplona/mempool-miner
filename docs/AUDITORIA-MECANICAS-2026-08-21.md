@@ -188,14 +188,14 @@ O shell (73 classes `u-inline-*` do HTML) está 100% mapeado. O que falta são a
 
 | # | Ponta | Evidência | Impacto |
 |---|---|---|---|
-| B1 | 8 keyframes indefinidos | `bossFlash`, `bossShake`, `bossHpDamage`, `bossIconPulse`, `bossDefeatPulse`, `halvingFlash`, `slashingFlash`, `rbfPulse` (referenciados em `pixel.css:695,721,749,751,1299,1471,1801` e `game.js:3155`) | todos os flashes/tremores de boss, halving e slashing são silenciosamente ignorados |
-| B2 | 3 CSS vars indefinidas | `--error-red`, `--lightning-blue`, `--warning-orange` (usadas em `game.js:2415,2419,2442,2489,1809,2518,3134,3154,3191`) | título do RBF, timer do boss, linhas L2 e textos de erro perdem a cor de destaque |
-| B3 | `.boss-loot-text` sem CSS | `game.js:3244` | linha de loot no modal de derrota do boss sem estilo |
-| B4 | Desconto de hint não aplicado | `game.js:1766` usa `HINT_PRICE` fixo; `getHintPrice` (`game.js:2853`) e `hintCost` (`game.js:4707`) nunca usados na compra | bônus de conquistas/skill tree de "desconto em dica" não reduz o preço efetivo |
-| B5 | `sprint-timer-display` duplicação | `game.js:5830-5836` cria o timer se não encontrar; o HTML já tem o elemento (`index.html:320-323`) | timer pode aparecer duplicado |
-| B6 | Rótulo de energia errado | HTML diz "10K SATS" (`index.html:256`); custo real é 2.000 sats (`ENERGY_BUY_COST`, `main.py:4262`); JS corrige só após a 1ª compra (`game.js:4850`) | rótulo mentiroso até a primeira compra |
-| B7 | Rótulo de crate errado | botão diz "50K" (`index.html:272`); preço real é 5.000 sats (`CRATE_PRICES`, `main.py:3502`) | rótulo mentiroso |
-| B8 | Código morto | `toggleChatPanel` (nunca chamada), `trackPoolRank1` (nunca chamada), `showCardPullAnimation` (nunca chamada), `crates/claim` (nunca chamada) | sem impacto funcional, mas dívida técnica |
+| B1 | **RESOLVIDO** — keyframes | animações de boss, halving, slashing e RBF estão definidas em `pixel.css` | efeitos ativos |
+| B2 | **RESOLVIDO** — variáveis CSS | `--error-red`, `--lightning-blue` e `--warning-orange` estão definidas no `:root` | cores consistentes |
+| B3 | **RESOLVIDO** — `.boss-loot-text` | regra presente em `pixel.css` | loot estilizado |
+| B4 | **RESOLVIDO** — desconto de dica | `buyHint()` usa `getHintPrice()`, composto a partir dos bônus atuais | desconto aplicado |
+| B5 | **RESOLVIDO** — timer Sprint único | usa `#sprint-timer-display` do HTML; criação JS é somente fallback quando o elemento não existe | sem duplicação |
+| B6 | **RESOLVIDO** — rótulo de energia | HTML mostra `2,000 SATS`, igual ao custo real; o JS preserva o markup original | consistente |
+| B7 | **RESOLVIDO** — rótulo de crate | HTML mostra `5K`, igual ao preço real de 5.000 sats | consistente |
+| B8 | **RESOLVIDO** — código morto/integrações | `toggleChatPanel` e `trackPoolRank1` removidas; `showCardPullAnimation` é chamada no claim de card; `crates/claim` é chamado nos fluxos de bloco concluído | sem dívida remanescente nesses símbolos |
 | B9 | Divergências docs↔código | ver §9 | docs desatualizados |
 
 ## 9. Divergências docs↔código (código é a fonte de verdade)
@@ -273,7 +273,7 @@ Adicionar ao `pixel.css` (respeitando o tema pixel 8-bit existente — cores do 
 | # | Correção | Esforço |
 |---|---|---|
 | 5.1 | Atualizar `docs/MECANICAS.md` com as 10 divergências do §9 (power-ups, 30 conquistas, 11 ranks, MEV +50k, 4 níveis de hardware, decaimento de halving, season trimestral, localização da loja, 11 campos de sessão) | ~1h |
-| 5.2 | Remover/ativar código morto: `toggleChatPanel`, `trackPoolRank1`, `showCardPullAnimation` (ativar em F2.4), `sprint-timer-display` duplicação (usar o do HTML) | ~30min |
+| 5.2 | **Concluído:** `toggleChatPanel`/`trackPoolRank1` removidas; card pull e crate claim ativos; timer Sprint reutiliza o elemento único do HTML | concluído |
 | 5.3 | Auditoria final (agents) + commit manual pelo usuário | — |
 
 **Total estimado: ~18-22h de trabalho**, em 5 fases com health check entre cada uma.

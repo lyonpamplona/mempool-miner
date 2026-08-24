@@ -14,6 +14,7 @@ import logging
 import os
 import random
 import time
+import uuid
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 from urllib.parse import urlsplit
@@ -41,6 +42,9 @@ from app.global_events import (
     publish_event_status,
 )
 from app.storage import (
+    ENERGY_BUY_SCRIPT,
+    ENERGY_REFUND_SCRIPT,
+    ENERGY_SPEND_SCRIPT,
     PREFIX,
     achievements_key,
     cards_set_key,
@@ -50,6 +54,7 @@ from app.storage import (
     crates_key,
     decoder_key,
     energy_key,
+    energy_round_key,
     events_channel,
     leaderboard_key,
     level_key,
@@ -132,6 +137,14 @@ PUBLIC_EVENT_FIELDS = {
         }
     ),
     "leaderboard_reset": frozenset({"realm_id", "epoch"}),
+    "market_sale": frozenset({
+        "listing_id",
+        "seller",
+        "buyer",
+        "powerup_id",
+        "price",
+        "seller_earnings",
+    }),
     # Boss Battles: evento de bloco especial a cada 50 blocos
     "boss_block": frozenset({
         "block_count",
@@ -918,8 +931,23 @@ async def update_player_state(realm_id: str, username: str, data: PlayerStateUpd
     key = player_state_key(definition.realm_id, username)
     updates = data.model_dump(exclude={"username"}, exclude_none=True)
     if updates:
-        await redis_client.hset(key, mapping=updates)
-        await redis_client.expire(key, 86400)  # 24h TTL
+        # Coerce todos os valores para string antes do hset.
+        # O Redis não aceita bool Python (DataError) — e o syncPlayerState
+        # envia lightning_active como bool. Sem essa coerção, o hset falha
+        # e o saldo NUNCA é sincronizado (causa raiz do "saldo insuficiente").
+        # Bool vira "true"/"false" (minúsculo) para casar com a leitura em
+        # get_player_state (raw.get("lightning_active", "false") == "true").
+        coerced = {}
+        for k, v in updates.items():
+            if isinstance(v, bool):
+                coerced[k] = "true" if v else "false"
+            else:
+                coerced[k] = str(v)
+        await redis_client.hset(key, mapping=coerced)
+        # Sem TTL: o estado do jogador (saldo, hardware, etc.) é persistente.
+        # persist() limpa qualquer TTL residual de chaves criadas com o código
+        # antigo (que setava expire 86400) — senão o saldo zeraria em 24h.
+        await redis_client.persist(key)
     return await get_player_state(realm_id, username)
 
 
@@ -1457,7 +1485,10 @@ async def claim_mission_reward(realm_id: str, username: str, mission_id: str) ->
     # Adiciona ao saldo do jogador
     state_key = player_state_key(definition.realm_id, username)
     await redis_client.hincrby(state_key, "balance", reward_amount)
-    await redis_client.expire(state_key, 86400)
+    # Sem TTL no player state (Fase 2 — ponta solta): o 8º expire(86400) que
+    # a auditoria encontrou. Sem persist(), uma chave antiga com TTL residual
+    # continuaria expirando o saldo em 24h após o claim.
+    await redis_client.persist(state_key)
 
     logger.info(
         "Recompensa coletada: %d sats para %s em %s (missão: %s)",
@@ -1754,35 +1785,50 @@ async def upgrade_skill(realm_id: str, username: str, data: SkillUpgradeRequest)
         )
 
     sk_key = skills_key(definition.realm_id, username)
-    raw = await redis_client.hgetall(sk_key)
-
     branch_level_key = f"{data.branch}_level"
-    current_level = int(raw.get(branch_level_key, 0))
+    lua_script = """
+    local skill_key = KEYS[1]
+    local branch_key = ARGV[1]
+    local max_level = tonumber(ARGV[2])
+    local ttl = tonumber(ARGV[3])
 
-    # Verifica se já está no máximo
-    if current_level >= 5:
+    local key_type = redis.call('type', skill_key)['ok']
+    if key_type ~= 'none' and key_type ~= 'hash' then
+        return {'invalid_storage_type', '0', '0'}
+    end
+
+    local current_level = tonumber(redis.call('hget', skill_key, branch_key) or '0')
+    local points_remaining = tonumber(redis.call('hget', skill_key, 'points_remaining') or '0')
+    if current_level >= max_level then
+        return {'max_level', tostring(current_level), tostring(points_remaining)}
+    end
+    if points_remaining < 1 then
+        return {'insufficient_points', tostring(current_level), tostring(points_remaining)}
+    end
+
+    local new_level = redis.call('hincrby', skill_key, branch_key, 1)
+    local new_points = redis.call('hincrby', skill_key, 'points_remaining', -1)
+    redis.call('expire', skill_key, ttl)
+    return {'ok', tostring(new_level), tostring(new_points)}
+    """
+    eval_result = await redis_client.eval(
+        lua_script,
+        1,
+        sk_key,
+        branch_level_key,
+        "5",
+        "86400",
+    )
+    status_raw, new_level_raw, new_points_raw = eval_result
+    status = status_raw.decode() if isinstance(status_raw, bytes) else str(status_raw)
+    new_level = int(new_level_raw)
+    new_points = int(new_points_raw)
+    if status == "max_level":
         raise HTTPException(status_code=400, detail=f"Ramo {data.branch} já está no nível máximo (5)")
-
-    # Verifica pontos disponíveis
-    points_remaining = int(raw.get("points_remaining", 0))
-    if points_remaining < 1:
+    if status == "insufficient_points":
         raise HTTPException(status_code=400, detail="Pontos de habilidade insuficientes")
-
-    # Obtém nível do jogador para recalcular pontos
-    lvl_key = level_key(definition.realm_id, username)
-    lvl_raw = await redis_client.hget(lvl_key, "level")
-    player_level = int(lvl_raw) if lvl_raw else 1
-    total_points = _calculate_skill_points(player_level)
-
-    # Atualiza atomicamente: incrementa nível do ramo, decrementa pontos
-    pipe = redis_client.pipeline()
-    pipe.hincrby(sk_key, branch_level_key, 1)
-    pipe.hincrby(sk_key, "points_remaining", -1)
-    pipe.expire(sk_key, 86400)
-    results = await pipe.execute()
-
-    new_level = current_level + 1
-    new_points = points_remaining - 1
+    if status != "ok":
+        raise HTTPException(status_code=500, detail="Estrutura interna da árvore de habilidades inválida")
 
     logger.info(
         "Skill upgrade: %s -> %s nível %d (pontos restantes: %d)",
@@ -2422,6 +2468,17 @@ class MarketBuyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     username: Username
+    listing_id: str = Field(
+        min_length=32,
+        max_length=64,
+        pattern=r"^[a-f0-9-]+$",
+    )
+
+
+def market_listing_id(member: str | bytes) -> str:
+    """Retorna ID estável também para listings legados sem UUID persistido."""
+    raw = member.decode() if isinstance(member, bytes) else member
+    return hashlib.sha256(raw.encode()).hexdigest()
 
 
 async def _get_player_inventory(realm_id: str, username: str) -> dict[str, int]:
@@ -2500,6 +2557,7 @@ async def _list_market(realm_id: str, *, powerup_filter: str | None = None,
         if seller_filter and listing.get("seller") != seller_filter:
             continue
 
+        listing.setdefault("listing_id", market_listing_id(member_str))
         listing["price"] = int(score)
         listing["price_formatted"] = f"{int(score):,}"
         listings.append(listing)
@@ -2591,6 +2649,7 @@ async def sell_on_market(realm_id: str, data: MarketSellRequest) -> dict[str, An
     market_key = market_list_key(realm)
     timestamp = datetime.datetime.now(datetime.timezone.utc)
     listing_data = {
+        "listing_id": str(uuid.uuid4()),
         "seller": data.username,
         "powerup_id": data.powerup_id,
         "powerup_name": POWERUP_DEFINITIONS[data.powerup_id]["name"],
@@ -2679,20 +2738,26 @@ async def buy_from_market(realm_id: str, data: MarketBuyRequest) -> dict[str, An
     realm = definition.realm_id
     buyer = data.username
 
-    # Obtém o listing mais barato (primeiro do Sorted Set)
+    # Localiza o listing escolhido. A remoção só acontece no Lua transacional.
     market_key = market_list_key(realm)
-    result = await redis_client.zpopmin(market_key, 1)
+    selected: tuple[str | bytes, float, dict[str, Any]] | None = None
+    raw_listings = await redis_client.zrange(market_key, 0, -1, withscores=True)
+    for member_str, price in raw_listings:
+        try:
+            listing = json.loads(member_str)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        candidate_id = listing.get("listing_id") or market_listing_id(member_str)
+        if candidate_id == data.listing_id:
+            listing["listing_id"] = candidate_id
+            selected = (member_str, float(price), listing)
+            break
 
-    if not result:
-        raise HTTPException(status_code=404, detail="Mercado vazio — nenhum power-up à venda")
+    if selected is None:
+        raise HTTPException(status_code=404, detail="Listing não encontrado")
 
-    member_str, price = result[0]
-
-    try:
-        listing = json.loads(member_str)
-    except (json.JSONDecodeError, TypeError):
-        # Listing corrompido — remove e tenta o próximo
-        raise HTTPException(status_code=500, detail="Listing corrompido — tente novamente")
+    member_str, price, listing = selected
+    price = int(price)
 
     seller = listing["seller"]
     powerup_id = listing["powerup_id"]
@@ -2707,20 +2772,23 @@ async def buy_from_market(realm_id: str, data: MarketBuyRequest) -> dict[str, An
 
     state_key = player_state_key(realm, buyer)
 
-    # Transação atômica via script Lua
+    # Transação atômica: valida e remove o listing escolhido junto da transferência.
     lua_script = """
-    local buyer_key = KEYS[1]
-    local seller_key = KEYS[2]
-    local powerups_buyer = KEYS[3]
-    local history_key = KEYS[4]
-    local price_key = KEYS[5]
+    local market_key = KEYS[1]
+    local buyer_key = KEYS[2]
+    local seller_key = KEYS[3]
+    local powerups_buyer = KEYS[4]
+    local history_key = KEYS[5]
+    local price_key = KEYS[6]
 
+    local market_type = redis.call('type', market_key)['ok']
     local buyer_type = redis.call('type', buyer_key)['ok']
     local seller_type = redis.call('type', seller_key)['ok']
     local inventory_type = redis.call('type', powerups_buyer)['ok']
     local history_type = redis.call('type', history_key)['ok']
     local price_type = redis.call('type', price_key)['ok']
-    if (buyer_type ~= 'none' and buyer_type ~= 'hash')
+    if (market_type ~= 'none' and market_type ~= 'zset')
+        or (buyer_type ~= 'none' and buyer_type ~= 'hash')
         or (seller_type ~= 'none' and seller_type ~= 'hash')
         or (inventory_type ~= 'none' and inventory_type ~= 'hash')
         or (history_type ~= 'none' and history_type ~= 'zset')
@@ -2728,25 +2796,27 @@ async def buy_from_market(realm_id: str, data: MarketBuyRequest) -> dict[str, An
         return 'invalid_storage_type'
     end
 
-    -- Debita do comprador
+    local listed_price = redis.call('zscore', market_key, ARGV[1])
+    if not listed_price then
+        return 'listing_missing'
+    end
+    if tonumber(listed_price) ~= tonumber(ARGV[2]) then
+        return 'listing_changed'
+    end
+
     local buyer_bal = tonumber(redis.call('hget', buyer_key, 'balance') or '0')
-    if buyer_bal < tonumber(ARGV[1]) then
+    if buyer_bal < tonumber(ARGV[3]) then
         return 'buyer_insufficient'
     end
-    redis.call('hincrby', buyer_key, 'balance', -tonumber(ARGV[1]))
+    if redis.call('zrem', market_key, ARGV[1]) ~= 1 then
+        return 'listing_missing'
+    end
 
-    -- Credita ao vendedor (menos taxa)
-    redis.call('hincrby', seller_key, 'balance', tonumber(ARGV[2]))
-
-    -- O item já saiu do vendedor ao ser colocado em escrow no listing.
-    redis.call('hincrby', powerups_buyer, ARGV[3], 1)
-
-    -- Registra no histórico de vendas
-    redis.call('zadd', history_key, ARGV[4], ARGV[5])
-
-    -- Registra preço no índice
-    redis.call('zadd', price_key, ARGV[6], ARGV[4])
-
+    redis.call('hincrby', buyer_key, 'balance', -tonumber(ARGV[3]))
+    redis.call('hincrby', seller_key, 'balance', tonumber(ARGV[4]))
+    redis.call('hincrby', powerups_buyer, ARGV[5], 1)
+    redis.call('zadd', history_key, ARGV[6], ARGV[7])
+    redis.call('zadd', price_key, ARGV[8], ARGV[6])
     return 'ok'
     """
 
@@ -2756,12 +2826,15 @@ async def buy_from_market(realm_id: str, data: MarketBuyRequest) -> dict[str, An
 
     eval_result = await redis_client.eval(
         lua_script,
-        5,
+        6,
+        market_key,
         state_key,
         player_state_key(realm, seller),
         powerups_key(realm, buyer),
         history_key,
         market_price_index_key(realm, powerup_id),
+        member_str,
+        str(price),
         str(total_cost),
         str(seller_earnings),
         powerup_id,
@@ -2772,14 +2845,14 @@ async def buy_from_market(realm_id: str, data: MarketBuyRequest) -> dict[str, An
 
     status = eval_result.decode() if isinstance(eval_result, bytes) else str(eval_result)
     if status == "buyer_insufficient":
-        await redis_client.zadd(market_key, {member_str: price})
         raise HTTPException(
             status_code=402,
             detail=f"Saldo insuficiente. Custo total: {total_cost:,} sats (preço: {price:,} + taxa: {fee_amount:,})",
             headers={"Retry-After": "1"},
         )
+    if status in {"listing_missing", "listing_changed"}:
+        raise HTTPException(status_code=409, detail="Listing não está mais disponível")
     if status != "ok":
-        await redis_client.zadd(market_key, {member_str: price})
         detail = (
             "Estrutura interna do mercado inválida"
             if status == "invalid_storage_type"
@@ -2787,7 +2860,32 @@ async def buy_from_market(realm_id: str, data: MarketBuyRequest) -> dict[str, An
         )
         raise HTTPException(status_code=500, detail=detail)
 
-    # Atualiza UI do vendedor (se online)
+    sale_event = event_envelope(
+        action="market_sale",
+        node_id=definition.node_id,
+        network=definition.network,
+        realm_id=realm,
+    )
+    sale_event.update({
+        "listing_id": listing["listing_id"],
+        "seller": seller,
+        "buyer": buyer,
+        "powerup_id": powerup_id,
+        "price": price,
+        "seller_earnings": seller_earnings,
+    })
+    try:
+        await redis_client.publish(
+            events_channel(realm),
+            json.dumps(sale_event, separators=(",", ":")),
+        )
+    except Exception:
+        logger.exception(
+            "Compra concluída, mas market_sale não pôde ser publicado: listing=%s realm=%s",
+            listing["listing_id"],
+            realm,
+        )
+
     logger.info(
         "Power-up vendido no mercado: %s por %d sats (comprador: %s, vendedor: %s, taxa: %d sats, realm: %s)",
         powerup_id, price, buyer, seller, fee_amount, realm,
@@ -3712,7 +3810,6 @@ async def open_crate(realm_id: str, data: CrateOpenRequest) -> dict[str, Any]:
         # Debita saldo
         new_balance = balance - price
         await redis_client.hset(player_key, "balance", str(new_balance))
-        await redis_client.expire(player_key, 86400)
 
     # Rola o item
     item = _roll_crate_item()
@@ -3722,7 +3819,6 @@ async def open_crate(realm_id: str, data: CrateOpenRequest) -> dict[str, Any]:
         current_balance = int(await redis_client.hget(player_key, "balance") or 0)
         new_balance = current_balance + item["value"]
         await redis_client.hset(player_key, "balance", str(new_balance))
-        await redis_client.expire(player_key, 86400)
         item["balance"] = new_balance
 
     # Se for power-up, credita 1 unidade no inventário do jogador
@@ -3954,7 +4050,6 @@ async def stake_sats(realm_id: str, data: StakeRequest) -> dict[str, Any]:
     # Deduz do saldo do jogador
     new_balance = current_balance - data.amount
     await redis_client.hset(player_key, mapping={"balance": str(new_balance)})
-    await redis_client.expire(player_key, 86400)
 
     # Calcula tempos e bônus
     now = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
@@ -4027,7 +4122,6 @@ async def unstake_sats(realm_id: str, data: StakeRequest) -> dict[str, Any]:
     current_balance = int(player_raw.get("balance", 0))
     new_balance = current_balance + returned
     await redis_client.hset(player_key, mapping={"balance": str(new_balance)})
-    await redis_client.expire(player_key, 86400)
 
     # Adiciona ao histórico
     history_entry = {
@@ -4099,7 +4193,6 @@ async def get_staking_status(realm_id: str, username: str) -> dict[str, Any]:
         current_balance = int(player_raw.get("balance", 0))
         new_balance = current_balance + amount
         await redis_client.hset(player_key, mapping={"balance": str(new_balance)})
-        await redis_client.expire(player_key, 86400)
 
         # Registra no histórico
         history_entry = {
@@ -4329,6 +4422,16 @@ ENERGY_MAX = 10
 ENERGY_REFILL_INTERVAL = 1800  # 30 min em segundos
 ENERGY_BUY_COST = 2000  # sats por 3 energy
 ENERGY_BUY_AMOUNT = 3
+ENERGY_ROUND_TTL = 86400  # 24h para retry/refund idempotente
+ENERGY_STATE_TTL = 86400 * 30
+
+
+def validate_energy_round_id(round_id: str) -> str:
+    """Normaliza UUID da rodada antes de compor a chave Redis."""
+    try:
+        return str(uuid.UUID(round_id))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="round_id inválido") from exc
 
 
 @app.get("/api/v1/networks/{realm_id}/energy/status", tags=["Energy"])
@@ -4393,7 +4496,7 @@ async def get_energy_status(realm_id: str, username: str) -> dict[str, Any]:
 
 
 @app.post("/api/v1/networks/{realm_id}/energy/spend", tags=["Energy"])
-async def spend_energy(realm_id: str, username: str) -> dict[str, Any]:
+async def spend_energy(realm_id: str, username: str, round_id: str) -> dict[str, Any]:
     """Gasta 1 energy para iniciar uma nova rodada.
 
     Args:
@@ -4407,41 +4510,52 @@ async def spend_energy(realm_id: str, username: str) -> dict[str, Any]:
         HTTPException: Se não houver energia suficiente (status 400).
     """
     definition = get_network_definition(realm_id)
-    key = energy_key(definition.realm_id, username)
-    raw = await redis_client.hgetall(key)
-
-    now = datetime.datetime.now(datetime.timezone.utc).timestamp()
-
-    if not raw:
-        await redis_client.hset(key, mapping={
-            "current": str(ENERGY_MAX),
-            "last_refill": str(now),
-            "max": str(ENERGY_MAX),
-        })
-        await redis_client.expire(key, 86400 * 30)
-        return {"username": username, "current": ENERGY_MAX - 1}
-
-    current = int(raw.get("current", ENERGY_MAX))
-    energy_max = int(raw.get("max", ENERGY_MAX))
-    last_refill = float(raw.get("last_refill", now))
-
-    # Regenera antes de gastar
-    elapsed = now - last_refill
-    refills = int(elapsed // ENERGY_REFILL_INTERVAL)
-    if refills > 0:
-        current = min(current + refills, energy_max)
-        last_refill += refills * ENERGY_REFILL_INTERVAL
-
-    if current <= 0:
+    normalized_round_id = validate_energy_round_id(round_id)
+    result = await redis_client.eval(
+        ENERGY_SPEND_SCRIPT,
+        2,
+        energy_key(definition.realm_id, username),
+        energy_round_key(definition.realm_id, username, normalized_round_id),
+        str(datetime.datetime.now(datetime.timezone.utc).timestamp()),
+        str(ENERGY_MAX),
+        str(ENERGY_REFILL_INTERVAL),
+        str(ENERGY_ROUND_TTL),
+        str(ENERGY_STATE_TTL),
+    )
+    result_code, current = int(result[0]), int(result[1])
+    if result_code == -1:
         raise HTTPException(status_code=400, detail="Energia insuficiente")
+    if result_code == -2:
+        raise HTTPException(status_code=409, detail="Rodada já compensada")
+    return {
+        "username": username,
+        "round_id": normalized_round_id,
+        "current": current,
+        "charged": result_code == 1,
+    }
 
-    current -= 1
-    await redis_client.hset(key, mapping={
-        "current": str(current),
-        "last_refill": str(last_refill),
-    })
 
-    return {"username": username, "current": current}
+@app.post("/api/v1/networks/{realm_id}/energy/refund", tags=["Energy"])
+async def refund_energy(realm_id: str, username: str, round_id: str) -> dict[str, Any]:
+    """Compensa no máximo uma vez a energia de uma rodada não iniciada."""
+    definition = get_network_definition(realm_id)
+    normalized_round_id = validate_energy_round_id(round_id)
+    result = await redis_client.eval(
+        ENERGY_REFUND_SCRIPT,
+        2,
+        energy_key(definition.realm_id, username),
+        energy_round_key(definition.realm_id, username, normalized_round_id),
+        str(ENERGY_MAX),
+        str(ENERGY_ROUND_TTL),
+        str(ENERGY_STATE_TTL),
+    )
+    result_code, current = int(result[0]), int(result[1])
+    return {
+        "username": username,
+        "round_id": normalized_round_id,
+        "current": current,
+        "refunded": result_code == 1,
+    }
 
 
 @app.post("/api/v1/networks/{realm_id}/energy/buy", tags=["Energy"])
@@ -4459,59 +4573,32 @@ async def buy_energy(realm_id: str, username: str) -> dict[str, Any]:
         HTTPException: Se saldo insuficiente ou já no máximo (status 400).
     """
     definition = get_network_definition(realm_id)
-
-    # Verifica saldo do jogador
     state_key = player_state_key(definition.realm_id, username)
-    state_raw = await redis_client.hgetall(state_key)
-    balance = int(state_raw.get("balance", 0))
-
-    if balance < ENERGY_BUY_COST:
+    energy_key_str = energy_key(definition.realm_id, username)
+    now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+    eval_result = await redis_client.eval(
+        ENERGY_BUY_SCRIPT,
+        2,
+        state_key,
+        energy_key_str,
+        str(ENERGY_BUY_COST),
+        str(ENERGY_BUY_AMOUNT),
+        str(ENERGY_MAX),
+        str(ENERGY_REFILL_INTERVAL),
+        str(now),
+        str(ENERGY_STATE_TTL),
+    )
+    result_code, current, balance = map(int, eval_result)
+    if result_code == -1:
         raise HTTPException(
             status_code=400,
             detail=f"Saldo insuficiente. Necessario {ENERGY_BUY_COST} sats",
         )
-
-    # Debita saldo
-    new_balance = balance - ENERGY_BUY_COST
-    await redis_client.hset(state_key, mapping={"balance": str(new_balance)})
-
-    # Adiciona energia
-    energy_key_str = energy_key(definition.realm_id, username)
-    raw = await redis_client.hgetall(energy_key_str)
-    now = datetime.datetime.now(datetime.timezone.utc).timestamp()
-
-    if not raw:
-        await redis_client.hset(energy_key_str, mapping={
-            "current": str(ENERGY_BUY_AMOUNT),
-            "last_refill": str(now),
-            "max": str(ENERGY_MAX),
-        })
-        await redis_client.expire(energy_key_str, 86400 * 30)
-        return {"username": username, "current": ENERGY_BUY_AMOUNT, "balance": new_balance}
-
-    current = int(raw.get("current", 0))
-    energy_max = int(raw.get("max", ENERGY_MAX))
-    last_refill = float(raw.get("last_refill", now))
-
-    # Regenera antes de comprar
-    elapsed = now - last_refill
-    refills = int(elapsed // ENERGY_REFILL_INTERVAL)
-    if refills > 0:
-        current = min(current + refills, energy_max)
-        last_refill += refills * ENERGY_REFILL_INTERVAL
-
-    if current >= energy_max:
-        # Reverte saldo se já está no máximo
-        await redis_client.hset(state_key, mapping={"balance": str(balance)})
+    if result_code == -2:
         raise HTTPException(status_code=400, detail="Energia já no máximo")
-
-    current = min(current + ENERGY_BUY_AMOUNT, energy_max)
-    await redis_client.hset(energy_key_str, mapping={
-        "current": str(current),
-        "last_refill": str(last_refill),
-    })
-
-    return {"username": username, "current": current, "balance": new_balance}
+    if result_code != 1:
+        raise HTTPException(status_code=500, detail="Estrutura interna de energia inválida")
+    return {"username": username, "current": current, "balance": balance}
 
 
 # ==========================================================================
@@ -4734,7 +4821,6 @@ async def decoder_submit(realm_id: str, data: DecoderSubmit) -> dict[str, Any]:
         # Credita bonus de 5.000 sats no player state
         player_key = player_state_key(definition.realm_id, data.username)
         await redis_client.hincrby(player_key, "balance", 5000)
-        await redis_client.expire(player_key, 86400)
 
         # Concede power-up aleatorio
         powerup_id = random.choice(list(POWERUP_IDS))
@@ -4874,6 +4960,7 @@ from app.storage import sprint_leaderboard_key
 SPRINT_GRID_SIZE = 10
 SPRINT_WORD_COUNT = 4
 SPRINT_TIME_LIMIT = 30
+SPRINT_MAX_SKILL_TIME_BONUS = 5
 SPRINT_REWARD_MULTIPLIER = 0.5
 
 
@@ -4892,7 +4979,10 @@ class SprintSubmitRequest(BaseModel):
 
     username: Username
     words_found: int = Field(ge=0, le=SPRINT_WORD_COUNT)
-    time_taken: float = Field(gt=0, le=SPRINT_TIME_LIMIT)
+    time_taken: float = Field(
+        gt=0,
+        le=SPRINT_TIME_LIMIT + SPRINT_MAX_SKILL_TIME_BONUS,
+    )
 
 
 @app.post("/api/v1/networks/{realm_id}/sprint/start")

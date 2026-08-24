@@ -6,7 +6,6 @@ import re
 from html.parser import HTMLParser
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 INDEX_HTML = ROOT / "frontend" / "index.html"
 GAME_JS = ROOT / "frontend" / "game.js"
@@ -57,14 +56,17 @@ def test_session_mechanics_use_registered_initializers_without_stubs() -> None:
     assert "await runSessionInitializers();" in javascript
     # Fase 1.4: power-ups usam o inventário PESSOAL (não o stub que devolvia o mercado)
     assert "powerups/${encodeURIComponent(minerName)}" in javascript
-    assert "currentRoundWords.forEach" in javascript
 
 
 def test_sprint_and_result_flow_have_deterministic_actions() -> None:
     """Quatro palavras Sprint e a ação do modal devem ser sempre acionáveis."""
     javascript = GAME_JS.read_text(encoding="utf-8")
 
-    assert "const rowIndex = index % currentGridSize;" in javascript
+    sprint = javascript.split("function renderWordBank()", 1)[1].split(
+        "function renderBankWord(", 1
+    )[0]
+    assert "const uniqueWords = [...new Set(" in sprint
+    assert "word => injectWordInGrid(" in sprint
     assert "setNextButtonAction(prepareNextBlock);" in javascript
     assert "btn.onclick = rbfHandler;" not in javascript
 
@@ -214,12 +216,11 @@ def test_interactive_targets_are_large_enough_for_pointer_and_touch() -> None:
     assert "#btn-dismiss-event {\n        min-height: 44px;\n        min-width: 44px;" in css
 
 
-def test_service_worker_cache_version_tracks_phase4_assets() -> None:
-    """O navegador não pode continuar servindo o CSS anterior ao redesign."""
+def test_service_worker_cache_version_tracks_frontend_fixes() -> None:
+    """O navegador não pode servir assets anteriores às correções publicadas."""
     service_worker = SERVICE_WORKER.read_text(encoding="utf-8")
 
-    # Fase 4: bump para v20 (migração de design + itens dinâmicos + keyframes)
-    assert "const CACHE_VERSION = 'v20';" in service_worker
+    assert "const CACHE_VERSION = 'v42';" in service_worker
 
 
 def test_ui_uses_local_svg_icons_instead_of_emoji_glyphs() -> None:
@@ -476,6 +477,622 @@ def test_powerups_toggle_is_visible_when_its_content_is_collapsed() -> None:
     assert "announceGameStatus('Inicie uma sessão para acessar os Power-ups.');" in powerups_handler
     assert "powerupsActiveEl.hidden = !isHidden;" in javascript
     assert "powerupsToggleBtn.setAttribute('aria-expanded', String(isHidden));" in javascript
+
+
+def test_native_hidden_attribute_overrides_component_display_rules() -> None:
+    """Power-ups, staking e futuros painéis hidden devem realmente desaparecer."""
+    css = PIXEL_CSS.read_text(encoding="utf-8")
+
+    assert re.search(
+        r"^\[hidden\]\s*\{\s*display:\s*none\s*!important;\s*\}",
+        css,
+        flags=re.MULTILINE,
+    )
+
+
+def test_energy_is_spent_before_building_the_round_and_can_resume() -> None:
+    """Falha de energia não pode deixar uma grade ativa sem cronômetro."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+
+    assert "const originalStartNetworkRace = startNetworkRace;" not in javascript
+    sprint_wrapper = javascript.split(
+        "const originalStartNetworkRaceForSprint = startNetworkRace;", 1
+    )[1].split("// ============================================\n// Fase 5: Sistema de Amigos", 1)[0]
+    assert "spendEnergy" not in sprint_wrapper
+
+    gate = javascript.split("async function requestPlayableBlockBuild()", 1)[1].split(
+        "function buildPlayableBlock(", 1
+    )[0]
+    assert gate.index(
+        "const hasEnergy = await spendEnergy(roundId, roundRealm, roundMiner);"
+    ) < gate.index(
+        "buildPlayableBlock();"
+    )
+    assert "if (hasEnergy === null)" in gate
+    assert "if (hasEnergy === false)" in gate
+    assert "showPendingEnergyState();" in gate
+
+    builder = javascript.split("function buildPlayableBlock(", 1)[1].split(
+        "function injectWordInGrid(", 1
+    )[0]
+    assert "spendEnergy" not in builder
+    assert javascript.count("void requestPlayableBlockBuild();") >= 4
+
+
+def test_partial_energy_mutations_preserve_status_metadata() -> None:
+    """Respostas de spend/buy não podem apagar max e next_refill_at."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    spend_energy = javascript.split(
+        "async function spendEnergy(roundId, realmId, username)", 1
+    )[1].split(
+        "async function buyEnergy()", 1
+    )[0]
+    buy_energy = javascript.split("async function buyEnergy()", 1)[1].split(
+        "// Event listeners do Energy System", 1
+    )[0]
+
+    assert "function mergeEnergyState(payload)" in javascript
+    assert "energyState = mergeEnergyState(payload);" in spend_energy
+    assert "energyState = mergeEnergyState(await response.json());" in buy_energy
+
+
+def test_energy_rounds_are_idempotent_and_compensated() -> None:
+    """Round abortado deve ser estornado com retry durável e UUID estável."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    gate = javascript.split("async function requestPlayableBlockBuild()", 1)[1].split(
+        "function buildPlayableBlock(", 1
+    )[0]
+    builder = javascript.split("function buildPlayableBlock(", 1)[1].split(
+        "function injectWordInGrid(", 1
+    )[0]
+    spend = javascript.split("async function spendEnergy(", 1)[1].split(
+        "async function buyEnergy()", 1
+    )[0]
+
+    assert "const ENERGY_REFUNDS_STORAGE_KEY" in javascript
+    assert "function createEnergyRoundId()" in javascript
+    assert "async function queueEnergyRefund(" in javascript
+    assert "async function flushPendingEnergyRefunds()" in javascript
+    assert "round_id=${encodeURIComponent(roundId)}" in spend
+    assert gate.count("await queueEnergyRefund(roundId") >= 2
+    assert "const blockStarted = buildPlayableBlock();" in gate
+    assert "return false;" in builder
+    assert "return true;" in builder
+    assert "await flushPendingEnergyRefunds();" in javascript
+
+
+def test_uncertain_energy_spend_survives_reload_before_refund() -> None:
+    """Timeout após débito deve preservar UUID e ser resolvido após reload."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+
+    assert "const ENERGY_PENDING_SPENDS_STORAGE_KEY" in javascript
+    assert "const pendingEnergySpends = loadPendingEnergySpends();" in javascript
+    assert "function reservePendingEnergySpend(" in javascript
+    assert "function clearPendingEnergySpend(" in javascript
+    assert "async function recoverPendingEnergySpends()" in javascript
+    assert "pendingEnergySpends.set(roundId" in javascript
+    assert "await recoverPendingEnergySpends();" in javascript
+
+    gate = javascript.split("async function requestPlayableBlockBuild()", 1)[1].split(
+        "function buildPlayableBlock(", 1
+    )[0]
+    assert "reservePendingEnergySpend(roundRealm, roundMiner)" in gate
+    assert gate.count("clearPendingEnergySpend(roundId)") >= 3
+
+    recovery = javascript.split("async function recoverPendingEnergySpends()", 1)[1].split(
+        "async function flushPendingEnergyRefunds()", 1
+    )[0]
+    assert "energy/spend?" in recovery
+    assert "round_id=${encodeURIComponent(roundId)}" in recovery
+    assert "await queueEnergyRefund(roundId" in recovery
+
+
+def test_energy_spend_uses_the_round_realm_and_player_snapshot() -> None:
+    """Troca de rede durante o fetch não pode debitar nem renderizar outro realm."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    gate = javascript.split("async function requestPlayableBlockBuild()", 1)[1].split(
+        "function buildPlayableBlock(", 1
+    )[0]
+    spend = javascript.split(
+        "async function spendEnergy(roundId, realmId, username)", 1
+    )[1].split("async function buyEnergy()", 1)[0]
+
+    assert "await spendEnergy(roundId, roundRealm, roundMiner)" in gate
+    assert "networkApiUrl(" in spend
+    assert "activeNetworkApiUrl(" not in spend
+    assert "encodeURIComponent(username)" in spend
+    assert "realmId === activeRealmId && username === minerName" in spend
+
+
+def test_saved_session_re_resolves_realm_and_restores_identity_inputs() -> None:
+    """F5 deve preservar realm, nome e pool mesmo se o catálogo iniciar vazio."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    restore = javascript.split("/* Fase 1: Tenta restaurar sessão anterior", 1)[1].split(
+        "void registerPwa();", 1
+    )[0]
+    start_session = javascript.split("async function startSession(", 1)[1].split(
+        "function processTransactionReceived(", 1
+    )[0]
+
+    assert "document.getElementById('miner-input').value = minerName;" in restore
+    assert "document.getElementById('pool-tag-input').value = poolName;" in restore
+    assert "await startSession(activeRealmId);" in restore
+    assert "await loadPlayerState(activeRealmId, minerName);" not in restore
+    assert "const requestedRealmId = realmIdOverride || networkSelectEl.value;" in start_session
+    assert start_session.count("selectedNetwork = networkCatalog.get(requestedRealmId);") >= 2
+    validated_selection = start_session.split(
+        "if (!selectedNetwork?.playable) {\n        updateNetworkChoice();", 1
+    )[1].split("const input = document.getElementById('miner-input').value.trim();", 1)[0]
+    assert "networkSelectEl.value = selectedNetwork.realm_id;" in validated_selection
+
+
+def test_word_validation_uses_official_coordinates_and_safe_fill() -> None:
+    """Ocorrência textual incidental não pode validar nem bloquear outro alvo."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    inject = javascript.split("function injectWordInGrid(", 1)[1].split(
+        "function renderWordBank()", 1
+    )[0]
+    selection = javascript.split("function endSelection()", 1)[1].split(
+        "function finishSelectionFromPointer", 1
+    )[0]
+    sprint = javascript.split("function renderWordBank()", 1)[1].split(
+        "function renderBankWord(", 1
+    )[0]
+
+    assert inject.count("coords") >= 4
+    assert "function selectionMatchesOfficialPath(" in javascript
+    assert "selectionMatchesOfficialPath(w, selectedCells)" in selection
+    assert "w.word === selectedWord" not in selection
+    assert "function fillGridWithoutIncidentalWords(" in javascript
+    assert "fillGridWithoutIncidentalWords()" in javascript
+    assert "new Set(" in sprint
+    assert "injectWordInGrid(" in sprint
+    assert "blockWords.push({" not in sprint
+
+
+def test_market_sell_uses_inventory_shape_and_username_contract() -> None:
+    """Dropdown e POST de venda devem seguir exatamente o contrato backend."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    inventory_loader = javascript.split("async function loadMarketInventory()", 1)[1].split(
+        "function renderMarketList()", 1
+    )[0]
+    seller = javascript.split("async function sellMarketPowerup()", 1)[1].split(
+        "// Tabs do mercado", 1
+    )[0]
+
+    assert "const payload = await response.json();" in inventory_loader
+    assert "marketInventory = payload.inventory || {};" in inventory_loader
+    assert "Object.entries(marketInventory)" in javascript
+    assert "username: minerName" in seller
+    assert "seller: minerName" not in seller
+
+
+def test_market_buy_and_history_match_backend_contract() -> None:
+    """Compra deve identificar o listing e histórico deve consumir `sales`."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    buyer = javascript.split("async function buyMarketListing(", 1)[1].split(
+        "async function sellMarketPowerup()", 1
+    )[0]
+    history = javascript.split("function renderMarketHistory()", 1)[1].split(
+        "function populateSellDropdown()", 1
+    )[0]
+
+    assert "username: minerName" in buyer
+    assert "listing_id: listingId" in buyer
+    assert "buyer: minerName" not in buyer
+    assert "marketHistoryData?.sales || []" in history
+    assert "marketHistoryData?.history" not in history
+
+
+def test_market_sale_event_refreshes_online_seller_state() -> None:
+    """Venda concluída por outro jogador deve atualizar o vendedor conectado."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+
+    assert "'market_sale'" in javascript
+    assert "if (data.action === 'market_sale')" in javascript
+    market_event = javascript.split("if (data.action === 'market_sale')", 1)[1].split(
+        "return;", 1
+    )[0]
+    assert "data.seller === minerName" in market_event
+    assert "loadMarketList()" in market_event
+    assert "loadMarketHistory()" in market_event
+    assert "loadPlayerState(activeRealmId, minerName)" in market_event
+
+
+def test_season_premium_button_tracks_confirmed_server_state() -> None:
+    """Premium confirmado permanece bloqueado; falha restaura a UI clicável."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    purchase = javascript.split("async function buySeasonPremium()", 1)[1].split(
+        "// Event listeners do Season Pass", 1
+    )[0]
+
+    assert "let purchaseSucceeded = false;" in purchase
+    assert "purchaseSucceeded = true;" in purchase
+    assert "btnBuySeasonPremiumEl.disabled = purchaseSucceeded" in purchase
+    assert "btnBuySeasonPremiumEl.disabled = false;" not in purchase
+
+
+def test_crate_render_is_side_effect_free_and_bonus_notifies_on_change() -> None:
+    """Polling do inventário não deve repetir o toast de bônus lendário."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    render = javascript.split("function updateCrateUI()", 1)[1].split(
+        "async function openCrate", 1
+    )[0]
+    opening = javascript.split("async function openCrate", 1)[1].split(
+        "function showCrateResult", 1
+    )[0]
+
+    assert "showNotification" not in render
+    assert "const previousLegendaryBonus = crateState.legendary_bonus" in opening
+    assert "result.legendary_bonus > previousLegendaryBonus" in opening
+    assert "Bônus Legendário ativo" in opening
+
+
+def test_chat_and_market_loaders_cache_success_per_session() -> None:
+    """Abrir painéis ou alternar tabs não deve repetir fetch já concluído."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    chat = javascript.split("async function loadChatHistory()", 1)[1].split(
+        "function renderChatMessages()", 1
+    )[0]
+    market = javascript.split("// Fase 9: Mercado", 1)[1].split(
+        "// Fase 8: Eventos Globais", 1
+    )[0]
+    reset = javascript.split("function resetSessionModules()", 1)[1].split(
+        "function teardownSession()", 1
+    )[0]
+
+    assert "chatHistoryLoaded = true;" in chat
+    assert "if (chatHistoryLoaded || chatHistoryLoading) return;" in chat
+    assert "const marketLoadedSections = new Set();" in javascript
+    assert "const marketLoadingSections = new Set();" in javascript
+    # .add() registra o cache de sucesso de cada seção (browse/history/inventory).
+    for section in ("browse", "history", "inventory"):
+        assert f"marketLoadedSections.add('{section}');" in market
+        assert f"marketLoadingSections.has('{section}')" in market
+    # .has() guarda contra double-load apenas onde a seção é reaberta por UI
+    # viva (browse/inventory alimentam marketLoaded). 'history' não tem guard
+    # .has() porque o bloco de tabs do mercado (que o usava) era código morto
+    # e foi removido — o cache de 'history' ainda é registrado via .add().
+    for section in ("browse", "inventory"):
+        assert f"marketLoadedSections.has('{section}')" in market
+    assert "marketLoadedSections.clear();" in reset
+    assert "marketLoadingSections.clear();" in reset
+    assert "btnRefreshMarketEl.addEventListener('click', loadMarketList);" in market
+
+
+def test_decoder_rate_limit_restores_launcher() -> None:
+    """Resposta 429 não pode deixar o Decoder permanentemente inacessível."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    decoder = javascript.split("async function startDecoderGame()", 1)[1].split(
+        "function updateDecoderTimer()", 1
+    )[0]
+    rate_limit = decoder.split("if (response.status === 429)", 1)[1].split(
+        "throw new Error", 1
+    )[0]
+
+    assert "decoderActive = false;" in rate_limit
+    assert "decoderLaunchBtnEl.classList.remove('hidden');" in rate_limit
+    assert rate_limit.index("classList.remove('hidden')") < rate_limit.index("return;")
+
+
+def test_rest_loaders_reject_stale_session_responses() -> None:
+    """Resposta de realm/jogador anterior nunca pode mutar a sessão atual."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    assert "function captureSessionContext(" in javascript
+    assert "function isSessionContextCurrent(" in javascript
+
+    boundaries = {
+        "loadPlayerState": "function updateStoreUI",
+        "loadChatHistory": "function renderChatMessages",
+        "loadStakingStatus": "function updateStakingUI",
+        "loadSkillTree": "function renderSkillTree",
+        "loadEnergyState": "function updateEnergyUI",
+        "loadSeasonData": "function addSeasonXP",
+        "loadMarketList": "async function loadMarketHistory",
+        "loadMarketHistory": "async function loadMarketInventory",
+        "loadMarketInventory": "function renderMarketList",
+        "loadCrateInventory": "function updateCrateUI",
+    }
+    for function_name, next_boundary in boundaries.items():
+        body = javascript.split(f"async function {function_name}", 1)[1].split(
+            next_boundary, 1
+        )[0]
+        assert "const sessionContext = captureSessionContext(" in body, function_name
+        assert "if (!isSessionContextCurrent(sessionContext)) return;" in body, function_name
+
+    skill_loader = javascript.split("async function loadSkillTree()", 1)[1].split(
+        "function renderSkillTree", 1
+    )[0]
+    stale_finally = skill_loader.split("finally", 1)[1]
+    assert "if (isSessionContextCurrent(sessionContext))" in stale_finally
+    guarded_cleanup = stale_finally.split(
+        "if (isSessionContextCurrent(sessionContext))", 1
+    )[1]
+    assert "skillTreeLoading = false;" in guarded_cleanup
+
+
+def test_energy_recovery_classifies_terminal_errors_and_resolves_uncertain_spend() -> None:
+    """Retries preservam exatamente-uma-vez e não deixam UI stale/enganosa."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    refunds = javascript.split("async function flushPendingEnergyRefunds()", 1)[1].split(
+        "async function queueEnergyRefund", 1
+    )[0]
+    spend = javascript.split("async function spendEnergy(", 1)[1].split(
+        "async function buyEnergy", 1
+    )[0]
+    gate = javascript.split("async function requestPlayableBlockBuild()", 1)[1].split(
+        "function startNetworkRace", 1
+    )[0]
+
+    assert "response.status >= 400 && response.status < 500" in refunds
+    assert "pendingEnergyRefunds.delete(roundId);" in refunds
+    assert "if (attempt === 0) continue;" in spend
+    assert "await loadEnergyState(false);" in spend
+    assert "if (hasEnergy === null)" in gate
+    uncertain = gate.split("if (hasEnergy === null)", 1)[1].split(
+        "if (hasEnergy === false)", 1
+    )[0]
+    assert "showPendingEnergyState" not in uncertain
+
+
+def test_boss_final_word_runs_common_rewards_without_normal_result_modal() -> None:
+    """Derrotar o Boss não pode pular XP, linha, persistência ou abrir dois modais."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    selection = javascript.split("function endSelection()", 1)[1].split(
+        "function finishSelectionFromPointer", 1
+    )[0]
+    defeat = selection.split("if (bossHp <= 0 && !bossDefeatHandled)", 1)[1].split(
+        "/* Fase 6: MEV Secreto", 1
+    )[0]
+    completion = selection.split(
+        "if (wordsFoundInBlock === blockWords.length)", 1
+    )[1].split("} else {\n        /* Fase 1: Slashing", 1)[0]
+
+    assert "return;" not in defeat
+    assert "currentRoundEarnings += Math.floor(points);" in selection
+    assert "if (bossDefeatHandled)" in completion
+    assert "roundNumber++;" in completion
+    assert "maxRoundEarningsTotal = Math.max(" in completion
+    assert "pushStats({ max_round_earnings: maxRoundEarningsTotal })" in completion
+    assert "trackBlockCompleted();" in completion
+    assert "claimFreeCrates();" in completion
+    assert "else" in completion
+    assert "showResult(true" not in completion
+
+
+def test_every_boss_word_deals_damage_including_mev() -> None:
+    """Boss com HP igual ao total de palavras deve ser sempre derrotável."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    selection = javascript.split("function endSelection()", 1)[1].split(
+        "function finishSelectionFromPointer", 1
+    )[0]
+    boss_damage = selection.split("/* Boss Battles:", 1)[1].split(
+        "/* Fase 6: MEV Secreto", 1
+    )[0]
+
+    assert "if (isBossActive)" in boss_damage
+    assert "!match.isMev" not in boss_damage
+    assert "bossHp = Math.max(0, bossHp - 1);" in boss_damage
+
+
+def test_boss_and_sprint_respect_modal_lifecycle_and_skill_time() -> None:
+    """Eventos especiais não se sobrepõem e recebem o bônus por rodada."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    boss = javascript.split("function handleBossBlock(", 1)[1].split(
+        "function updateBossOverlay", 1
+    )[0]
+    block_mined = javascript.split('else if (data.action === "block_mined")', 1)[1].split(
+        "if (data.action === 'leaderboard_reset')", 1
+    )[0]
+
+    assert "result-modal" in boss
+    assert "classList.contains('active')" in boss
+    assert "networkTimeLimit = bossTimer + skillTimeBonus;" in javascript
+    assert "sprintTimeLimit = data.time_limit + skillTimeBonus;" in javascript
+    assert "if (sprintRoundActive)" in block_mined
+    sprint_branch = block_mined.split("if (sprintRoundActive)", 1)[1].split(
+        "else if (isPlaying)", 1
+    )[0]
+    assert "endSprintRound('block_mined')" in sprint_branch
+    assert "showOrphanBlockSalvage" not in sprint_branch
+
+
+def test_sprint_submit_mirrors_backend_reward_once_in_local_state() -> None:
+    """Reward confirmado no backend deve aparecer imediatamente no HUD local."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    submit = javascript.split("async function submitSprintResult(", 1)[1].split(
+        "function showSprintResult(", 1
+    )[0]
+
+    assert "if (generation !== sessionGeneration) return;" in submit
+    assert "balanceSatoshis += data.reward;" in submit
+    assert "currentRoundEarnings += data.reward;" in submit
+    assert "saveSessionState();" in submit
+    assert submit.index("balanceSatoshis += data.reward;") < submit.index("showSprintResult(data);")
+
+
+def test_level_time_bonus_is_idempotent_and_separate_from_saved_hardware_bonus() -> None:
+    """Reload/update de nível não acumula bônus nem contamina o save de hardware."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    level_ui = javascript.split("function updateLevelUI()", 1)[1]
+    level_loader = javascript.split("async function loadLevelState()", 1)[1].split(
+        "function updateLevelUI()", 1
+    )[0]
+
+    assert "let levelTimeBonus = 0;" in javascript
+    assert "function getNetworkTimeBonus()" in javascript
+    assert "levelTimeBonus = Number(bonuses?.time_bonus_seconds) || 0;" in level_ui
+    assert "window.NETWORK_TIME_BONUS" not in javascript
+    assert "networkTimeBonus + levelTimeBonus" in javascript
+    assert "const sessionContext = captureSessionContext(" in level_loader
+    assert "if (!isSessionContextCurrent(sessionContext)) return;" in level_loader
+
+
+def test_phase5_dead_frontend_symbols_are_removed_without_live_stats() -> None:
+    """Limpeza remove somente símbolos sem leitores/call-sites reais."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    for dead_symbol in (
+        "function toggleChatPanel(",
+        "isRbfMode",
+        "eventPreannounceTimeout",
+        "function trackPoolRank1(",
+        "function loadSprintLeaderboard(",
+        "function renderSprintLeaderboard(",
+    ):
+        assert dead_symbol not in javascript
+    assert "let poolRank1 = 0;" in javascript
+    assert "pool_rank_1" in javascript
+
+
+def test_chat_keeps_oldest_first_order_and_caps_array_and_dom() -> None:
+    """Histórico, echo local e mensagens de sistema compartilham ordem/teto."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    history = javascript.split("async function loadChatHistory()", 1)[1].split(
+        "function renderChatMessages()", 1
+    )[0]
+    sender = javascript.split("async function sendChatMessage()", 1)[1].split(
+        "function insertChatToken", 1
+    )[0]
+    system = javascript.split("function appendSystemMessage(", 1)[1].split(
+        "function scrollToBottom", 1
+    )[0]
+
+    assert "data.messages.slice(0, CHAT_MAX_MESSAGES).reverse()" in history
+    assert "chatMessages.push(data.message);" in sender
+    assert "chatMessages.unshift" not in sender
+    assert "chatMessages.shift();" in sender
+    assert "function appendNodeToChat(" in javascript
+    assert "appendNodeToChat(msgEl);" in system
+
+
+def test_energy_label_and_boss_routing_keep_single_owners() -> None:
+    """JS restaura label original e Boss nunca cai no buffer normal."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    energy = javascript.split("async function buyEnergy()", 1)[1].split(
+        "// Event listeners do Energy System", 1
+    )[0]
+    boss_route = javascript.split(
+        "// Boss Battles: roteia transações para o buffer do boss", 1
+    )[1].split("if (txBuffer.length < WORDS_PER_BLOCK)", 1)[0]
+
+    assert "const originalContent = btnBuyEnergyEl.innerHTML;" in energy
+    assert "btnBuyEnergyEl.innerHTML = originalContent;" in energy
+    assert "btnBuyEnergyEl.textContent = '2,000 SATS'" not in energy
+    assert "if (handleBossTransaction(data))" not in boss_route
+    assert "handleBossTransaction(data);" in boss_route
+    assert "return;" in boss_route
+
+
+def test_external_text_is_not_interpolated_raw_into_frontend_html() -> None:
+    """Mercado usa DOM e sinks restantes escapam texto externo explicitamente."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    market = javascript.split("function renderMarketList()", 1)[1].split(
+        "function renderMarketHistory()", 1
+    )[0]
+    dropdown = javascript.split("function populateSellDropdown()", 1)[1].split(
+        "async function buyMarketListing", 1
+    )[0]
+
+    assert "marketBrowseEl.innerHTML = html" not in market
+    assert "${listing.listing_id}" not in market
+    assert ".textContent = `Vendedor: ${listing.seller}`;" in market
+    assert "buyButton.dataset.listingId = String(listing.listing_id);" in market
+    assert "select.innerHTML +=" not in dropdown
+    assert "option.textContent =" in dropdown
+
+    for raw_interpolation in (
+        "${def.name}",
+        "${def.description}",
+        "${ach.name}",
+        "${ach.description}",
+        "${card.block_hash || '-'}",
+    ):
+        assert raw_interpolation not in javascript
+    assert '<div class="crate-result-item">${itemName}</div>' not in javascript
+    assert '<div class="crate-result-item">${escapeHtml(itemName)}</div>' in javascript
+    assert "function escapeHtml(" in javascript
+
+
+def test_staking_history_whitelists_type_and_uses_text_nodes() -> None:
+    """Enum externo não entra em classe/HTML sem normalização."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    history = javascript.split("async function loadStakingHistory()", 1)[1].split(
+        "async function performStake()", 1
+    )[0]
+
+    assert "const safeType =" in history
+    assert "stake-${entry.type}" not in history
+    assert "item.innerHTML" not in history
+    assert "typeElement.textContent = typeLabel;" in history
+    assert "amountElement.textContent = amountText;" in history
+    assert "dateElement.textContent = date;" in history
+
+
+def test_skill_tree_bonuses_are_idempotent_and_feed_real_game_formulas() -> None:
+    """Bônus backend devem sobreviver ao reload sem acumular e afetar o jogo real."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    loader = javascript.split("async function loadSkillTree()", 1)[1].split(
+        "function renderSkillTree()", 1
+    )[0]
+    apply_bonuses = javascript.split("function applySkillBonuses(bonuses)", 1)[1].split(
+        "registerSessionInitializer('skills'", 1
+    )[0]
+    hint_price = javascript.split("function getHintPrice()", 1)[1].split(
+        "function applyAchievementBonus", 1
+    )[0]
+    builder = javascript.split("function buildPlayableBlock(", 1)[1].split(
+        "function injectWordInGrid(", 1
+    )[0]
+    selection = javascript.split("function endSelection()", 1)[1].split(
+        "function finishSelectionFromPointer", 1
+    )[0]
+
+    assert "applySkillBonuses(skillTreeData.bonuses);" in loader
+    for key in (
+        "mining_time_bonus",
+        "search_discount_percent",
+        "lightning_reward_percent",
+    ):
+        assert key in apply_bonuses
+    assert "baseTimeLimit = 60 +" in apply_bonuses
+    assert "hintCost = Math.round(HINT_PRICE *" in apply_bonuses
+    assert "skillRewardBonus =" in apply_bonuses
+    assert "+=" not in apply_bonuses
+    assert "*=" not in apply_bonuses
+    assert "networkTimeLimit += baseTimeLimit - 60;" in builder
+    assert "hintCost * (1 - discount)" in hint_price
+    assert "effectiveBaseReward * (1 + skillRewardBonus)" in selection
+
+
+def test_sprint_uses_one_idempotent_completion_path_and_real_word_count() -> None:
+    """Conclusão e timeout Sprint devem submeter uma vez sem modal normal concorrente."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    selection = javascript.split("function endSelection()", 1)[1].split(
+        "function finishSelectionFromPointer", 1
+    )[0]
+    sprint = javascript.split("async function startSprintRound()", 1)[1].split(
+        "function showSprintResult(", 1
+    )[0]
+    reset = javascript.split("function resetSessionModules()", 1)[1].split(
+        "function teardownSession(", 1
+    )[0]
+
+    assert "let sprintRoundActive = false;" in javascript
+    assert "let sprintRoundEnding = false;" in javascript
+    assert "sprintWordsFound = wordsFoundInBlock;" in selection
+    assert "if (sprintRoundActive)" in selection
+    assert "void endSprintRound('completed');" in selection
+    assert "void endSprintRound('timeout');" in sprint
+    assert "async function endSprintRound(reason" in javascript
+    assert "if (!sprintRoundActive || sprintRoundEnding) return;" in javascript
+    assert "if (sprintRoundActive || sprintRoundEnding || sprintRoundStarting) return;" in sprint
+    assert "sprintRoundStarting = true;" in sprint
+    assert "sprintRoundStarting = false;" in sprint
+    assert "Math.max(0.001, Math.min(sprintTimeLimit" in sprint
+    assert "timerEl.remove()" not in sprint
+    assert "generation !== sessionGeneration" in sprint
+    assert "sprintRoundActive = false;" in reset
+    assert "sprintRoundEnding = false;" in reset
 
 
 def test_mobile_social_controls_wrap_without_horizontal_overflow() -> None:

@@ -2446,7 +2446,8 @@
    Utilitários — hidden (escopo global: precisa valer em TODOS os viewports,
    senão boss-hud, banners e market-sections ficam visíveis em telas <1920px)
    ========================================================================== */
-.hidden { display: none !important; }
+.hidden,
+[hidden] { display: none !important; }
 
 /* ==========================================================================
    Card Pull — overlay de animação ao ganhar um card (criado via JS em
@@ -2826,6 +2827,36 @@
     text-align: center;
     color: var(--text-muted);
     font-size: 12px;
+}
+
+/* Fase 8 (pontas soltas): CTA nos estados vazios do mercado — antes era
+ * "botão morto" (texto sem orientação). Agora tem mensagem + dica de ação. */
+.market-empty-cta {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 20px 16px;
+    border: 1px dashed var(--border-dim, #30363d);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.03);
+}
+.market-empty-cta .market-empty-msg {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-main, #f0f6fc);
+    margin: 0;
+}
+.market-empty-cta .market-empty-hint {
+    font-size: 11px;
+    color: var(--text-dim, #8b949e);
+    margin: 0;
+}
+
+/* Fase 8 (ponta solta da auditoria): a seção #market-sell (u-inline-040)
+ * tem display:none por padrão. O botão VENDER adiciona .market-sell-open
+ * para exibi-la (select + preço + CTA de inventário vazio). */
+#market-sell.market-sell-open {
+    display: flex;
 }
 
 /* --- Season Pass (recompensas) --- */

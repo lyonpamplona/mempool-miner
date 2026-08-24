@@ -51,12 +51,15 @@ services:
     <<: *bitcoin-node
     environment:
       BITCOIN_NETWORK: regtest
+      # Faucet contínuo: mantém a mempool populada e o tip fresco (evita IBD)
+      FAUCET_INTERVAL: "20"
+      FAUCET_TXS: "12"
+      BLOCK_INTERVAL: "90"
     entrypoint: ["/bin/bash", "/entrypoint.sh"]
     command:
       - -conf=/etc/bitcoin/bitcoin.conf
       - -datadir=/home/bitcoin/.bitcoin
       - -chain=regtest
-      - -prune=550
       - -dbcache=64
       - -maxmempool=50
       - -maxconnections=10

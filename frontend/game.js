@@ -35,6 +35,19 @@ function setSvgIcon(element, name, className = 'ui-icon') {
     element.replaceChildren(svg);
 }
 
+/**
+ * Escapa texto externo antes de inseri-lo em templates HTML controlados.
+ */
+function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, character => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    })[character]);
+}
+
 const ACHIEVEMENT_CATEGORIES = [
     { key: 'all', label: 'Todas', iconName: null },
     { key: 'volume', label: 'Volume', iconName: 'pickaxe' },
@@ -69,6 +82,31 @@ function showTab(tabName) {
     });
 
     if (typeof playSound === 'function') playSound('tick');
+
+    /* Fase 5 (pontas soltas): se os painéis foram zerados (teardownSession)
+     * e a sessão está pronta, re-chama os loaders da tab que o jogador
+     * acabou de abrir. Sem isso, "Aguardando sessão." persistia em todas
+     * as abas após qualquer teardown (pagehide, onclose, troca de rede). */
+    if (
+        sessionPanelsReset
+        && sessionReady
+        && activeRealmId
+        && minerName
+        && TAB_INITIALIZERS[tabName]
+    ) {
+        const names = TAB_INITIALIZERS[tabName];
+        void (async () => {
+            for (const name of names) {
+                const initializer = sessionInitializers.get(name);
+                if (typeof initializer === 'function') {
+                    try { await initializer(); } catch (e) {
+                        console.error(`Falha ao re-inicializar ${name} em showTab.`, e);
+                    }
+                }
+            }
+            sessionPanelsReset = false;
+        })();
+    }
 }
 
 function activateMechanicSection(groupName, sectionName, focusButton = false) {
@@ -195,13 +233,17 @@ const API_BASE_URL = new URL(configuredBaseUrl || runtimeOrigin, runtimeOrigin);
 const NETWORKS_URL = new URL('/api/v1/networks', API_BASE_URL).toString();
 const REALM_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 
-function activeNetworkApiUrl(path) {
-    if (!REALM_ID_PATTERN.test(activeRealmId)) throw new Error('Realm inválido');
+function networkApiUrl(realmId, path) {
+    if (!REALM_ID_PATTERN.test(realmId)) throw new Error('Realm inválido');
     const normalizedPath = String(path).replace(/^\/+/, '');
     return new URL(
-        `/api/v1/networks/${encodeURIComponent(activeRealmId)}/${normalizedPath}`,
+        `/api/v1/networks/${encodeURIComponent(realmId)}/${normalizedPath}`,
         API_BASE_URL
     ).toString();
+}
+
+function activeNetworkApiUrl(path) {
+    return networkApiUrl(activeRealmId, path);
 }
 
 function leaderboardUrl(realmId) {
@@ -233,6 +275,17 @@ let isTransitioning = false;
 let isLightningMode = false;
 let activeRealmId = null;
 let activeEpoch = null;
+/* Fase 3 (pontas soltas): dedup de block_mined — ignora eventos com o mesmo
+ * block_hash/epoch já processado (re-entrega ZMQ ou re-publicação). */
+let lastMinedBlockHash = null;
+let lastMinedEpoch = null;
+/* Fase 3: orphan block salvage só pode ser oferecido uma vez por rodada. */
+let orphanOfferedThisRound = false;
+/* Fase 6 (pontas soltas): rodada já finalizada (todas as palavras achadas).
+ * O tick do timer verifica essa flag antes de declarar "expirou" — sem ela,
+ * a corrida timer × showResult fazia o sucesso ser sobrescrito pela
+ * expiração (janela de 600ms do scheduleForSession). */
+let roundSettled = false;
 let sessionGeneration = 0;
 let sessionReady = false;
 
@@ -293,6 +346,12 @@ let hardwareLevel = 1;
 let hardwareNames = ["CPU Miner", "GPU Rig", "ASIC Antminer", "Quantum Node"];
 let hardwarePrices = [100000, 500000, 2000000];
 let networkTimeBonus = 0;
+let levelTimeBonus = 0;
+
+function getNetworkTimeBonus() {
+    return networkTimeBonus + levelTimeBonus;
+}
+
 const HINT_PRICE = 5000;
 const LIGHTNING_PRICE = 1000000;
 
@@ -313,10 +372,17 @@ const SLASHING_PENALTY = 0.05;      /* 5% do saldo */
 
 let networkTimeLimit = 60;
 let networkTimePassed = 0;
+/* Fase 7 (pontas soltas): timer por timestamp — endTime absoluto em vez de
+ * contador por tick. O setInterval é throttled em aba em segundo plano
+ * (Chrome: 1 tick/s), então o contador "acelerava" na prática. Com
+ * Date.now() o progresso é sempre fiel ao tempo real. */
+let raceEndTime = 0;
+let lastTickTime = 0;
 let networkInterval;
 let leaderboardInterval;
 let networkHealthInterval;
 let pendingBuildTimeout;
+let energyGatePending = false;
 let lastFoundTime = 0;
 let comboMultiplier = 1;
 
@@ -329,9 +395,14 @@ let powerupsInventoryData = null;
 
 /* Variaveis de estado para modulos */
 let chatHistoryLoaded = false;
+let chatHistoryLoading = false;
 let marketLoaded = false;
+const marketLoadedSections = new Set();
+const marketLoadingSections = new Set();
 let baseTimeLimit = 60;
+let skillTimeBonus = 0;
 let hintCost = HINT_PRICE;
+let skillRewardBonus = 0;
 
 
 /* Fase 3: Lightning Channel Liquidity — canal dura N blocos */
@@ -394,10 +465,10 @@ function renderPowerupsPanel() {
             <div class="powerup-item ${active ? 'active' : ''}">
                 <div class="powerup-item-icon">${iconSvg(iconName)}</div>
                 <div class="powerup-item-info">
-                    <div class="powerup-item-name">${def.name} <span class="powerup-item-count">x${count}</span></div>
-                    <div class="powerup-item-desc">${def.description}</div>
+                    <div class="powerup-item-name">${escapeHtml(def.name)} <span class="powerup-item-count">x${count}</span></div>
+                    <div class="powerup-item-desc">${escapeHtml(def.description)}</div>
                 </div>
-                <button type="button" class="powerup-item-btn" data-powerup-id="${def.id}" ${count <= 0 ? 'disabled' : ''}>${active ? 'ATIVO' : 'ATIVAR'}</button>
+                <button type="button" class="powerup-item-btn" data-powerup-id="${escapeHtml(def.id)}" ${count <= 0 ? 'disabled' : ''}>${active ? 'ATIVO' : 'ATIVAR'}</button>
             </div>
         `;
     }
@@ -495,6 +566,20 @@ function announceGameStatus(message) {
 }
 
 const sessionInitializers = new Map();
+/* Fase 5 (pontas soltas): mapeia cada tab aos inicializadores que a
+ * repopulam. Usado pelo showTab para re-chamar os loaders quando os
+ * painéis foram zerados (teardownSession) e o jogador volta à tab. */
+const TAB_INITIALIZERS = {
+    upgrades: ['energy', 'crates', 'level'],
+    perfil: ['skills', 'season', 'cards'],
+    /* Fase 5 (ponta solta da auditoria): o painel de missões está na tab
+     * competir (section-competir-missions), não em perfil. Antes 'missions'
+     * estava mapeado para perfil e o painel ficava "Aguardando sessão."
+     * para sempre após um teardown. */
+    competir: ['missions'],
+    social: ['chat-staking', 'market', 'friends'],
+};
+let sessionPanelsReset = false; /* true após teardownSession zerar os painéis */
 
 function registerSessionInitializer(name, initializer) {
     if (!name || typeof initializer !== 'function') {
@@ -505,12 +590,25 @@ function registerSessionInitializer(name, initializer) {
 
 async function runSessionInitializers() {
     for (const [name, initializer] of sessionInitializers) {
-        try {
-            await initializer();
-        } catch (error) {
-            console.error(`Falha ao inicializar módulo ${name}.`, error);
+        // Fase 5 (pontas soltas): retry com backoff — um inicializador que
+        // falha (404/rede/backend não pronto) deixava o painel no placeholder
+        // "Aguardando sessão." para sempre. Máx. 3 tentativas.
+        let ok = false;
+        for (let attempt = 0; attempt < 3 && !ok; attempt++) {
+            try {
+                await initializer();
+                ok = true;
+            } catch (error) {
+                console.error(`Falha ao inicializar módulo ${name} (tentativa ${attempt + 1}/3).`, error);
+                if (attempt < 2) {
+                    await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
+                }
+            }
         }
     }
+    /* Fase 5: painéis repopulados — limpa a flag para o showTab não
+     * re-chamar os loaders desnecessariamente. */
+    sessionPanelsReset = false;
 }
 
 /**
@@ -632,6 +730,18 @@ function scheduleForSession(callback, delay, generation = sessionGeneration) {
 function cancelSessionTimeout(timeoutId) {
     clearTimeout(timeoutId);
     sessionTimeouts.delete(timeoutId);
+}
+
+function captureSessionContext(realmId = activeRealmId, username = minerName) {
+    return { generation: sessionGeneration, realmId, username };
+}
+
+function isSessionContextCurrent(context) {
+    return (
+        context.generation === sessionGeneration
+        && context.realmId === activeRealmId
+        && context.username === minerName
+    );
 }
 
 function describeNetwork(network) {
@@ -851,15 +961,38 @@ function resetSessionModules() {
     marketInventory = null;
     friendsData = null;
     chatHistoryLoaded = false;
+    chatHistoryLoading = false;
     marketLoaded = false;
+    marketLoadedSections.clear();
+    marketLoadingSections.clear();
 
     baseTimeLimit = 60;
+    skillTimeBonus = 0;
+    levelTimeBonus = 0;
     hintCost = HINT_PRICE;
+    skillRewardBonus = 0;
+
+    sprintRoundActive = false;
+    sprintRoundEnding = false;
+    sprintRoundStarting = false;
+    sprintWordsFound = 0;
+    sprintTimeLeft = 30;
+    sprintTimeLimit = 30;
+    sprintStartTime = null;
+    sprintTimerInterval = null;
+    const sprintTimerValue = document.getElementById('sprint-timer-value');
+    if (sprintTimerValue) {
+        sprintTimerValue.textContent = '00:00';
+        sprintTimerValue.classList.remove('warning');
+    }
+    document.querySelectorAll('.sprint-result-overlay').forEach(overlay => overlay.remove());
 
     stakeState = createEmptyStakeState();
     selectedStakeDuration = 6;
     if (stakingDurationEl) stakingDurationEl.value = '6';
     updateStakingUI();
+    energyGatePending = false;
+    pendingEnergyRoundId = null;
     energyState = createInitialEnergyState();
     updateEnergyUI();
     crateState = createInitialCrateState();
@@ -878,6 +1011,9 @@ function resetSessionModules() {
     resetSessionPanel(marketBrowseEl, 'Aguardando sessão.');
     resetSessionPanel(marketHistoryEl, 'Aguardando sessão.');
     resetSessionPanel(friendsListEl, 'Aguardando sessão.');
+    /* Fase 5: marca que os painéis foram zerados — o showTab re-chama os
+     * loaders da tab ativa quando o jogador voltar a ela. */
+    sessionPanelsReset = true;
 }
 
 function teardownSession(reason = 'realm-switch') {
@@ -905,7 +1041,7 @@ function teardownSession(reason = 'realm-switch') {
     clearInterval(eventCountdownInterval);
     clearInterval(stakeCountdownInterval);
     clearInterval(stakePollInterval);
-    clearTimeout(eventPreannounceTimeout);
+
     clearTimeout(achievementToastTimeout);
     clearTimeout(rbfTimeout);
     clearTimeout(reconnectTimeout);
@@ -983,7 +1119,10 @@ function setModalState(modal, isActive) {
 
 document.addEventListener('keydown', event => {
     if (event.key !== 'Tab') return;
-    const modal = document.querySelector('.modal-overlay.active');
+    /* Fase 8 (ponta solta da auditoria): os modais reais usam .modal-wrap
+     * (não .modal-overlay) — antes a trapa de foco nunca encontrava o modal
+     * e ficava desativada em todos os modais (acessibilidade). */
+    const modal = document.querySelector('.modal-wrap.active');
     if (!modal) return;
     const focusable = Array.from(modal.querySelectorAll(
         'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])'
@@ -1091,7 +1230,6 @@ function initEmptyGrid() {
     updateStoreUI();
 }
 initEmptyGrid();
-let isRbfMode = false; /* Flag para evitar conflito de handler no RBF */
 
 /* ==========================================================================
    Boss Battles — estado e lógica do Boss Block (a cada 50 blocos)
@@ -1111,7 +1249,6 @@ let bossDefeatHandled = false;
 let activeGlobalEvent = null;   // {type, label, icon, description, color, startedAt, endsAt, preannounced}
 let eventBannerEl = null;       // Referência ao banner DOM
 let eventCountdownInterval = null;
-let eventPreannounceTimeout = null;
 
 // Mapeamento de ícones e cores por tipo de evento
 const EVENT_META = {
@@ -1211,6 +1348,16 @@ window.addEventListener('pagehide', () => {
     saveSessionState(); /* Fase 1: salva estado antes de sair */
     teardownSession('page-hide');
 });
+/* Fase 5 (pontas soltas): ao voltar via back/forward (bfcache), o pagehide
+ * já zerou os 11 painéis ("Aguardando sessão."). Re-dispara os
+ * inicializadores para repopulá-los. Sem esse handler, os painéis ficavam
+ * no placeholder para sempre após navegar para fora e voltar. */
+window.addEventListener('pageshow', (event) => {
+    if (!event.persisted) return;
+    if (!sessionReady || !activeRealmId || !minerName) return;
+    announceGameStatus('Restaurando painéis da sessão...');
+    void runSessionInitializers();
+});
 updateConnectivityStatus();
 
 /* Fase 1: Tenta restaurar sessão anterior antes de mostrar modal */
@@ -1233,6 +1380,8 @@ updateConnectivityStatus();
             document.getElementById('ui-operator-tag').innerText = operatorDisplayName();
             document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString();
             document.getElementById('ui-hw').innerText = hardwareNames[hardwareLevel - 1];
+            document.getElementById('miner-input').value = minerName;
+            document.getElementById('pool-tag-input').value = poolName;
             if (isLightningMode) document.body.classList.add('lightning-theme');
 
             // Seleciona a rede salva no select
@@ -1240,12 +1389,9 @@ updateConnectivityStatus();
                 networkSelectEl.value = activeRealmId;
             }
 
-            // Carrega estado do backend
-            await loadPlayerState(activeRealmId, minerName);
-
             // Reconecta WebSocket automaticamente
             announceGameStatus('Restaurando sessão anterior...');
-            void startSession(activeRealmId);
+            await startSession(activeRealmId);
         } else {
             // Sem sessão anterior — mostra modal de tutorial
             setModalState(document.getElementById('auth-modal'), true);
@@ -1264,14 +1410,14 @@ void registerPwa();
  * Fase 1: Aceita realmIdOverride para reconexão automática.
  */
 async function startSession(realmIdOverride = null) {
-    let selectedNetwork = realmIdOverride
-        ? networkCatalog.get(realmIdOverride)
-        : networkCatalog.get(networkSelectEl.value);
+    const requestedRealmId = realmIdOverride || networkSelectEl.value;
+    let selectedNetwork = networkCatalog.get(requestedRealmId);
 
     // Fallback 1: se networkCatalog nao carregou, tentar carregar AGORA
     if (!selectedNetwork?.playable && networkCatalog.size === 0) {
         announceGameStatus('Carregando redes...');
         await loadNetworkCatalog();
+        selectedNetwork = networkCatalog.get(requestedRealmId);
     }
 
     // Fallback 2: usar a primeira rede playable disponivel
@@ -1295,6 +1441,7 @@ async function startSession(realmIdOverride = null) {
         announceGameStatus('Nenhuma rede disponivel. Recarregue a pagina.');
         return;
     }
+    networkSelectEl.value = selectedNetwork.realm_id;
     const input = document.getElementById('miner-input').value.trim();
     const safeInput = Array.from(input)
         .filter(char => /[\p{L}\p{N}_-]/u.test(char))
@@ -1413,6 +1560,7 @@ async function startSession(realmIdOverride = null) {
         const scopedActions = new Set([
             'game_start', 'network_status', 'transaction_received', 'block_mined',
             'leaderboard_reset' /* Fase 4 */,
+            'market_sale' /* Fase 4: atualização do vendedor */,
             'boss_block' /* Boss Battles */,
             'event_preannounce', 'event_started', 'event_ended' /* Fase 8: Eventos Globais */,
             'pvp_challenge', 'pvp_start', 'pvp_score_update', 'pvp_end', 'pvp_timer' /* Fase 3: PvP */,
@@ -1472,6 +1620,17 @@ async function startSession(realmIdOverride = null) {
             }
             return;
         }
+        if (data.action === 'market_sale') {
+            if (data.seller === minerName) {
+                void Promise.all([
+                    loadMarketList(),
+                    loadMarketHistory(),
+                    loadPlayerState(activeRealmId, minerName),
+                ]);
+                showNotification(`Power-up vendido por ${Number(data.price).toLocaleString()} sats.`, 'success');
+            }
+            return;
+        }
         if (data.action === "transaction_received" && sessionReady && !isPlaying) {
             if (!isValidTransactionEvent(data)) {
                 console.warn("Evento de transação fora do contrato foi ignorado.");
@@ -1483,9 +1642,8 @@ async function startSession(realmIdOverride = null) {
             }
             // Boss Battles: roteia transações para o buffer do boss quando ativo
             if (isBossActive) {
-                if (handleBossTransaction(data)) {
-                    return; // Boss transaction processada
-                }
+                handleBossTransaction(data);
+                return;
             }
             if (txBuffer.length < WORDS_PER_BLOCK) {
                 if (!txBuffer.find(t => t.word === data.word)) {
@@ -1496,13 +1654,28 @@ async function startSession(realmIdOverride = null) {
                         cancelSessionTimeout(pendingBuildTimeout);
                         pendingBuildTimeout = scheduleForSession(() => {
                             pendingBuildTimeout = undefined;
-                            buildPlayableBlock();
+                            void requestPlayableBlockBuild();
                         }, 500, generation);
                     }
                 }
             }
         }
         else if (data.action === "block_mined") {
+            /* Fase 3 (pontas soltas): dedup — ignora block_mined com o mesmo
+             * block_hash/epoch já processado (re-entrega ZMQ ou re-publicação
+             * do backend). Sem isso, "Bloco minerado!" aparece 2× e a rodada
+             * reinicia com tempo acelerado. */
+            if (data.block_hash && data.block_hash === lastMinedBlockHash) {
+                console.warn("block_mined duplicado ignorado:", data.block_hash.slice(0, 16));
+                return;
+            }
+            if (data.epoch && data.epoch === lastMinedEpoch && !data.block_hash) {
+                console.warn("block_mined duplicado ignorado (epoch):", data.epoch.slice(0, 16));
+                return;
+            }
+            lastMinedBlockHash = data.block_hash || null;
+            lastMinedEpoch = data.epoch || null;
+            orphanOfferedThisRound = false;
             activeEpoch = data.epoch ?? activeEpoch; /* Usa nullish coalescing para evitar sobrescrever com block_hash */
             clearInterval(networkInterval);
             cancelSessionTimeout(pendingBuildTimeout);
@@ -1522,11 +1695,17 @@ async function startSession(realmIdOverride = null) {
             if (data.block_hash) {
                 void creditBlockCard(data.block_hash);
             }
-            if (isPlaying) {
+            if (sprintRoundActive) {
+                void endSprintRound('block_mined');
+            } else if (isPlaying) {
                 isPlaying = false;
                 playSound('orphan');
-                /* Fase 2: Orphan Block Salvage (RBF) — oferece resgate */
-                showOrphanBlockSalvage();
+                /* Fase 2: Orphan Block Salvage (RBF) — oferece resgate.
+                 * Fase 3: só uma vez por rodada (flag orphanOfferedThisRound). */
+                if (!orphanOfferedThisRound) {
+                    orphanOfferedThisRound = true;
+                    showOrphanBlockSalvage();
+                }
             } else if (!isTransitioning && !document.getElementById('result-modal').classList.contains('active')) {
                 /* Fase 3: Lightning Channel Liquidity — decrementa blocos restantes */
                 if (isLightningMode && lightningBlocksRemaining > 0) {
@@ -1808,15 +1987,19 @@ async function submitScore() {
 
 /**
  * Fase 3: Sincroniza estado do jogador com o backend.
+ *
+ * Fase 2 (pontas soltas): retry com backoff — o sync é a ponte entre o
+ * saldo local (localStorage) e o backend (Redis). Se falhar em silêncio,
+ * o backend fica com saldo 0 e as compras retornam "saldo insuficiente".
  */
-async function syncPlayerState() {
+async function syncPlayerState(retries = 2) {
     const realmId = activeRealmId;
     const generation = sessionGeneration;
     if (!realmId || !sessionReady || !minerName) return;
     const controller = new AbortController();
     requestControllers.add(controller);
     try {
-        await fetch(playerStateUrl(realmId, minerName), {
+        const response = await fetch(playerStateUrl(realmId, minerName), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1829,8 +2012,21 @@ async function syncPlayerState() {
             }),
             signal: controller.signal
         });
+        if (!response.ok && retries > 0) {
+            // Retry com backoff (500ms * tentativa) para falhas transitórias.
+            await new Promise(r => setTimeout(r, 500 * (3 - retries)));
+            requestControllers.delete(controller);
+            return syncPlayerState(retries - 1);
+        }
     } catch(error) {
-        if (error.name !== 'AbortError') console.warn("Erro ao sincronizar estado do jogador.", error);
+        if (error.name !== 'AbortError') {
+            console.warn("Erro ao sincronizar estado do jogador.", error);
+            if (retries > 0) {
+                await new Promise(r => setTimeout(r, 500 * (3 - retries)));
+                requestControllers.delete(controller);
+                return syncPlayerState(retries - 1);
+            }
+        }
     } finally {
         requestControllers.delete(controller);
     }
@@ -1838,14 +2034,30 @@ async function syncPlayerState() {
 
 /**
  * Fase 3: Carrega estado do jogador do backend ao iniciar sessão.
+ *
+ * Reconciliação de saldo (Fase 2 — pontas soltas):
+ * - Backend é a fonte de verdade. Se o backend tem saldo > 0, espelha no local.
+ * - Se o backend está 0 mas o local tem saldo > 0 (ex.: primeiro uso, ou o
+ *   backend perdeu o estado), empurra o valor local para o backend via
+ *   syncPlayerState() para que compras funcionem.
  */
 async function loadPlayerState(realmId, username) {
     if (!realmId || !username) return;
+    const sessionContext = captureSessionContext(realmId, username);
     try {
         const response = await fetch(playerStateUrl(realmId, username));
         if (!response.ok) return;
         const state = await response.json();
-        if (state.balance > 0) balanceSatoshis = state.balance;
+        if (!isSessionContextCurrent(sessionContext)) return;
+        // Reconciliação: backend é a fonte de verdade, mas NUNCA apaga um
+        // saldo local maior (ex.: backend zerou/expirou, local tem 10.720).
+        // Toma o máximo dos dois lados e empurra o local para o backend
+        // quando o local é maior, para que compras funcionem.
+        if (state.balance > balanceSatoshis) {
+            balanceSatoshis = state.balance;
+        } else if (balanceSatoshis > state.balance) {
+            void syncPlayerState();
+        }
         if (state.hardware_level > 1) {
             hardwareLevel = state.hardware_level;
             networkTimeBonus = (hardwareLevel - 1) * 10;
@@ -1921,7 +2133,13 @@ function buyHardware() {
         if (balanceSatoshis < nextPrice) return;
         balanceSatoshis -= nextPrice; document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString(); playSound('buy');
         networkTimeBonus += 10;
-        if(isPlaying && !isLightningMode) networkTimeLimit += 10;
+        if(isPlaying && !isLightningMode) {
+            networkTimeLimit += 10;
+            /* Fase 7: estende o endTime do timer por timestamp — sem isso,
+             * o +10s do hardware não valeria na rodada em andamento. */
+            raceEndTime += 10 * 1000;
+            updateRaceLimitLabel();
+        }
         document.getElementById('ui-hw').innerText = hardwareNames[hardwareLevel];
         hardwareLevel++; updateStoreUI(); submitScore();
         saveSessionState(); /* Fase 1: salva após compra de hardware */
@@ -1962,7 +2180,7 @@ function buyLightning() {
                 setModalState(term, false);
                 isTransitioning = false;
                 if (!isPlaying && txBuffer.length === WORDS_PER_BLOCK) {
-                    buildPlayableBlock();
+                    void requestPlayableBlockBuild();
                 }
             }, 1500, generation);
         }, 2500, generation);
@@ -1984,6 +2202,7 @@ function prepareNextBlock() {
     isSelecting = false;
     activePointerId = null;
     isPlaying = false; txBuffer = []; wordsFoundInBlock = 0; currentRoundEarnings = 0; networkTimePassed = 0; netProgressEl.style.width = '0%';
+    roundSettled = false; /* Fase 6: nova rodada — libera o timer para expirar de novo */
     netProgressEl.setAttribute('aria-valuenow', '0');
     netProgressEl.setAttribute('aria-valuetext', 'Aguardando uma rodada');
     bankEl.innerHTML = `<div class="loading-state" id="tx-loading-bank">Aguardando transacoes (0/${WORDS_PER_BLOCK})...</div>`;
@@ -1991,6 +2210,84 @@ function prepareNextBlock() {
     consecutiveErrors = 0; /* Fase 1: reseta erros entre rodadas */
     resetRoundPowerups(); /* Power-ups: reseta efeitos de rodada entre rodadas */
     announceGameStatus(`Aguardando ${WORDS_PER_BLOCK} transacoes da rede ativa.`);
+}
+
+/**
+ * Mantém a coleta visível quando não há energia para iniciar uma rodada.
+ */
+function showPendingEnergyState() {
+    isPlaying = false;
+    overlayEl.classList.remove('hidden');
+    const loaderText = overlayEl.querySelector('#tx-loading');
+    if (loaderText) {
+        loaderText.innerText = 'Energia insuficiente. Aguarde a recarga ou compre energia.';
+    }
+    const bankLoadingText = document.getElementById('tx-loading-bank');
+    if (bankLoadingText) {
+        bankLoadingText.innerText = `Rodada pronta (${WORDS_PER_BLOCK}/${WORDS_PER_BLOCK}). Aguardando energia...`;
+    }
+    announceGameStatus('Rodada pronta. Aguarde a recarga ou compre energia para continuar.');
+}
+
+/**
+ * Consome energia antes de expor a grade e evita cobranças concorrentes.
+ */
+async function requestPlayableBlockBuild() {
+    if (
+        energyGatePending
+        || isTransitioning
+        || isPlaying
+        || !sessionReady
+        || !ws
+        || ws.readyState !== WebSocket.OPEN
+        || txBuffer.length !== WORDS_PER_BLOCK
+    ) return;
+
+    const generation = sessionGeneration;
+    const roundRealm = activeRealmId;
+    const roundMiner = minerName;
+    const roundId = reservePendingEnergySpend(roundRealm, roundMiner);
+    energyGatePending = true;
+    try {
+        const hasEnergy = await spendEnergy(roundId, roundRealm, roundMiner);
+        if (
+            generation !== sessionGeneration
+            || !sessionReady
+            || txBuffer.length !== WORDS_PER_BLOCK
+        ) {
+            if (hasEnergy) {
+                await queueEnergyRefund(roundId, roundRealm, roundMiner);
+                clearPendingEnergySpend(roundId);
+            } else if (hasEnergy === false) {
+                clearPendingEnergySpend(roundId);
+            }
+            pendingEnergyRoundId = null;
+            return;
+        }
+        if (hasEnergy === null) {
+            isPlaying = false;
+            overlayEl.classList.remove('hidden');
+            announceGameStatus('Não foi possível confirmar a energia. Sincronizando estado...');
+            return;
+        }
+        if (hasEnergy === false) {
+            clearPendingEnergySpend(roundId);
+            showPendingEnergyState();
+            return;
+        }
+        const blockStarted = buildPlayableBlock();
+        if (!blockStarted) {
+            await queueEnergyRefund(roundId, roundRealm, roundMiner);
+            clearPendingEnergySpend(roundId);
+            showPendingEnergyState();
+            return;
+        }
+        clearPendingEnergySpend(roundId);
+    } finally {
+        if (generation === sessionGeneration) {
+            energyGatePending = false;
+        }
+    }
 }
 
 /**
@@ -2003,7 +2300,7 @@ function buildPlayableBlock(buildAttempt = 0) {
         || !ws
         || ws.readyState !== WebSocket.OPEN
         || txBuffer.length !== WORDS_PER_BLOCK
-    ) return;
+    ) return false;
     overlayEl.classList.add('hidden');
     gridEl.innerHTML = ''; svgEl.innerHTML = ''; bankEl.innerHTML = '';
     grid = []; blockWords = []; currentRoundEarnings = 0; isPlaying = true;
@@ -2020,30 +2317,31 @@ function buildPlayableBlock(buildAttempt = 0) {
         globalRewardMultiplier = 10;
     } else if (globalEventType === 'mempool_flood') {
         currentGridSize = 15; // Grade pesada obrigatória
-        networkTimeLimit = 75 + networkTimeBonus;
+        networkTimeLimit = 75 + getNetworkTimeBonus();
         globalRewardMultiplier = 2;
     } else if (globalEventType === 'fee_spike') {
         globalRewardMultiplier = 3;
         if (isLightningMode) { currentGridSize = 8; networkTimeLimit = 20; }
-        else if (maxVsize > 1000) { currentGridSize = 15; networkTimeLimit = 75 + networkTimeBonus; }
-        else { currentGridSize = 12; networkTimeLimit = 60 + networkTimeBonus; }
+        else if (maxVsize > 1000) { currentGridSize = 15; networkTimeLimit = 75 + getNetworkTimeBonus(); }
+        else { currentGridSize = 12; networkTimeLimit = 60 + getNetworkTimeBonus(); }
     } else if (globalEventType === 'golden_rush') {
         globalRewardMultiplier = 5;
         if (isLightningMode) { currentGridSize = 8; networkTimeLimit = 20; }
-        else if (maxVsize > 1000) { currentGridSize = 15; networkTimeLimit = 75 + networkTimeBonus; }
-        else { currentGridSize = 12; networkTimeLimit = 60 + networkTimeBonus; }
+        else if (maxVsize > 1000) { currentGridSize = 15; networkTimeLimit = 75 + getNetworkTimeBonus(); }
+        else { currentGridSize = 12; networkTimeLimit = 60 + getNetworkTimeBonus(); }
     } else if (isLightningMode) {
         currentGridSize = 8; // Condensado
         networkTimeLimit = 20; // Ultra rápido
     } else if (maxVsize > 1000) {
         currentGridSize = 15; // Bloco pesado
-        networkTimeLimit = 75 + networkTimeBonus;
+        networkTimeLimit = 75 + getNetworkTimeBonus();
     } else {
         currentGridSize = 12; // Padrão
-        networkTimeLimit = 60 + networkTimeBonus;
+        networkTimeLimit = 60 + getNetworkTimeBonus();
     }
     // Fase 2: Halving Protocol — tempo fica 1s mais curto a cada bloco
     const halvingPenalty = Math.min(roundNumber - 1, 30); // Máx 30s de penalidade
+    networkTimeLimit += baseTimeLimit - 60;
     networkTimeLimit = Math.max(networkTimeLimit - halvingPenalty, 15); // Mínimo 15s
     // Fase 2: Halving Protocol — baseReward decresce 2% a cada 10 blocos
     const halvingRewardFactor = Math.max(1 - (Math.floor(roundNumber / 10) * 0.02), 0.5); // Mínimo 50%
@@ -2068,21 +2366,20 @@ function buildPlayableBlock(buildAttempt = 0) {
     const allWordsPlaced = txBuffer.every(
         tx => injectWordInGrid(tx.word, tx.isHighFee, tx.isGolden, tx.isMev, tx.multiplier)
     );
-    if (!allWordsPlaced) {
+    const safeGridFilled = allWordsPlaced && fillGridWithoutIncidentalWords();
+    if (!safeGridFilled) {
         if (buildAttempt < 4) {
-            buildPlayableBlock(buildAttempt + 1);
-            return;
+            return buildPlayableBlock(buildAttempt + 1);
         }
         isPlaying = false;
         overlayEl.classList.remove('hidden');
         const loaderText = overlayEl.querySelector('#tx-loading');
         if (loaderText) loaderText.innerText = "Falha ao montar a grade. Aguarde o próximo conjunto.";
-        return;
+        return false;
     }
 
     for (let y = 0; y < currentGridSize; y++) {
         for (let x = 0; x < currentGridSize; x++) {
-            if (grid[y][x].char === '') { grid[y][x].char = String.fromCharCode(65 + Math.floor(Math.random() * 26)); }
             grid[y][x].element.innerText = grid[y][x].char;
             grid[y][x].element.setAttribute('aria-label', `Letra ${grid[y][x].char}, linha ${y + 1}, coluna ${x + 1}`);
         }
@@ -2093,6 +2390,7 @@ function buildPlayableBlock(buildAttempt = 0) {
     /* Power-ups: aplica efeitos pendentes no início da rodada */
     applyPendingPowerups();
     startNetworkRace();
+    return true;
 }
 
 /**
@@ -2117,11 +2415,15 @@ function injectWordInGrid(word, isHighFee, isGolden, isMev = false, multiplier =
                 if (grid[cy][cx].char !== '') { canPlace = false; break; }
             }
             if (canPlace) {
-                for (let i = 0; i < word.length; i++) {
-                    const cx = startX + dir[0] * i; const cy = startY + dir[1] * i;
-                    grid[cy][cx].char = word[i];
-                }
-                blockWords.push({ word, found: false, isHighFee, isGolden, startX, startY, hinted: false, isMev: isMev, multiplier: multiplier });
+                const coords = Array.from({ length: word.length }, (_, index) => ({
+                    x: startX + dir[0] * index,
+                    y: startY + dir[1] * index
+                }));
+                coords.forEach(({ x, y }, index) => { grid[y][x].char = word[index]; });
+                blockWords.push({
+                    word, found: false, isHighFee, isGolden, startX, startY,
+                    coords, hinted: false, isMev: isMev, multiplier: multiplier
+                });
 
                 /* Fase 6: palavras MEV nao aparecem no word bank (secretas) */
                 if (!isMev) {
@@ -2138,7 +2440,14 @@ function injectWordInGrid(word, isHighFee, isGolden, isMev = false, multiplier =
             const segment = Array.from({ length: word.length }, (_, index) => grid[y][x + index]);
             if (segment.every(cell => cell.char === '')) {
                 segment.forEach((cell, index) => { cell.char = word[index]; });
-                blockWords.push({ word, found: false, isHighFee, isGolden, startX: x, startY: y, hinted: false, isMev: isMev, multiplier: multiplier });
+                const coords = Array.from({ length: word.length }, (_, index) => ({
+                    x: x + index,
+                    y
+                }));
+                blockWords.push({
+                    word, found: false, isHighFee, isGolden, startX: x, startY: y,
+                    coords, hinted: false, isMev: isMev, multiplier: multiplier
+                });
                 /* Fase 6: palavras MEV nao aparecem no word bank (secretas) */
                 if (!isMev) {
                     renderBankWord(word, isHighFee, isGolden);
@@ -2149,6 +2458,70 @@ function injectWordInGrid(word, isHighFee, isGolden, isMev = false, multiplier =
     }
 
     console.error(`Não foi possível inserir a palavra ${word} na grade.`);
+    return false;
+}
+
+const WORD_SEARCH_DIRECTIONS = [[1, 0], [0, 1], [1, 1], [1, -1]];
+
+function normalizedCoordinatePath(coords) {
+    const forward = coords.map(({ x, y }) => `${x},${y}`).join('|');
+    const reverse = [...coords].reverse().map(({ x, y }) => `${x},${y}`).join('|');
+    return forward < reverse ? forward : reverse;
+}
+
+function selectionMatchesOfficialPath(target, selection) {
+    if (!Array.isArray(target?.coords) || target.coords.length !== selection.length) return false;
+    const selectedCoords = selection.map(({ x, y }) => ({ x, y }));
+    return normalizedCoordinatePath(target.coords) === normalizedCoordinatePath(selectedCoords);
+}
+
+function hasIncidentalTargetOccurrence() {
+    const targets = new Map();
+    blockWords.forEach(target => {
+        if (!targets.has(target.word)) targets.set(target.word, new Set());
+        targets.get(target.word).add(normalizedCoordinatePath(target.coords));
+    });
+
+    for (const [word, officialPaths] of targets) {
+        const reversedWord = [...word].reverse().join('');
+        for (let startY = 0; startY < currentGridSize; startY++) {
+            for (let startX = 0; startX < currentGridSize; startX++) {
+                for (const [dx, dy] of WORD_SEARCH_DIRECTIONS) {
+                    const endX = startX + dx * (word.length - 1);
+                    const endY = startY + dy * (word.length - 1);
+                    if (endX < 0 || endX >= currentGridSize || endY < 0 || endY >= currentGridSize) continue;
+                    const coords = Array.from({ length: word.length }, (_, index) => ({
+                        x: startX + dx * index,
+                        y: startY + dy * index
+                    }));
+                    const candidate = coords.map(({ x, y }) => grid[y][x].char).join('');
+                    if (
+                        (candidate === word || candidate === reversedWord)
+                        && !officialPaths.has(normalizedCoordinatePath(coords))
+                    ) return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+function fillGridWithoutIncidentalWords(maxAttempts = 50) {
+    const officialCells = new Set(
+        blockWords.flatMap(target => target.coords.map(({ x, y }) => `${x},${y}`))
+    );
+    const fillerCells = [];
+    for (let y = 0; y < currentGridSize; y++) {
+        for (let x = 0; x < currentGridSize; x++) {
+            if (!officialCells.has(`${x},${y}`)) fillerCells.push(grid[y][x]);
+        }
+    }
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        fillerCells.forEach(cell => {
+            cell.char = String.fromCharCode(65 + Math.floor(Math.random() * 26));
+        });
+        if (!hasIncidentalTargetOccurrence()) return true;
+    }
     return false;
 }
 
@@ -2180,32 +2553,23 @@ function renderWordBank() {
         grid.push(row);
     }
 
-    currentRoundWords.forEach((rawWord, index) => {
-        const word = String(rawWord).toUpperCase().slice(0, currentGridSize);
-        const rowIndex = index % currentGridSize;
-        for (let letterIndex = 0; letterIndex < word.length; letterIndex++) {
-            grid[rowIndex][letterIndex].char = word[letterIndex];
-        }
-        blockWords.push({
-            word,
-            found: false,
-            isHighFee: false,
-            isGolden: false,
-            startX: 0,
-            startY: rowIndex,
-            hinted: false,
-            isMev: false,
-            multiplier: 1.0
-        });
-        renderBankWord(word, false, false);
-    });
+    const uniqueWords = [...new Set(
+        currentRoundWords
+            .map(rawWord => String(rawWord).toUpperCase().slice(0, currentGridSize))
+            .filter(Boolean)
+    )];
+    currentRoundWords = uniqueWords;
+    const allWordsPlaced = uniqueWords.every(
+        word => injectWordInGrid(word, false, false, false, 1.0)
+    );
+    if (!allWordsPlaced || !fillGridWithoutIncidentalWords()) {
+        isPlaying = false;
+        return false;
+    }
 
     for (let y = 0; y < currentGridSize; y++) {
         for (let x = 0; x < currentGridSize; x++) {
             const cell = grid[y][x];
-            if (cell.char === '') {
-                cell.char = String.fromCharCode(65 + Math.floor(Math.random() * 26));
-            }
             cell.element.textContent = cell.char;
             cell.element.setAttribute(
                 'aria-label',
@@ -2213,6 +2577,7 @@ function renderWordBank() {
             );
         }
     }
+    return true;
 }
 
 
@@ -2428,12 +2793,13 @@ function endSelection() {
     if (!isSelecting) return;
     isSelecting = false;
 
-    const selectedWord = selectedCells.map(c => grid[c.y][c.x].char).join('');
-    const reversedWord = selectedWord.split('').reverse().join('');
-    const match = blockWords.find(w => (w.word === selectedWord || w.word === reversedWord) && !w.found);
+    const match = blockWords.find(
+        w => !w.found && selectionMatchesOfficialPath(w, selectedCells)
+    );
 
     if (match) {
         playSound('success'); match.found = true; wordsFoundInBlock++;
+        if (sprintRoundActive) sprintWordsFound = wordsFoundInBlock;
         consecutiveErrors = 0; /* Fase 1: reseta contador de erros ao acertar */
 
         const now = Date.now();
@@ -2444,7 +2810,10 @@ function endSelection() {
         lastFoundTime = now;
         document.getElementById('ui-combo').innerText = `${comboMultiplier.toFixed(1)}×`;
 
-        let points = (effectiveBaseReward + (match.word.length * 50)) * comboMultiplier;
+        let points = (
+            (effectiveBaseReward * (1 + skillRewardBonus))
+            + (match.word.length * 50)
+        ) * comboMultiplier;
         // Fase 3: Usa multiplicador do backend (GOLDEN=5×, HIGH FEE=3×)
         const backendMultiplier = match.multiplier || 1.0;
         points *= backendMultiplier;
@@ -2455,7 +2824,7 @@ function endSelection() {
         points = applyAchievementBonus(points);
 
         /* Boss Battles: multiplicador 5× e dano ao boss */
-        if (isBossActive && !match.isMev) {
+        if (isBossActive) {
             points *= bossRewardMultiplier;
             // Dano ao boss — diminui HP
             bossHp = Math.max(0, bossHp - 1);
@@ -2483,8 +2852,6 @@ function endSelection() {
                 // Limpa timer
                 clearInterval(networkInterval);
                 isPlaying = false;
-                // Não mostra resultado normal — mostra modal do boss
-                return;
             }
         }
 
@@ -2536,12 +2903,26 @@ function endSelection() {
         if (wordsFoundInBlock === blockWords.length) {
             clearInterval(networkInterval);
             isPlaying = false;
-            scheduleForSession(() => showResult(
-                true,
-                isLightningMode
-                    ? "Rodada L2 simulada concluída."
-                    : "Todas as palavras foram encontradas antes do cronômetro."
-            ), 600, sessionGeneration);
+            /* Fase 6 (pontas soltas): marca a rodada como finalizada ANTES de
+             * qualquer delay — o tick do timer em andamento verifica essa flag
+             * e não sobrescreve o sucesso com "expirou". */
+            roundSettled = true;
+            if (sprintRoundActive) {
+                void endSprintRound('completed');
+            } else if (bossDefeatHandled) {
+                maxRoundEarningsTotal = Math.max(maxRoundEarningsTotal, currentRoundEarnings);
+                void pushStats({ max_round_earnings: maxRoundEarningsTotal });
+                roundNumber++;
+                trackBlockCompleted();
+                void claimFreeCrates();
+            } else {
+                scheduleForSession(() => showResult(
+                    true,
+                    isLightningMode
+                        ? "Rodada L2 simulada concluída."
+                        : "Todas as palavras foram encontradas antes do cronômetro."
+                ), 600, sessionGeneration);
+            }
         }
     } else {
         /* Fase 1: Slashing — penalidade por erro repetido */
@@ -2617,10 +2998,32 @@ function drawAnimatedLine(startCell, endCell) {
 }
 
 /**
+ * Fase 7 (pontas soltas): exibe o limite efetivo da rodada no HUD.
+ * Antes o HUD só mostrava "GLOBAL_NETWORK_LIMIT" genérico e o jogador não
+ * via por que o tempo "acelerava" (Lightning=20s, RBF=15s, Halving -30s).
+ */
+function updateRaceLimitLabel() {
+    const label = document.getElementById('race-limit-label');
+    if (!label) return;
+    const prefix = isLightningMode ? 'L2 ' : '';
+    label.textContent = `LIMIT ${prefix}${networkTimeLimit}s`;
+}
+
+/**
  * Inicia o cronômetro visual da corrida contra a rede.
+ *
+ * Fase 7 (pontas soltas): timer por timestamp (endTime absoluto) em vez de
+ * contador por tick. O setInterval é throttled em aba em segundo plano
+ * (Chrome: 1 tick/s, depois 1 tick/min), então o contador "acelerava"/
+ * atrasava na prática. Com Date.now() o progresso é sempre fiel ao tempo
+ * real — a rodada expira no tempo certo mesmo com a aba em segundo plano.
  */
 function startNetworkRace() {
     clearInterval(networkInterval);
+    const now = Date.now();
+    raceEndTime = now + networkTimeLimit * 1000;
+    lastTickTime = now;
+    updateRaceLimitLabel();
     netProgressEl.setAttribute('aria-valuetext', `${networkTimeLimit} segundos restantes`);
     const generation = sessionGeneration;
     networkInterval = setInterval(() => {
@@ -2628,28 +3031,40 @@ function startNetworkRace() {
             clearInterval(networkInterval);
             return;
         }
-        /* Power-up Time Freeze: pausa o cronômetro por N segundos */
+        const tickNow = Date.now();
+        const deltaMs = tickNow - lastTickTime;
+        lastTickTime = tickNow;
+
+        /* Power-up Time Freeze: pausa o cronômetro — adia o endTime pelo
+         * delta real do tick para o tempo restante não diminuir durante o
+         * freeze, e decrementa o freeze pelo tempo real. */
         if (powerupEffects.time_freeze > 0) {
-            powerupEffects.time_freeze--;
+            raceEndTime += deltaMs;
+            powerupEffects.time_freeze = Math.max(0, powerupEffects.time_freeze - deltaMs / 1000);
+            const freezeLeft = Math.ceil(powerupEffects.time_freeze);
             netProgressEl.classList.add('time-frozen');
-            netProgressEl.setAttribute('aria-valuetext', `Time Freeze ativo: ${powerupEffects.time_freeze}s restantes`);
+            netProgressEl.setAttribute('aria-valuetext', `Time Freeze ativo: ${freezeLeft}s restantes`);
             return;
         }
         netProgressEl.classList.remove('time-frozen');
-        networkTimePassed++;
-        const percent = (networkTimePassed / networkTimeLimit) * 100;
-        netProgressEl.style.width = `${percent}%`;
-        netProgressEl.setAttribute('aria-valuenow', String(Math.min(100, Math.round(percent))));
-        netProgressEl.setAttribute(
-            'aria-valuetext',
-            `${Math.max(0, networkTimeLimit - networkTimePassed)} segundos restantes`
-        );
 
-        if (networkTimePassed >= networkTimeLimit) {
-            clearInterval(networkInterval); isPlaying = false; playSound('orphan'); submitScore();
+        const remainingMs = raceEndTime - Date.now();
+        const remaining = Math.max(0, Math.ceil(remainingMs / 1000));
+        networkTimePassed = Math.max(0, networkTimeLimit - remaining);
+        const percent = (networkTimePassed / networkTimeLimit) * 100;
+        netProgressEl.style.width = `${Math.min(100, percent)}%`;
+        netProgressEl.setAttribute('aria-valuenow', String(Math.min(100, Math.round(percent))));
+        netProgressEl.setAttribute('aria-valuetext', `${remaining} segundos restantes`);
+
+        if (remainingMs <= 0) {
+            clearInterval(networkInterval);
+            /* Fase 6 (pontas soltas): se a rodada já foi finalizada (todas as
+             * palavras achadas), não sobrescreve o sucesso com "expirou". */
+            if (roundSettled) return;
+            isPlaying = false; playSound('orphan'); submitScore();
             showResult(false, "O cronômetro da rodada expirou.");
         }
-    }, 1000);
+    }, 250);
 }
 
 /**
@@ -2692,7 +3107,6 @@ function showOrphanBlockSalvage() {
     const text = document.getElementById('result-text');
     const btn = document.getElementById('next-btn');
 
-    isRbfMode = true; /* Ativa modo RBF — previne conflito com prepareNextBlock */
     setModalState(modal, true);
     title.innerText = "Bloco minerado!";
     title.style.color = "var(--warning-orange)";
@@ -2704,7 +3118,6 @@ function showOrphanBlockSalvage() {
     const generation = sessionGeneration;
     rbfTimeout = scheduleForSession(() => {
         rbfTimeout = null;
-        isRbfMode = false; /* Desativa modo RBF */
         showResult(false, "O tempo de RBF expirou.");
     }, 3000, generation);
 
@@ -2724,17 +3137,16 @@ function showOrphanBlockSalvage() {
             // Fase 3: Sincroniza estado do jogador (RBF usado)
             void syncPlayerState();
 
-            /* Reinicia a rodada com tempo extra (respeita networkTimeBonus do hardware) */
+            /* Reinicia a rodada com tempo extra (hardware + nível) */
             isPlaying = true;
             networkTimePassed = 0;
-            networkTimeLimit = RBF_TIME_BONUS + networkTimeBonus;
+            networkTimeLimit = RBF_TIME_BONUS + getNetworkTimeBonus();
             netProgressEl.style.width = '0%';
             netProgressEl.setAttribute('aria-valuenow', '0');
-            netProgressEl.setAttribute('aria-valuetext', `${RBF_TIME_BONUS + networkTimeBonus} segundos restantes`);
+            netProgressEl.setAttribute('aria-valuetext', `${RBF_TIME_BONUS + getNetworkTimeBonus()} segundos restantes`);
             setModalState(modal, false);
             startNetworkRace();
         } else {
-            isRbfMode = false; /* Desativa modo RBF */
             announceGameStatus("Saldo insuficiente para RBF.");
             scheduleForSession(() => showResult(false, "Saldo insuficiente para RBF."), 500, generation);
         }
@@ -2898,14 +3310,14 @@ function renderAchievementsModal() {
 
         card.innerHTML = `
             <span class="achievement-icon">${iconSvg(achievementIconName(ach.category))}</span>
-            <span class="achievement-name">${ach.name}</span>
+            <span class="achievement-name">${escapeHtml(ach.name)}</span>
             <div class="achievement-progress-bar">
                 <div class="achievement-progress-fill"></div>
             </div>
             <span class="achievement-progress-text">${currentLabel}</span>
             <div class="achievement-tooltip">
-                <div class="achievement-tooltip-desc">${ach.description}</div>
-                ${bonusLabel ? `<div class="achievement-tooltip-bonus">Bônus: ${bonusLabel}</div>` : ''}
+                <div class="achievement-tooltip-desc">${escapeHtml(ach.description)}</div>
+                ${bonusLabel ? `<div class="achievement-tooltip-bonus">Bônus: ${escapeHtml(bonusLabel)}</div>` : ''}
             </div>
         `;
         card.querySelector('.achievement-progress-fill').style.width = `${progressPercent}%`;
@@ -3024,15 +3436,11 @@ function trackEpochSurvived() {
     pushStats({ epochs_survived: epochsSurvived });
 }
 
-function trackPoolRank1() {
-    poolRank1++;
-    pushStats({ pool_rank_1: poolRank1 });
-}
 
 /* Fase 7: Aplicar bônus de achievements ao preco de dica */
 function getHintPrice() {
     const discount = achievementBonuses.hint_discount || 0;
-    return Math.floor(HINT_PRICE * (1 - discount));
+    return Math.floor(hintCost * (1 - discount));
 }
 
 /* Fase 7: Aplicar bônus de achievements a recompensa */
@@ -3091,6 +3499,10 @@ async function loadAchievementStats(realmId, username) {
  */
 function handleBossBlock(data, generation) {
     if (generation !== sessionGeneration) return;
+    if (document.getElementById('result-modal')?.classList.contains('active')) {
+        console.warn('Boss block recebido com resultado pendente — ignorado.');
+        return;
+    }
     if (isPlaying) {
         console.warn('Boss block recebido mas rodada já em andamento — ignorado.');
         return;
@@ -3227,7 +3639,7 @@ function buildBossPlayableBlock() {
 
     // Boss: sempre 15×15
     currentGridSize = 15;
-    networkTimeLimit = bossTimer;
+    networkTimeLimit = bossTimer + skillTimeBonus;
 
     configureGridSize(currentGridSize);
 
@@ -3307,9 +3719,16 @@ function buildBossPlayableBlock() {
 /**
  * Fase Boss: inicia o cronômetro especial do boss (45s).
  * Usa cor vermelha na barra de progresso para indicar urgência.
+ *
+ * Fase 7 (pontas soltas): timer por timestamp (endTime absoluto) — mesmo
+ * tratamento do startNetworkRace, imune a throttling de aba em 2º plano.
  */
 function startBossNetworkRace() {
     clearInterval(networkInterval);
+    const now = Date.now();
+    raceEndTime = now + networkTimeLimit * 1000;
+    lastTickTime = now;
+    updateRaceLimitLabel();
     netProgressEl.setAttribute('aria-valuetext', `${networkTimeLimit} segundos restantes`);
     netProgressEl.style.background = 'var(--error-red)';
     netProgressEl.style.boxShadow = '0 0 10px rgba(239, 68, 68, 0.8)';
@@ -3320,22 +3739,21 @@ function startBossNetworkRace() {
             clearInterval(networkInterval);
             return;
         }
-        networkTimePassed++;
+        const remainingMs = raceEndTime - Date.now();
+        const remaining = Math.max(0, Math.ceil(remainingMs / 1000));
+        networkTimePassed = Math.max(0, networkTimeLimit - remaining);
         const percent = (networkTimePassed / networkTimeLimit) * 100;
-        netProgressEl.style.width = `${percent}%`;
+        netProgressEl.style.width = `${Math.min(100, percent)}%`;
         netProgressEl.setAttribute('aria-valuenow', String(Math.min(100, Math.round(percent))));
-        netProgressEl.setAttribute(
-            'aria-valuetext',
-            `${Math.max(0, networkTimeLimit - networkTimePassed)} segundos restantes`
-        );
+        netProgressEl.setAttribute('aria-valuetext', `${remaining} segundos restantes`);
 
         // Timer crítico — menos de 10s
-        if (networkTimeLimit - networkTimePassed <= 10 && networkTimeLimit - networkTimePassed > 0) {
+        if (remaining <= 10 && remaining > 0) {
             netProgressEl.style.background = 'var(--error-red)';
             netProgressEl.style.animation = 'rbfPulse 0.5s ease-in-out infinite';
         }
 
-        if (networkTimePassed >= networkTimeLimit) {
+        if (remainingMs <= 0) {
             clearInterval(networkInterval);
             isPlaying = false;
             playSound('orphan');
@@ -3343,7 +3761,7 @@ function startBossNetworkRace() {
             // Boss expirou — mostra resultado normal
             showBossResult(false, "O cronômetro do boss expirou. O boss resistiu!");
         }
-    }, 1000);
+    }, 250);
 }
 
 /**
@@ -3852,23 +4270,15 @@ function chatHistoryUrl(realmId, limit = 20) {
     return url.toString();
 }
 
-/**
- * Alterna a visibilidade do painel de chat.
- */
-function toggleChatPanel() {
-    showTab('social');
-    chatPanelVisible = true;
-    if (!chatHistoryLoaded) {
-        void loadChatHistory();
-    }
-    chatInputEl.focus();
-}
 
 /**
  * Carrega o histórico recente de mensagens do backend.
  */
 async function loadChatHistory() {
     if (!activeRealmId) return;
+    if (chatHistoryLoaded || chatHistoryLoading) return;
+    const sessionContext = captureSessionContext();
+    chatHistoryLoading = true;
     const controller = new AbortController();
     requestControllers.add(controller);
     try {
@@ -3878,9 +4288,11 @@ async function loadChatHistory() {
         });
         if (!response.ok) return;
         const data = await response.json();
+        if (!isSessionContextCurrent(sessionContext)) return;
         if (data.messages && Array.isArray(data.messages)) {
-            chatMessages = data.messages.slice(0, CHAT_MAX_MESSAGES);
+            chatMessages = data.messages.slice(0, CHAT_MAX_MESSAGES).reverse();
             renderChatMessages();
+            chatHistoryLoaded = true;
         }
     } catch (error) {
         if (error.name !== 'AbortError') {
@@ -3888,6 +4300,7 @@ async function loadChatHistory() {
         }
     } finally {
         requestControllers.delete(controller);
+        if (isSessionContextCurrent(sessionContext)) chatHistoryLoading = false;
     }
 }
 
@@ -3900,6 +4313,15 @@ function renderChatMessages() {
         appendChatMessage(msg, false);
     });
     scrollToBottom();
+}
+
+/**
+ * Insere um nó no chat e mantém apenas as mensagens mais recentes.
+ */
+function appendNodeToChat(node) {
+    chatMessagesEl.appendChild(node);
+    const allMessages = chatMessagesEl.querySelectorAll('.chat-message');
+    if (allMessages.length > CHAT_MAX_MESSAGES) allMessages[0].remove();
 }
 
 /**
@@ -3941,13 +4363,7 @@ function appendChatMessage(msg, animate = true) {
     textEl.textContent = msg.message;
     msgEl.appendChild(textEl);
 
-    chatMessagesEl.appendChild(msgEl);
-
-    // Limita o DOM às últimas 50 mensagens
-    const allMsgs = chatMessagesEl.querySelectorAll('.chat-message');
-    if (allMsgs.length > CHAT_MAX_MESSAGES) {
-        allMsgs[0].remove();
-    }
+    appendNodeToChat(msgEl);
 
     scrollToBottom();
 }
@@ -3959,7 +4375,7 @@ function appendSystemMessage(text) {
     const msgEl = document.createElement('div');
     msgEl.className = 'chat-message system';
     msgEl.textContent = text;
-    chatMessagesEl.appendChild(msgEl);
+    appendNodeToChat(msgEl);
     scrollToBottom();
 }
 
@@ -4026,7 +4442,8 @@ async function sendChatMessage() {
         } else if (response.ok) {
             const data = await response.json();
             if (data.message) {
-                chatMessages.unshift(data.message);
+                chatMessages.push(data.message);
+                if (chatMessages.length > CHAT_MAX_MESSAGES) chatMessages.shift();
                 appendChatMessage(data.message, true);
             }
             chatInputEl.value = '';
@@ -4256,12 +4673,14 @@ function stopStakeCountdown() {
  */
 async function loadStakingStatus() {
     if (!activeRealmId || !minerName) return;
+    const sessionContext = captureSessionContext();
 
     try {
         const response = await fetch(stakingStatusUrl(activeRealmId, minerName));
         if (!response.ok) return;
 
         const data = await response.json();
+        if (!isSessionContextCurrent(sessionContext)) return;
         stakeState = {
             active: data.active || false,
             amount: data.amount || 0,
@@ -4286,12 +4705,14 @@ async function loadStakingStatus() {
  */
 async function loadStakingHistory() {
     if (!activeRealmId || !minerName || !stakingHistoryListEl) return;
+    const sessionContext = captureSessionContext();
 
     try {
         const response = await fetch(stakingHistoryUrl(activeRealmId, minerName));
         if (!response.ok) return;
 
         const data = await response.json();
+        if (!isSessionContextCurrent(sessionContext)) return;
         const history = data.history || [];
 
         if (history.length === 0) {
@@ -4304,13 +4725,15 @@ async function loadStakingHistory() {
         const recent = history.slice(-10).reverse();
         for (const entry of recent) {
             const item = document.createElement('div');
-            item.className = `staking-history-item stake-${entry.type}`;
+            const safeType = ['created', 'unstake', 'expired'].includes(entry.type)
+                ? entry.type
+                : 'created';
+            item.className = `staking-history-item stake-${safeType}`;
 
-            const typeLabel = entry.type === 'created' ? 'Stake' :
-                              entry.type === 'unstake' ? 'Cancelado' :
-                              entry.type === 'expired' ? 'Expirado' : 'Stake';
+            const typeLabel = safeType === 'created' ? 'Stake' :
+                              safeType === 'unstake' ? 'Cancelado' : 'Expirado';
 
-            const amountText = entry.type === 'unstake'
+            const amountText = safeType === 'unstake'
                 ? `${entry.returned.toLocaleString()} sats (penalty: ${entry.penalty.toLocaleString()})`
                 : `${entry.amount.toLocaleString()} sats`;
 
@@ -4320,11 +4743,16 @@ async function loadStakingHistory() {
                 })
                 : '';
 
-            item.innerHTML = `
-                <span class="staking-history-type">${typeLabel}</span>
-                <span class="staking-history-amount">${amountText}</span>
-                <span class="staking-history-date">${date}</span>
-            `;
+            const typeElement = document.createElement('span');
+            typeElement.className = 'staking-history-type';
+            typeElement.textContent = typeLabel;
+            const amountElement = document.createElement('span');
+            amountElement.className = 'staking-history-amount';
+            amountElement.textContent = amountText;
+            const dateElement = document.createElement('span');
+            dateElement.className = 'staking-history-date';
+            dateElement.textContent = date;
+            item.append(typeElement, amountElement, dateElement);
             stakingHistoryListEl.appendChild(item);
         }
     } catch (error) {
@@ -4460,19 +4888,6 @@ if (btnCancelStakeEl) {
     btnCancelStakeEl.addEventListener('click', cancelStake);
 }
 
-// Seleção de duração do stake
-document.querySelectorAll('.staking-duration-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-        document.querySelectorAll('.staking-duration-btn').forEach(b => {
-            b.classList.remove('active');
-            b.setAttribute('aria-checked', 'false');
-        });
-        btn.classList.add('active');
-        btn.setAttribute('aria-checked', 'true');
-        selectedStakeDuration = parseInt(btn.dataset.hours, 10);
-    });
-});
-
 // Fase 3: sincroniza o <select> de duração com selectedStakeDuration (1h/6h/24h)
 if (stakingDurationEl) {
     stakingDurationEl.addEventListener('change', () => {
@@ -4557,6 +4972,7 @@ async function startDecoderGame() {
                 decoderCooldownRemaining = parseInt(errorData.detail?.match(/\d+/)?.[0] || '180', 10);
                 announceGameStatus(`Decoder: aguarde ${decoderCooldownRemaining}s para jogar novamente.`);
                 decoderActive = false;
+                decoderLaunchBtnEl.classList.remove('hidden');
                 return;
             }
             throw new Error(`HTTP ${response.status}`);
@@ -4647,8 +5063,11 @@ async function submitDecoderAnswer() {
             );
             decoderFeedbackEl.hidden = false;
 
-            // Animação de recompensa
-            decoderModalEl.querySelector('.decoder-content').classList.add('reward');
+            // Animação de recompensa (guard: .decoder-content pode não existir
+            // no HTML — antes lançava TypeError e interrompia o caminho de
+            // sucesso: saldo +5.000, streak e syncPlayerState).
+            const decoderContent = decoderModalEl.querySelector('.decoder-content');
+            if (decoderContent) decoderContent.classList.add('reward');
             playSound('success');
 
             // Atualiza saldo local
@@ -4757,6 +5176,7 @@ const skillsContentEl = document.getElementById('skills-content');
 // Carrega a skill tree do backend
 async function loadSkillTree() {
     if (skillTreeLoading) return;
+    const sessionContext = captureSessionContext();
     skillTreeLoading = true;
 
     if (skillsLoadingEl) skillsLoadingEl.hidden = false;
@@ -4769,14 +5189,19 @@ async function loadSkillTree() {
 
         if (!response.ok) throw new Error('Falha ao carregar skill tree');
 
-        skillTreeData = await response.json();
+        const payload = await response.json();
+        if (!isSessionContextCurrent(sessionContext)) return;
+        skillTreeData = payload;
+        applySkillBonuses(skillTreeData.bonuses);
         renderSkillTree();
     } catch (error) {
         console.error('Erro ao carregar skill tree:', error);
         if (skillsLoadingEl) skillsLoadingEl.textContent = 'Erro ao carregar habilidades.';
     } finally {
-        skillTreeLoading = false;
-        if (skillsLoadingEl) skillsLoadingEl.hidden = true;
+        if (isSessionContextCurrent(sessionContext)) {
+            skillTreeLoading = false;
+            if (skillsLoadingEl) skillsLoadingEl.hidden = true;
+        }
     }
 }
 
@@ -4878,10 +5303,6 @@ async function unlockSkill(branchKey) {
         // Recarrega a skill tree
         await loadSkillTree();
 
-        // Atualiza bônus no jogo
-        if (skillTreeData) {
-            applySkillBonuses(skillTreeData.bonuses);
-        }
     } catch (error) {
         console.error('Erro ao desbloquear habilidade:', error);
         showNotification('Erro ao desbloquear habilidade', 'error');
@@ -4890,22 +5311,20 @@ async function unlockSkill(branchKey) {
 
 // Aplica bônus das habilidades no jogo
 function applySkillBonuses(bonuses) {
-    if (!bonuses) return;
+    const miningTimeBonus = Math.max(0, Number(bonuses?.mining_time_bonus) || 0);
+    const searchDiscount = Math.min(
+        Math.max(0, Number(bonuses?.search_discount_percent) || 0) / 100,
+        1
+    );
+    const rewardBonus = Math.min(
+        Math.max(0, Number(bonuses?.lightning_reward_percent) || 0) / 100,
+        1
+    );
 
-    // Mining: +tempo base
-    if (bonuses.base_time_bonus) {
-        baseTimeLimit += bonuses.base_time_bonus;
-    }
-
-    // Search: desconto em hints
-    if (bonuses.hint_discount) {
-        hintCost = Math.round(hintCost * (1 - bonuses.hint_discount));
-    }
-
-    // Lightning: bônus de recompensa
-    if (bonuses.reward_bonus) {
-        effectiveBaseReward *= (1 + bonuses.reward_bonus);
-    }
+    skillTimeBonus = miningTimeBonus;
+    baseTimeLimit = 60 + skillTimeBonus;
+    hintCost = Math.round(HINT_PRICE * (1 - searchDiscount));
+    skillRewardBonus = rewardBonus;
 }
 
 registerSessionInitializer('skills', async () => {
@@ -4918,6 +5337,148 @@ registerSessionInitializer('skills', async () => {
 
 let energyState = createInitialEnergyState();
 let energyTimerInterval = null;
+let pendingEnergyRoundId = null;
+let energyRefundFlushPending = false;
+const ENERGY_REFUNDS_STORAGE_KEY = 'mempool-miner-energy-refunds';
+const ENERGY_PENDING_SPENDS_STORAGE_KEY = 'mempool-miner-energy-pending-spends';
+
+/**
+ * Preserva metadados do status quando spend/buy retornam apenas campos mutados.
+ */
+function mergeEnergyState(payload) {
+    return { ...energyState, ...payload };
+}
+
+function createEnergyRoundId() {
+    return crypto.randomUUID();
+}
+
+function loadPendingEnergyRefunds() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(ENERGY_REFUNDS_STORAGE_KEY) || '[]');
+        if (!Array.isArray(raw)) return new Map();
+        return new Map(raw
+            .filter(item => item?.roundId && item?.realmId && item?.username)
+            .map(item => [item.roundId, item]));
+    } catch (error) {
+        console.warn('Refunds de energia persistidos foram ignorados.', error);
+        return new Map();
+    }
+}
+
+const pendingEnergyRefunds = loadPendingEnergyRefunds();
+
+function loadPendingEnergySpends() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(ENERGY_PENDING_SPENDS_STORAGE_KEY) || '[]');
+        if (!Array.isArray(raw)) return new Map();
+        return new Map(raw
+            .filter(item => item?.roundId && item?.realmId && item?.username)
+            .map(item => [item.roundId, item]));
+    } catch (error) {
+        console.warn('Spends de energia pendentes foram ignorados.', error);
+        return new Map();
+    }
+}
+
+const pendingEnergySpends = loadPendingEnergySpends();
+
+function persistPendingEnergyRefunds() {
+    try {
+        localStorage.setItem(
+            ENERGY_REFUNDS_STORAGE_KEY,
+            JSON.stringify(Array.from(pendingEnergyRefunds.values()))
+        );
+    } catch (error) {
+        console.warn('Não foi possível persistir refunds de energia.', error);
+    }
+}
+
+function persistPendingEnergySpends() {
+    try {
+        localStorage.setItem(
+            ENERGY_PENDING_SPENDS_STORAGE_KEY,
+            JSON.stringify(Array.from(pendingEnergySpends.values()))
+        );
+    } catch (error) {
+        console.warn('Não foi possível persistir spends de energia.', error);
+    }
+}
+
+function reservePendingEnergySpend(realmId, username) {
+    if (pendingEnergyRoundId && pendingEnergySpends.has(pendingEnergyRoundId)) {
+        return pendingEnergyRoundId;
+    }
+    const existing = Array.from(pendingEnergySpends.values()).find(
+        item => item.realmId === realmId && item.username === username
+    );
+    const roundId = existing?.roundId || createEnergyRoundId();
+    pendingEnergyRoundId = roundId;
+    pendingEnergySpends.set(roundId, { roundId, realmId, username });
+    persistPendingEnergySpends();
+    return roundId;
+}
+
+function clearPendingEnergySpend(roundId) {
+    pendingEnergySpends.delete(roundId);
+    persistPendingEnergySpends();
+    if (pendingEnergyRoundId === roundId) pendingEnergyRoundId = null;
+}
+
+async function recoverPendingEnergySpends() {
+    for (const [roundId, entry] of Array.from(pendingEnergySpends.entries())) {
+        try {
+            const response = await fetch(networkApiUrl(
+                entry.realmId,
+                `energy/spend?username=${encodeURIComponent(entry.username)}&round_id=${encodeURIComponent(roundId)}`
+            ), { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+            if (![200, 400, 409].includes(response.status)) continue;
+            await queueEnergyRefund(roundId, entry.realmId, entry.username);
+            clearPendingEnergySpend(roundId);
+        } catch (error) {
+            console.warn(`Spend de energia ${roundId} continua pendente.`, error);
+        }
+    }
+}
+
+async function flushPendingEnergyRefunds() {
+    if (energyRefundFlushPending || pendingEnergyRefunds.size === 0) return;
+    energyRefundFlushPending = true;
+    try {
+        for (const [roundId, entry] of pendingEnergyRefunds) {
+            try {
+                const response = await fetch(networkApiUrl(
+                    entry.realmId,
+                    `energy/refund?username=${encodeURIComponent(entry.username)}&round_id=${encodeURIComponent(roundId)}`
+                ), { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+                if (!response.ok) {
+                    if (response.status >= 400 && response.status < 500) {
+                        pendingEnergyRefunds.delete(roundId);
+                        persistPendingEnergyRefunds();
+                    }
+                    continue;
+                }
+                const payload = await response.json();
+                if (entry.realmId === activeRealmId && entry.username === minerName) {
+                    energyState = mergeEnergyState(payload);
+                    updateEnergyUI();
+                }
+                pendingEnergyRefunds.delete(roundId);
+                persistPendingEnergyRefunds();
+            } catch (error) {
+                console.warn(`Refund de energia pendente para ${roundId}.`, error);
+            }
+        }
+    } finally {
+        energyRefundFlushPending = false;
+    }
+}
+
+async function queueEnergyRefund(roundId, realmId, username) {
+    pendingEnergyRefunds.set(roundId, { roundId, realmId, username });
+    persistPendingEnergyRefunds();
+    await flushPendingEnergyRefunds();
+}
 
 // Elementos do Energy System
 const uiEnergyBarEl = document.getElementById('ui-energy-bar');
@@ -4926,7 +5487,8 @@ const uiEnergyTimerEl = document.getElementById('ui-energy-timer');
 const btnBuyEnergyEl = document.getElementById('btn-buy-energy');
 
 // Carrega estado de energia do backend
-async function loadEnergyState() {
+async function loadEnergyState(resumeRound = true) {
+    const sessionContext = captureSessionContext();
     try {
         const response = await fetch(activeNetworkApiUrl(`energy/status?username=${encodeURIComponent(minerName)}`), {
             headers: { 'X-Abort-After': '5000' }
@@ -4934,8 +5496,13 @@ async function loadEnergyState() {
 
         if (!response.ok) throw new Error('Falha ao carregar energia');
 
-        energyState = await response.json();
+        const payload = await response.json();
+        if (!isSessionContextCurrent(sessionContext)) return;
+        energyState = payload;
         updateEnergyUI();
+        if (resumeRound && energyState.current > 0) {
+            void requestPlayableBlockBuild();
+        }
     } catch (error) {
         console.error('Erro ao carregar energia:', error);
     }
@@ -4989,35 +5556,59 @@ function startEnergyTimer() {
 }
 
 // Gasta 1 energia antes de iniciar rodada
-async function spendEnergy() {
-    try {
-        const response = await fetch(activeNetworkApiUrl(`energy/spend?username=${encodeURIComponent(minerName)}`), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
-        });
+async function spendEnergy(roundId, realmId, username) {
+    const isCurrentSession = () => realmId === activeRealmId && username === minerName;
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+            const response = await fetch(networkApiUrl(
+                realmId,
+                `energy/spend?username=${encodeURIComponent(username)}&round_id=${encodeURIComponent(roundId)}`
+            ), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
 
-        if (!response.ok) {
-            if (response.status === 400) {
-                showNotification('Energia insuficiente! Aguarde regeneração ou compre mais.', 'error');
-                return false;
+            if (!response.ok) {
+                if (response.status === 400) {
+                    if (isCurrentSession()) {
+                        showNotification('Energia insuficiente! Aguarde regeneração ou compre mais.', 'error');
+                    }
+                    return false;
+                }
+                if (response.status === 409) {
+                    if (isCurrentSession()) {
+                        showNotification('A tentativa anterior já foi compensada. Tente novamente.', 'error');
+                    }
+                    return false;
+                }
+                if (response.status >= 400 && response.status < 500) return false;
+                throw new Error(`Falha ao gastar energia: HTTP ${response.status}`);
             }
-            throw new Error('Falha ao gastar energia');
-        }
 
-        energyState = await response.json();
-        updateEnergyUI();
-        return true;
-    } catch (error) {
-        console.error('Erro ao gastar energia:', error);
-        showNotification('Erro ao verificar energia', 'error');
-        return false;
+            const payload = await response.json();
+            if (isCurrentSession()) {
+                energyState = mergeEnergyState(payload);
+                updateEnergyUI();
+            }
+            return true;
+        } catch (error) {
+            console.error('Erro ao gastar energia:', error);
+            if (attempt === 0) continue;
+            if (isCurrentSession()) {
+                await loadEnergyState(false);
+                showNotification('Não foi possível confirmar a energia. Estado sincronizado.', 'error');
+            }
+            return null;
+        }
     }
+    return null;
 }
 
 // Compra 3 energia por 2.000 sats
 async function buyEnergy() {
     if (!btnBuyEnergyEl) return;
 
+    const originalContent = btnBuyEnergyEl.innerHTML;
     btnBuyEnergyEl.disabled = true;
     btnBuyEnergyEl.textContent = '...';
 
@@ -5033,16 +5624,19 @@ async function buyEnergy() {
             return;
         }
 
-        energyState = await response.json();
+        energyState = mergeEnergyState(await response.json());
         updateEnergyUI();
         playSound('buy');
         showNotification('+3 Energia comprada!', 'success');
+        // Fase 2: espelha o saldo retornado pelo backend (fonte de verdade)
+        void loadPlayerState(activeRealmId, minerName);
+        void requestPlayableBlockBuild();
     } catch (error) {
         console.error('Erro ao comprar energia:', error);
         showNotification('Erro ao comprar energia', 'error');
     } finally {
         btnBuyEnergyEl.disabled = false;
-        btnBuyEnergyEl.textContent = '2,000 SATS';
+        btnBuyEnergyEl.innerHTML = originalContent;
     }
 }
 
@@ -5051,16 +5645,10 @@ if (btnBuyEnergyEl) {
     btnBuyEnergyEl.addEventListener('click', buyEnergy);
 }
 
-// Gasta energia antes de iniciar rodada
-const originalStartNetworkRace = startNetworkRace;
-startNetworkRace = async function() {
-    const hasEnergy = await spendEnergy();
-    if (!hasEnergy) return;
-    originalStartNetworkRace();
-};
-
 // Carrega energia ao iniciar sessão
 registerSessionInitializer('energy', async () => {
+    await recoverPendingEnergySpends();
+    await flushPendingEnergyRefunds();
     await loadEnergyState();
     startEnergyTimer();
 });
@@ -5071,7 +5659,6 @@ registerSessionInitializer('energy', async () => {
 
 let seasonData = null;
 let seasonTimerInterval = null;
-let currentSeasonTab = 'free';
 
 // Elementos do Season Pass
 const seasonPanelEl = document.getElementById('season-panel');
@@ -5090,6 +5677,7 @@ const seasonRewardsPremiumEl = document.getElementById('season-rewards-premium')
 
 // Carrega dados da temporada do backend
 async function loadSeasonData() {
+    const sessionContext = captureSessionContext();
     try {
         const response = await fetch(activeNetworkApiUrl(`season/${encodeURIComponent(minerName)}`), {
             headers: { 'X-Abort-After': '5000' }
@@ -5097,7 +5685,9 @@ async function loadSeasonData() {
 
         if (!response.ok) throw new Error('Falha ao carregar temporada');
 
-        seasonData = await response.json();
+        const payload = await response.json();
+        if (!isSessionContextCurrent(sessionContext)) return;
+        seasonData = payload;
         renderSeasonUI();
     } catch (error) {
         console.error('Erro ao carregar temporada:', error);
@@ -5256,6 +5846,7 @@ async function buySeasonPremium() {
 
     btnBuySeasonPremiumEl.disabled = true;
     btnBuySeasonPremiumEl.textContent = '...';
+    let purchaseSucceeded = false;
 
     try {
         const response = await fetch(activeNetworkApiUrl(`season/${encodeURIComponent(minerName)}/buy-premium`), {
@@ -5269,6 +5860,7 @@ async function buySeasonPremium() {
             return;
         }
 
+        purchaseSucceeded = true;
         playSound('buy');
         showNotification('Premium ativado!', 'success');
 
@@ -5278,9 +5870,11 @@ async function buySeasonPremium() {
         console.error('Erro ao comprar premium:', error);
         showNotification('Erro ao comprar premium', 'error');
     } finally {
-        btnBuySeasonPremiumEl.disabled = false;
-        if (seasonData?.is_premium) {
+        btnBuySeasonPremiumEl.disabled = purchaseSucceeded;
+        if (purchaseSucceeded || seasonData?.is_premium) {
             btnBuySeasonPremiumEl.innerHTML = `${iconSvg('crown')}<span>Premium Ativo</span>`;
+        } else {
+            btnBuySeasonPremiumEl.innerHTML = `${iconSvg('crown')}<span>Premium (50.000 SATS)</span>`;
         }
     }
 }
@@ -5289,25 +5883,6 @@ async function buySeasonPremium() {
 if (btnBuySeasonPremiumEl) {
     btnBuySeasonPremiumEl.addEventListener('click', buySeasonPremium);
 }
-
-// Tabs de recompensas
-document.querySelectorAll('.season-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-        document.querySelectorAll('.season-tab').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-
-        const tabName = tab.dataset.tab;
-        currentSeasonTab = tabName;
-
-        if (tabName === 'free') {
-            seasonRewardsFreeEl.hidden = false;
-            seasonRewardsPremiumEl.hidden = true;
-        } else {
-            seasonRewardsFreeEl.hidden = true;
-            seasonRewardsPremiumEl.hidden = false;
-        }
-    });
-});
 
 // Timer de atualização da temporada
 function startSeasonTimer() {
@@ -5450,9 +6025,9 @@ function renderCardsGrid(cards) {
         const tooltipEl = document.createElement('div');
         tooltipEl.className = 'block-card-tooltip';
         tooltipEl.innerHTML = `
-            <div>Hash: ${card.block_hash || '-'}</div>
+            <div>Hash: ${escapeHtml(card.block_hash || '-')}</div>
             <div>Bloco: #${card.block_number || '?'}</div>
-            <div>Raridade: ${card.rarity}</div>
+            <div>Raridade: ${escapeHtml(card.rarity)}</div>
             ${card.timestamp ? `<div>Data: ${new Date(card.timestamp).toLocaleString('pt-BR')}</div>` : ''}
         `;
         cardEl.appendChild(tooltipEl);
@@ -5460,20 +6035,6 @@ function renderCardsGrid(cards) {
         cardsGridEl.appendChild(cardEl);
     }
 }
-
-// Filtros de raridade
-document.querySelectorAll('.card-filter').forEach(filter => {
-    filter.addEventListener('click', () => {
-        document.querySelectorAll('.card-filter').forEach(f => f.classList.remove('active'));
-        filter.classList.add('active');
-
-        currentCardFilter = filter.dataset.rarity;
-
-        if (cardsData) {
-            renderCardsGrid(cardsData.cards);
-        }
-    });
-});
 
 // Animação de pull de card (quando ganha novo card via WebSocket)
 function showCardPullAnimation(card) {
@@ -5568,6 +6129,9 @@ const POWERUP_NAMES = {
 
 // Carrega lista do mercado
 async function loadMarketList() {
+    if (marketLoadingSections.has('browse')) return;
+    marketLoadingSections.add('browse');
+    const sessionContext = captureSessionContext();
     try {
         const response = await fetch(activeNetworkApiUrl('market/list'), {
             headers: { 'X-Abort-After': '5000' }
@@ -5575,15 +6139,24 @@ async function loadMarketList() {
 
         if (!response.ok) throw new Error('Falha ao carregar mercado');
 
-        marketData = await response.json();
+        const payload = await response.json();
+        if (!isSessionContextCurrent(sessionContext)) return;
+        marketData = payload;
         renderMarketList();
+        marketLoadedSections.add('browse');
+        marketLoaded = marketLoadedSections.has('browse') && marketLoadedSections.has('inventory');
     } catch (error) {
         console.error('Erro ao carregar mercado:', error);
+    } finally {
+        if (isSessionContextCurrent(sessionContext)) marketLoadingSections.delete('browse');
     }
 }
 
 // Carrega histórico do mercado
 async function loadMarketHistory() {
+    if (marketLoadingSections.has('history')) return;
+    marketLoadingSections.add('history');
+    const sessionContext = captureSessionContext();
     try {
         const response = await fetch(activeNetworkApiUrl('market/history'), {
             headers: { 'X-Abort-After': '5000' }
@@ -5591,15 +6164,23 @@ async function loadMarketHistory() {
 
         if (!response.ok) throw new Error('Falha ao carregar histórico');
 
-        marketHistoryData = await response.json();
+        const payload = await response.json();
+        if (!isSessionContextCurrent(sessionContext)) return;
+        marketHistoryData = payload;
         renderMarketHistory();
+        marketLoadedSections.add('history');
     } catch (error) {
         console.error('Erro ao carregar histórico:', error);
+    } finally {
+        if (isSessionContextCurrent(sessionContext)) marketLoadingSections.delete('history');
     }
 }
 
 // Carrega inventário de power-ups do jogador
 async function loadMarketInventory() {
+    if (marketLoadingSections.has('inventory')) return;
+    marketLoadingSections.add('inventory');
+    const sessionContext = captureSessionContext();
     try {
         const response = await fetch(activeNetworkApiUrl(`powerups/${encodeURIComponent(minerName)}`), {
             headers: { 'X-Abort-After': '5000' }
@@ -5607,10 +6188,16 @@ async function loadMarketInventory() {
 
         if (!response.ok) throw new Error('Falha ao carregar inventário');
 
-        marketInventory = await response.json();
+        const payload = await response.json();
+        if (!isSessionContextCurrent(sessionContext)) return;
+        marketInventory = payload.inventory || {};
         populateSellDropdown();
+        marketLoadedSections.add('inventory');
+        marketLoaded = marketLoadedSections.has('browse') && marketLoadedSections.has('inventory');
     } catch (error) {
         console.error('Erro ao carregar inventário:', error);
+    } finally {
+        if (isSessionContextCurrent(sessionContext)) marketLoadingSections.delete('inventory');
     }
 }
 
@@ -5623,45 +6210,74 @@ function renderMarketList() {
 
     const filtered = filter === 'all' ? listings : listings.filter(l => l.powerup_id === filter);
 
+    marketBrowseEl.replaceChildren();
+
     if (filtered.length === 0) {
-        marketBrowseEl.innerHTML = '<p class="market-empty">Nenhum power-up à venda.</p>';
+        /* Fase 8 (pontas soltas): estado vazio com CTA claro — antes era
+         * "Nenhum power-up à venda." (botão morto). Agora orienta o jogador
+         * a vender na seção VENDER. */
+        const emptyState = document.createElement('div');
+        emptyState.className = 'market-empty market-empty-cta';
+        const msg = document.createElement('p');
+        msg.className = 'market-empty-msg';
+        msg.textContent = 'Nenhum item à venda no momento.';
+        const hint = document.createElement('p');
+        hint.className = 'market-empty-hint';
+        hint.textContent = 'Venda o seu na seção VENDER acima — ou jogue para ganhar power-ups.';
+        emptyState.append(msg, hint);
+        marketBrowseEl.appendChild(emptyState);
         return;
     }
-
-    let html = '';
 
     for (const listing of filtered) {
         const iconName = POWERUP_ICON_NAMES[listing.powerup_id] || 'bolt';
         const name = POWERUP_NAMES[listing.powerup_id] || listing.powerup_id;
 
-        html += `
-            <div class="market-listing">
-                <div class="market-listing-icon">${iconSvg(iconName)}</div>
-                <div class="market-listing-info">
-                    <div class="market-listing-name">${name}</div>
-                    <div class="market-listing-seller">Vendedor: ${listing.seller}</div>
-                </div>
-                <div class="market-listing-price">
-                    <div class="market-listing-price-value">${listing.price.toLocaleString()}</div>
-                    <div class="market-listing-price-label">SATS</div>
-                </div>
-                <button type="button" class="market-listing-buy-btn" data-listing-id="${listing.listing_id}" data-price="${listing.price}">Comprar</button>
-            </div>
-        `;
+        const row = document.createElement('div');
+        row.className = 'market-listing';
+
+        const icon = document.createElement('div');
+        icon.className = 'market-listing-icon';
+        setSvgIcon(icon, iconName);
+
+        const info = document.createElement('div');
+        info.className = 'market-listing-info';
+        const nameElement = document.createElement('div');
+        nameElement.className = 'market-listing-name';
+        nameElement.textContent = String(name);
+        const seller = document.createElement('div');
+        seller.className = 'market-listing-seller';
+        seller.textContent = `Vendedor: ${listing.seller}`;
+        info.append(nameElement, seller);
+
+        const price = document.createElement('div');
+        price.className = 'market-listing-price';
+        const priceValue = document.createElement('div');
+        priceValue.className = 'market-listing-price-value';
+        priceValue.textContent = listing.price.toLocaleString();
+        const priceLabel = document.createElement('div');
+        priceLabel.className = 'market-listing-price-label';
+        priceLabel.textContent = 'SATS';
+        price.append(priceValue, priceLabel);
+
+        const buyButton = document.createElement('button');
+        buyButton.type = 'button';
+        buyButton.className = 'market-listing-buy-btn';
+        buyButton.dataset.listingId = String(listing.listing_id);
+        buyButton.dataset.price = String(listing.price);
+        buyButton.textContent = 'Comprar';
+        buyButton.addEventListener('click', () => buyMarketListing(buyButton.dataset.listingId));
+
+        row.append(icon, info, price, buyButton);
+        marketBrowseEl.appendChild(row);
     }
-
-    marketBrowseEl.innerHTML = html;
-
-    marketBrowseEl.querySelectorAll('.market-listing-buy-btn').forEach(btn => {
-        btn.addEventListener('click', () => buyMarketListing(btn.dataset.listingId, parseInt(btn.dataset.price)));
-    });
 }
 
 // Renderiza histórico
 function renderMarketHistory() {
     if (!marketHistoryEl) return;
 
-    const history = marketHistoryData?.history || [];
+    const history = marketHistoryData?.sales || [];
 
     if (history.length === 0) {
         marketHistoryEl.innerHTML = '<p class="market-empty">Nenhum histórico disponível.</p>';
@@ -5677,9 +6293,9 @@ function renderMarketHistory() {
         html += `
             <div class="market-history-item">
                 <span class="market-history-type ${typeClass}">${typeLabel}</span>
-                <span class="market-history-powerup">${iconSvg(POWERUP_ICON_NAMES[entry.powerup_id] || 'bolt')} ${POWERUP_NAMES[entry.powerup_id] || entry.powerup_id}</span>
+                <span class="market-history-powerup">${iconSvg(POWERUP_ICON_NAMES[entry.powerup_id] || 'bolt')} ${escapeHtml(POWERUP_NAMES[entry.powerup_id] || entry.powerup_id)}</span>
                 <span class="market-history-price">${entry.price?.toLocaleString() || '-'} SATS</span>
-                <span class="market-history-time">${time}</span>
+                <span class="market-history-time">${escapeHtml(time)}</span>
             </div>
         `;
     }
@@ -5692,23 +6308,37 @@ function populateSellDropdown() {
     const select = document.getElementById('market-sell-select');
     if (!select || !marketInventory) return;
 
-    select.innerHTML = '<option value="">Selecione um power-up</option>';
+    select.replaceChildren();
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Selecione um power-up';
+    select.appendChild(placeholder);
 
+    let hasSellable = false;
     for (const [powerupId, count] of Object.entries(marketInventory)) {
         if (count > 0) {
+            hasSellable = true;
             const name = POWERUP_NAMES[powerupId] || powerupId;
-            select.innerHTML += `<option value="${powerupId}">${name} (x${count})</option>`;
+            const option = document.createElement('option');
+            option.value = powerupId;
+            option.textContent = `${name} (x${count})`;
+            select.appendChild(option);
         }
     }
+
+    /* Fase 8 (pontas soltas): CTA quando o inventário está vazio — antes a
+     * aba VENDER era um "botão morto" (select vazio + botão inerte). */
+    const emptyCta = document.getElementById('market-sell-empty');
+    if (emptyCta) emptyCta.hidden = hasSellable;
 }
 
 // Compra power-up do mercado
-async function buyMarketListing(listingId, price) {
+async function buyMarketListing(listingId) {
     try {
         const response = await fetch(activeNetworkApiUrl('market/buy'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ listing_id: listingId, buyer: minerName })
+            body: JSON.stringify({ listing_id: listingId, username: minerName })
         });
 
         if (!response.ok) {
@@ -5720,8 +6350,8 @@ async function buyMarketListing(listingId, price) {
         playSound('buy');
         showNotification('Power-up comprado!', 'success');
 
-        // Recarrega dados
-        await Promise.all([loadMarketList(), loadMarketHistory(), loadMarketInventory()]);
+        // Recarrega dados + saldo (Fase 2: backend é a fonte de verdade)
+        await Promise.all([loadMarketList(), loadMarketHistory(), loadMarketInventory(), loadPlayerState(activeRealmId, minerName)]);
     } catch (error) {
         console.error('Erro ao comprar:', error);
         showNotification('Erro ao comprar power-up', 'error');
@@ -5758,7 +6388,7 @@ async function sellMarketPowerup() {
         const response = await fetch(activeNetworkApiUrl('market/sell'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ seller: minerName, powerup_id: powerupId, price })
+            body: JSON.stringify({ username: minerName, powerup_id: powerupId, price })
         });
 
         if (!response.ok) {
@@ -5787,41 +6417,21 @@ async function sellMarketPowerup() {
     }
 }
 
-// Tabs do mercado
-document.querySelectorAll('.market-tab-btn').forEach(tab => {
-    tab.addEventListener('click', () => {
-        document.querySelectorAll('.market-tab-btn').forEach(t => {
-            t.classList.remove('active');
-            t.setAttribute('aria-selected', 'false');
-        });
-        tab.classList.add('active');
-        tab.setAttribute('aria-selected', 'true');
-
-        // Mostra seção correspondente
-        document.querySelectorAll('.market-section').forEach(s => {
-            s.classList.add('hidden');
-            s.classList.remove('active');
-        });
-
-        const sectionId = tab.id === 'tab-browse' ? 'market-browse' :
-                         tab.id === 'tab-sell' ? 'market-sell' : 'market-history';
-        const section = document.getElementById(sectionId);
-        if (section) {
-            section.classList.remove('hidden');
-            section.classList.add('active');
-        }
-
-        // Carrega dados da seção
-        if (tab.id === 'tab-browse') loadMarketList();
-        else if (tab.id === 'tab-history') loadMarketHistory();
-        else if (tab.id === 'tab-sell') loadMarketInventory();
-    });
-});
-
-// Botão de vender
+// Botão de vender — Fase 8 (ponta solta da auditoria): a seção #market-sell
+// estava com display:none permanente (u-inline-040), então o CTA de venda
+// (market-sell-empty) nunca aparecia. Agora VENDER alterna a seção: fecha→abre
+// (e popula o dropdown/CTA); já aberta→executa a venda.
 const btnMarketSell = document.getElementById('btn-market-sell');
-if (btnMarketSell) {
-    btnMarketSell.addEventListener('click', sellMarketPowerup);
+if (btnMarketSell && marketSellEl) {
+    btnMarketSell.addEventListener('click', () => {
+        const isOpen = marketSellEl.classList.contains('market-sell-open');
+        if (!isOpen) {
+            marketSellEl.classList.add('market-sell-open');
+            populateSellDropdown();
+        } else {
+            sellMarketPowerup();
+        }
+    });
 }
 
 if (marketFilterPowerupEl) {
@@ -6023,9 +6633,13 @@ registerSessionInitializer('global-events', async () => {
 let sprintMode = false;
 let sprintTimerInterval = null;
 let sprintTimeLeft = 30;
+let sprintTimeLimit = 30;
 let sprintWordsFound = 0;
 let sprintStartTime = null;
 let currentRoundWords = [];
+let sprintRoundActive = false;
+let sprintRoundEnding = false;
+let sprintRoundStarting = false;
 
 // Elementos do Modo Sprint
 const btnSprintModeEl = document.getElementById('btn-sprint-mode');
@@ -6045,16 +6659,26 @@ if (btnSprintModeEl) {
 
 // Inicia rodada sprint
 async function startSprintRound() {
+    if (sprintRoundActive || sprintRoundEnding || sprintRoundStarting) return;
+    const realmId = activeRealmId;
+    const username = minerName;
+    const generation = sessionGeneration;
+    sprintRoundStarting = true;
     try {
-        const response = await fetch(activeNetworkApiUrl('sprint/start'), {
+        const response = await fetch(networkApiUrl(realmId, 'sprint/start'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: minerName })
+            body: JSON.stringify({ username })
         });
 
         if (!response.ok) throw new Error('Falha ao iniciar sprint');
 
         const data = await response.json();
+        if (
+            generation !== sessionGeneration
+            || realmId !== activeRealmId
+            || username !== minerName
+        ) return;
 
         // Configura grid sprint
         currentGridSize = data.grid_size;
@@ -6062,12 +6686,17 @@ async function startSprintRound() {
 
         // Configura palavras
         currentRoundWords = data.words;
-        renderWordBank();
+        wordsFoundInBlock = 0;
+        currentRoundEarnings = 0;
+        if (!renderWordBank()) throw new Error('Falha ao montar grade Sprint');
 
         // Inicia timer
-        sprintTimeLeft = data.time_limit;
+        sprintTimeLimit = data.time_limit + skillTimeBonus;
+        sprintTimeLeft = sprintTimeLimit;
         sprintWordsFound = 0;
         sprintStartTime = Date.now();
+        sprintRoundActive = true;
+        sprintRoundEnding = false;
 
         showSprintTimer();
         startSprintCountdown();
@@ -6076,6 +6705,8 @@ async function startSprintRound() {
     } catch (error) {
         console.error('Erro ao iniciar sprint:', error);
         showNotification('Erro ao iniciar sprint', 'error');
+    } finally {
+        if (generation === sessionGeneration) sprintRoundStarting = false;
     }
 }
 
@@ -6111,31 +6742,57 @@ function startSprintCountdown() {
 
         if (sprintTimeLeft <= 0) {
             clearInterval(sprintTimerInterval);
-            endSprintRound();
+            sprintTimerInterval = null;
+            void endSprintRound('timeout');
         }
     }, 1000);
 }
 
 // Finaliza rodada sprint
-function endSprintRound() {
-    const timeTaken = (Date.now() - sprintStartTime) / 1000;
+async function endSprintRound(reason = 'timeout') {
+    if (!sprintRoundActive || sprintRoundEnding) return;
+    sprintRoundEnding = true;
+    sprintRoundActive = false;
+    isPlaying = false;
+    clearInterval(sprintTimerInterval);
+    sprintTimerInterval = null;
 
-    // Remove timer display
-    const timerEl = document.getElementById('sprint-timer-display');
-    if (timerEl) timerEl.remove();
+    const generation = sessionGeneration;
+    const realmId = activeRealmId;
+    const username = minerName;
+    const startedAt = sprintStartTime || Date.now();
+    const elapsed = (Date.now() - startedAt) / 1000;
+    const timeTaken = Math.max(0.001, Math.min(sprintTimeLimit, elapsed));
+    sprintTimeLeft = reason === 'completed' ? sprintTimeLeft : 0;
+    updateSprintTimerDisplay();
 
-    // Envia resultado
-    submitSprintResult(sprintWordsFound, timeTaken);
+    try {
+        await submitSprintResult(
+            sprintWordsFound,
+            timeTaken,
+            realmId,
+            username,
+            generation
+        );
+    } finally {
+        if (generation === sessionGeneration) sprintRoundEnding = false;
+    }
 }
 
 // Envia resultado sprint
-async function submitSprintResult(wordsFound, timeTaken) {
+async function submitSprintResult(
+    wordsFound,
+    timeTaken,
+    realmId = activeRealmId,
+    username = minerName,
+    generation = sessionGeneration
+) {
     try {
-        const response = await fetch(activeNetworkApiUrl('sprint/submit'), {
+        const response = await fetch(networkApiUrl(realmId, 'sprint/submit'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                username: minerName,
+                username,
                 words_found: wordsFound,
                 time_taken: timeTaken
             })
@@ -6144,6 +6801,11 @@ async function submitSprintResult(wordsFound, timeTaken) {
         if (!response.ok) throw new Error('Falha ao enviar resultado');
 
         const data = await response.json();
+        if (generation !== sessionGeneration) return;
+        balanceSatoshis += data.reward;
+        currentRoundEarnings += data.reward;
+        document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString();
+        saveSessionState();
         showSprintResult(data);
     } catch (error) {
         console.error('Erro ao enviar resultado sprint:', error);
@@ -6187,46 +6849,6 @@ function showSprintResult(data) {
     }
 }
 
-// Carrega leaderboard sprint
-async function loadSprintLeaderboard() {
-    try {
-        const response = await fetch(activeNetworkApiUrl('sprint/leaderboard'), {
-            headers: { 'X-Abort-After': '5000' }
-        });
-
-        if (!response.ok) throw new Error('Falha ao carregar leaderboard sprint');
-
-        const data = await response.json();
-        renderSprintLeaderboard(data.leaderboard);
-    } catch (error) {
-        console.error('Erro ao carregar leaderboard sprint:', error);
-    }
-}
-
-// Renderiza leaderboard sprint
-function renderSprintLeaderboard(leaderboard) {
-    const container = document.getElementById('sprint-leaderboard-list');
-    if (!container) return;
-
-    container.innerHTML = '';
-
-    if (leaderboard.length === 0) {
-        container.innerHTML = '<p class="market-empty">Nenhum registro ainda.</p>';
-        return;
-    }
-
-    for (let i = 0; i < leaderboard.length; i++) {
-        const entry = leaderboard[i];
-        const item = document.createElement('div');
-        item.className = 'sprint-leaderboard-item';
-        item.innerHTML = `
-            <span class="sprint-leaderboard-rank">${i + 1}</span>
-            <span class="sprint-leaderboard-name">${entry.username}</span>
-            <span class="sprint-leaderboard-time">${entry.time.toFixed(1)}s</span>
-        `;
-        container.appendChild(item);
-    }
-}
 
 // Integra com startNetworkRace existente
 const originalStartNetworkRaceForSprint = startNetworkRace;
@@ -6447,6 +7069,7 @@ const crateFreeCountEl = document.getElementById('crate-free-count');
 
 // Carrega inventário de crates
 async function loadCrateInventory() {
+    const sessionContext = captureSessionContext();
     try {
         const response = await fetch(activeNetworkApiUrl(`crates/inventory?username=${encodeURIComponent(minerName)}`), {
             headers: { 'X-Abort-After': '5000' }
@@ -6454,7 +7077,9 @@ async function loadCrateInventory() {
 
         if (!response.ok) throw new Error('Falha ao carregar inventário de crates');
 
-        crateState = await response.json();
+        const payload = await response.json();
+        if (!isSessionContextCurrent(sessionContext)) return;
+        crateState = payload;
         updateCrateUI();
     } catch (error) {
         console.error('Erro ao carregar inventário de crates:', error);
@@ -6463,7 +7088,7 @@ async function loadCrateInventory() {
 
 // Atualiza UI das crates
 function updateCrateUI() {
-    const { free_crates, owned_crates, legendary_bonus } = crateState;
+    const { free_crates } = crateState;
 
     // Atualiza contadores
     if (crateFreeCountEl) {
@@ -6480,14 +7105,11 @@ function updateCrateUI() {
         btnOpenCrateBuy.disabled = false;
     }
 
-    // Atualiza bônus legendário
-    if (legendary_bonus > 0) {
-        showNotification(`Bônus Legendário ativo: +${legendary_bonus * 100}%`, 'success');
-    }
 }
 
 // Abre crate (grátis ou comprada)
 async function openCrate(isFree = true) {
+    const previousLegendaryBonus = crateState.legendary_bonus || 0;
     try {
         const response = await fetch(activeNetworkApiUrl('crates/open'), {
             method: 'POST',
@@ -6503,9 +7125,12 @@ async function openCrate(isFree = true) {
 
         const result = await response.json();
         showCrateResult(result);
+        if (result.legendary_bonus > previousLegendaryBonus) {
+            showNotification(`Bônus Legendário ativo: +${result.legendary_bonus * 100}%`, 'success');
+        }
 
-        // Recarrega inventário
-        await loadCrateInventory();
+        // Recarrega inventário + saldo (Fase 2: backend é a fonte de verdade)
+        await Promise.all([loadCrateInventory(), loadPlayerState(activeRealmId, minerName)]);
     } catch (error) {
         console.error('Erro ao abrir crate:', error);
         showNotification('Erro ao abrir crate', 'error');
@@ -6539,7 +7164,7 @@ function showCrateResult(result) {
         <div class="crate-modal-content">
             <div class="crate-icon">${iconSvg(rarityInfo.iconName)}</div>
             <div class="crate-result-title">Crate Aberta!</div>
-            <div class="crate-result-item">${itemName}</div>
+            <div class="crate-result-item">${escapeHtml(itemName)}</div>
             <div class="crate-result-rarity ${rarityInfo.class}">${rarityInfo.label}</div>
             ${value ? `<div class="crate-result-value">+${Number(value).toLocaleString()} sats</div>` : ''}
             <button class="crate-close-btn" id="btn-close-crate">Fechar</button>
@@ -6643,6 +7268,7 @@ const levelBarTextEl = document.getElementById('level-bar-text');
 
 // Carrega estado de nível do backend
 async function loadLevelState() {
+    const sessionContext = captureSessionContext();
     try {
         const response = await fetch(activeNetworkApiUrl(`level/${encodeURIComponent(minerName)}`), {
             headers: { 'X-Abort-After': '5000' }
@@ -6650,7 +7276,9 @@ async function loadLevelState() {
 
         if (!response.ok) throw new Error('Falha ao carregar nível');
 
-        levelState = await response.json();
+        const payload = await response.json();
+        if (!isSessionContextCurrent(sessionContext)) return;
+        levelState = payload;
         updateLevelUI();
 
         // Mostra barra de nível
@@ -6665,6 +7293,7 @@ async function loadLevelState() {
 // Atualiza UI da barra de nível
 function updateLevelUI() {
     const { level, xp, xp_to_next, xp_progress, rank, bonuses } = levelState;
+    levelTimeBonus = Number(bonuses?.time_bonus_seconds) || 0;
 
     if (!levelIconEl) return;
 
@@ -6690,11 +7319,6 @@ function updateLevelUI() {
 
     // Aplica bônus passivos
     if (bonuses) {
-        // Tempo base bonus
-        if (bonuses.time_bonus_seconds) {
-            window.NETWORK_TIME_BONUS = (window.NETWORK_TIME_BONUS || 0) + bonuses.time_bonus_seconds;
-        }
-
         // Desconto de hints
         if (bonuses.hint_discount_percent) {
             window.HINT_DISCOUNT = bonuses.hint_discount_percent;
@@ -6747,7 +7371,10 @@ async function addXP(xpAmount) {
 function calculateWordXP(word, comboMultiplier = 1) {
     const baseXP = word.length * 10;
     const comboBonus = comboMultiplier * 5;
-    return baseXP + comboBonus;
+    // Fase 4 (pontas soltas): XP deve ser inteiro — o comboMultiplier sobe em
+    // 0.5, então baseXP + comboBonus pode ser float (ex.: 67.5). O backend
+    // grava str(xp) no Redis e lê com int(), o que quebrava com float.
+    return Math.round(baseXP + comboBonus);
 }
 
 // Carrega nível ao iniciar sessão

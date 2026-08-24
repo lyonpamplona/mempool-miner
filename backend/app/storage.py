@@ -31,6 +31,102 @@ end
 return 0
 """
 
+ENERGY_SPEND_SCRIPT = """
+local round_state = redis.call('get', KEYS[2])
+local energy_max = tonumber(redis.call('hget', KEYS[1], 'max') or ARGV[2])
+local current = tonumber(redis.call('hget', KEYS[1], 'current') or energy_max)
+if round_state == 'spent' then
+  return {0, current}
+end
+if round_state == 'refunded' then
+  return {-2, current}
+end
+
+local now = tonumber(ARGV[1])
+local last_refill = tonumber(redis.call('hget', KEYS[1], 'last_refill') or now)
+local refill_interval = tonumber(ARGV[3])
+local refills = math.floor((now - last_refill) / refill_interval)
+if refills > 0 then
+  current = math.min(current + refills, energy_max)
+  last_refill = last_refill + (refills * refill_interval)
+end
+if current <= 0 then
+  return {-1, current}
+end
+
+current = current - 1
+redis.call('hset', KEYS[1],
+  'current', tostring(current),
+  'last_refill', tostring(last_refill),
+  'max', tostring(energy_max))
+redis.call('expire', KEYS[1], tonumber(ARGV[5]))
+redis.call('set', KEYS[2], 'spent', 'EX', tonumber(ARGV[4]))
+return {1, current}
+"""
+
+ENERGY_REFUND_SCRIPT = """
+local round_state = redis.call('get', KEYS[2])
+local energy_max = tonumber(redis.call('hget', KEYS[1], 'max') or ARGV[1])
+local current = tonumber(redis.call('hget', KEYS[1], 'current') or energy_max)
+if round_state == 'refunded' then
+  return {0, current}
+end
+if round_state ~= 'spent' then
+  return {-1, current}
+end
+
+current = math.min(current + 1, energy_max)
+redis.call('hset', KEYS[1], 'current', tostring(current), 'max', tostring(energy_max))
+redis.call('expire', KEYS[1], tonumber(ARGV[3]))
+redis.call('set', KEYS[2], 'refunded', 'EX', tonumber(ARGV[2]))
+return {1, current}
+"""
+
+
+ENERGY_BUY_SCRIPT = """
+local state_key = KEYS[1]
+local energy_key = KEYS[2]
+local cost = tonumber(ARGV[1])
+local amount = tonumber(ARGV[2])
+local default_max = tonumber(ARGV[3])
+local refill_interval = tonumber(ARGV[4])
+local now = tonumber(ARGV[5])
+local energy_ttl = tonumber(ARGV[6])
+
+local state_type = redis.call('type', state_key)['ok']
+local energy_type = redis.call('type', energy_key)['ok']
+if (state_type ~= 'none' and state_type ~= 'hash')
+    or (energy_type ~= 'none' and energy_type ~= 'hash') then
+    return {-3, 0, 0}
+end
+
+local balance = tonumber(redis.call('hget', state_key, 'balance') or '0')
+if balance < cost then
+    return {-1, 0, balance}
+end
+
+local current = tonumber(redis.call('hget', energy_key, 'current') or '0')
+local energy_max = tonumber(redis.call('hget', energy_key, 'max') or default_max)
+local last_refill = tonumber(redis.call('hget', energy_key, 'last_refill') or now)
+local refills = math.floor((now - last_refill) / refill_interval)
+if refills > 0 then
+    current = math.min(current + refills, energy_max)
+    last_refill = last_refill + (refills * refill_interval)
+end
+if current >= energy_max then
+    return {-2, current, balance}
+end
+
+local new_current = math.min(current + amount, energy_max)
+local new_balance = redis.call('hincrby', state_key, 'balance', -cost)
+redis.call('hset', energy_key,
+    'current', tostring(new_current),
+    'last_refill', tostring(last_refill),
+    'max', tostring(energy_max))
+redis.call('expire', energy_key, energy_ttl)
+return {1, new_current, new_balance}
+"""
+
 
 def events_channel(realm_id: str) -> str:
     """Canal ao vivo de um realm."""
@@ -261,6 +357,14 @@ def energy_key(realm_id: str, username: str) -> str:
         max: energia máxima (10)
     """
     return f"{PREFIX}:{{{validate_realm_id(realm_id)}}}:energy:{username}"
+
+
+def energy_round_key(realm_id: str, username: str, round_id: str) -> str:
+    """Estado idempotente do débito/estorno de energia de uma rodada."""
+    return (
+        f"{PREFIX}:{{{validate_realm_id(realm_id)}}}:"
+        f"energy_round:{username}:{round_id}"
+    )
 
 
 # Fase: Mini-game Decoder — tracking de partidas e streaks

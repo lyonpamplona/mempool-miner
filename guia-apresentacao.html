@@ -1,159 +1,1105 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="description" content="Apresentação pública do Mempool Miner, um jogo educacional orientado a eventos Bitcoin.">
-  <meta name="theme-color" content="#050505">
-  <title>Mempool Miner — Apresentação</title>
-  <link rel="stylesheet" href="/site.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MEMPOOL MINER // WIKI_DO_JOGO</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-void: #0a0d12;
+            --hull-dark: #12161f;
+            --hull-panel: #1a202c;
+            --hull-surface: #242c3d;
+            --hull-accent: #2e384d;
+            --border-dim: #2b3545;
+            --border-hi: #41506b;
+            --border-glow: rgba(0, 240, 255, 0.4);
+            --border-glow-amber: rgba(247, 147, 26, 0.4);
+            --border-glow-green: rgba(0, 255, 136, 0.4);
+            --text-main: #f0f6fc;
+            --text-dim: #9aa5b5;
+            --text-dark: #5c687a;
+            --neon-cyan: #00f0ff;
+            --neon-green: #00ff88;
+            --neon-amber: #f7931a;
+            --neon-red: #ff3355;
+            --neon-magenta: #f000ff;
+            --neon-gold: #ffcc00;
+            --neon-blue: #3b82f6;
+            --f-tech: 'JetBrains Mono', monospace;
+            --f-pixel: 'Press Start 2P', monospace;
+            --f-data: 'VT323', monospace;
+            --menu-w: 300px;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; scroll-behavior: smooth; }
+        html { scroll-padding-top: 80px; }
+        body {
+            background-color: var(--bg-void);
+            color: var(--text-main);
+            font-family: var(--f-tech);
+            line-height: 1.7;
+            overflow-x: hidden;
+            font-size: 14px;
+            background-image:
+                linear-gradient(135deg, rgba(255,255,255,0.015) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.015) 50%, rgba(255,255,255,0.015) 75%, transparent 75%, transparent),
+                radial-gradient(circle at 50% 10%, rgba(0, 240, 255, 0.05) 0%, transparent 60%),
+                radial-gradient(circle at 80% 80%, rgba(247, 147, 26, 0.03) 0%, transparent 50%);
+            background-size: 32px 32px, 100% 100%, 100% 100%;
+        }
+        body::after {
+            content: '';
+            position: fixed; inset: 0;
+            background: repeating-linear-gradient(0deg, transparent 0, transparent 2px, rgba(0,0,0,0.12) 2px, rgba(0,0,0,0.12) 4px);
+            pointer-events: none; z-index: 9999;
+        }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg-void); }
+        ::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--neon-cyan); }
+
+        /* ===== NAV (topo) ===== */
+        nav {
+            position: fixed; top: 0; left: 0; width: 100%;
+            background: rgba(18, 22, 31, 0.96);
+            backdrop-filter: blur(10px);
+            border-bottom: 2px solid var(--border-dim);
+            padding: 10px clamp(12px, 2.5vw, 32px);
+            display: flex; justify-content: space-between; align-items: center; gap: 12px;
+            z-index: 1000;
+        }
+        .nav-brand {
+            font-family: var(--f-pixel); font-size: 9px; color: var(--neon-cyan);
+            display: flex; align-items: center; gap: 8px; text-decoration: none;
+            letter-spacing: 0.5px; text-shadow: 0 0 8px var(--border-glow);
+            white-space: nowrap;
+        }
+        .nav-brand span.sys-box {
+            border: 1px solid var(--neon-cyan); padding: 2px 6px;
+            background: rgba(0, 240, 255, 0.1); color: var(--neon-cyan);
+        }
+        .nav-tools { display: flex; gap: 10px; align-items: center; flex: 1; justify-content: flex-end; }
+        .search-wrap { position: relative; flex: 1; max-width: 340px; }
+        .search-wrap input {
+            width: 100%; background: var(--hull-dark); border: 1px solid var(--border-dim);
+            color: var(--text-main); font-family: var(--f-tech); font-size: 12px;
+            padding: 7px 10px 7px 30px; border-radius: 2px; outline: none; transition: 0.2s;
+        }
+        .search-wrap input:focus { border-color: var(--neon-cyan); box-shadow: 0 0 8px var(--border-glow); }
+        .search-wrap .search-ico {
+            position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
+            color: var(--text-dark); font-size: 13px; pointer-events: none;
+        }
+        .btn-menu {
+            background: rgba(0, 240, 255, 0.12); color: var(--neon-cyan);
+            border: 1px solid var(--neon-cyan); padding: 7px 12px;
+            font-family: var(--f-pixel); font-size: 7px; cursor: pointer;
+            display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .btn-menu:hover { background: var(--neon-cyan); color: #000; box-shadow: 0 0 14px var(--border-glow); }
+        .btn-menu.active { background: var(--neon-cyan); color: #000; }
+
+        /* ===== MENU LATERAL (direita) ===== */
+        .side-menu {
+            position: fixed; top: 56px; right: 0; bottom: 0;
+            width: var(--menu-w);
+            background: rgba(18, 22, 31, 0.98);
+            backdrop-filter: blur(10px);
+            border-left: 2px solid var(--border-dim);
+            transform: translateX(100%);
+            transition: transform 0.28s ease;
+            z-index: 900;
+            overflow-y: auto;
+            padding: 18px 0 40px 0;
+        }
+        .side-menu.open { transform: translateX(0); box-shadow: -8px 0 30px rgba(0,0,0,0.5); }
+        .side-menu .menu-head {
+            font-family: var(--f-pixel); font-size: 8px; color: var(--neon-amber);
+            padding: 0 18px 12px 18px; border-bottom: 1px solid var(--border-dim);
+            letter-spacing: 1px; text-shadow: 0 0 8px var(--border-glow-amber);
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .side-menu .menu-close {
+            background: none; border: 1px solid var(--border-dim); color: var(--text-dim);
+            font-family: var(--f-tech); font-size: 12px; cursor: pointer; padding: 2px 8px;
+            transition: 0.2s;
+        }
+        .side-menu .menu-close:hover { border-color: var(--neon-red); color: var(--neon-red); }
+        .side-menu ul { list-style: none; padding: 8px 0; }
+        .side-menu li { margin: 0; }
+        .side-menu a {
+            display: block; padding: 7px 18px; color: var(--text-dim); text-decoration: none;
+            font-size: 12px; border-left: 2px solid transparent; transition: 0.15s;
+            line-height: 1.4;
+        }
+        .side-menu a:hover { color: var(--neon-cyan); background: rgba(0,240,255,0.05); }
+        .side-menu a.active { color: var(--neon-cyan); border-left-color: var(--neon-cyan); background: rgba(0,240,255,0.08); }
+        .side-menu a.sub { padding-left: 34px; font-size: 11px; color: var(--text-dark); }
+        .side-menu a.sub:hover { color: var(--neon-green); }
+        .side-menu .menu-sep {
+            height: 1px; background: var(--border-dim); margin: 10px 18px;
+        }
+        .side-menu .menu-label {
+            font-family: var(--f-pixel); font-size: 6px; color: var(--text-dark);
+            padding: 6px 18px 4px 18px; letter-spacing: 1px; text-transform: uppercase;
+        }
+
+        /* ===== CONTEÚDO (wiki) ===== */
+        .wiki {
+            max-width: 1080px;
+            margin: 0; /* alinhado à esquerda, aproveita o espaço */
+            padding: 84px clamp(16px, 4vw, 56px) 80px 18px;
+            transition: margin-right 0.28s ease;
+        }
+        body.menu-open .wiki { margin-right: var(--menu-w); }
+
+        .wiki-hero {
+            border: 1px solid var(--border-hi);
+            background: linear-gradient(135deg, rgba(0,240,255,0.06), rgba(247,147,26,0.04));
+            padding: 28px 26px; margin-bottom: 34px;
+            position: relative;
+        }
+        .wiki-hero::before {
+            content: 'WIKI // v1.0'; position: absolute; top: -9px; left: 18px;
+            background: var(--bg-void); padding: 0 8px;
+            font-family: var(--f-pixel); font-size: 7px; color: var(--neon-amber);
+            letter-spacing: 1px;
+        }
+        .wiki-hero h1 {
+            font-family: var(--f-pixel); font-size: clamp(15px, 2.6vw, 24px);
+            color: var(--neon-cyan); line-height: 1.5; margin-bottom: 12px;
+            text-shadow: 0 0 12px var(--border-glow);
+        }
+        .wiki-hero p { color: var(--text-dim); font-size: 13px; max-width: 70ch; }
+        .wiki-hero .hero-meta {
+            display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px;
+        }
+        .wiki-hero .hero-meta span {
+            font-size: 10px; color: var(--text-dim); border: 1px solid var(--border-dim);
+            padding: 3px 8px; background: var(--hull-dark);
+        }
+        .wiki-hero .hero-meta span b { color: var(--neon-green); font-weight: 700; }
+
+        .section-block { margin-bottom: 40px; scroll-margin-top: 76px; }
+        .section-title {
+            font-family: var(--f-pixel); font-size: clamp(11px, 1.6vw, 15px);
+            color: var(--text-main); line-height: 1.6; margin-bottom: 18px;
+            padding-bottom: 12px; border-bottom: 2px solid var(--border-dim);
+            display: flex; gap: 12px; align-items: baseline;
+        }
+        .section-title .num { color: var(--neon-amber); font-size: 0.8em; text-shadow: 0 0 8px var(--border-glow-amber); }
+        .section-title .hl { color: var(--neon-cyan); text-shadow: 0 0 8px var(--border-glow); }
+
+        h3 {
+            font-family: var(--f-tech); font-size: 15px; font-weight: 800;
+            color: var(--neon-green); margin: 26px 0 12px 0;
+            padding-left: 10px; border-left: 3px solid var(--neon-green);
+            letter-spacing: 0.3px;
+        }
+        h4 {
+            font-family: var(--f-tech); font-size: 13px; font-weight: 700;
+            color: var(--neon-amber); margin: 18px 0 8px 0;
+        }
+        p { margin-bottom: 12px; color: var(--text-main); font-size: 13.5px; }
+        p.dim, .dim { color: var(--text-dim); }
+        ul, ol { margin: 0 0 14px 22px; color: var(--text-main); font-size: 13.5px; }
+        li { margin-bottom: 6px; }
+        li::marker { color: var(--neon-cyan); }
+        code {
+            font-family: var(--f-tech); font-size: 12px; color: var(--neon-gold);
+            background: var(--hull-dark); padding: 1px 5px; border: 1px solid var(--border-dim);
+            border-radius: 2px;
+        }
+        pre {
+            background: var(--hull-dark); border: 1px solid var(--border-dim);
+            border-left: 3px solid var(--neon-cyan);
+            padding: 14px 16px; margin: 14px 0; overflow-x: auto;
+            font-size: 12px; line-height: 1.6; color: var(--text-main);
+        }
+        pre code { background: none; border: none; padding: 0; color: inherit; }
+
+        /* Tabelas wiki */
+        .table-wrap { overflow-x: auto; margin: 14px 0; border: 1px solid var(--border-dim); }
+        table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+        th {
+            background: var(--hull-surface); color: var(--neon-cyan);
+            font-family: var(--f-pixel); font-size: 7px; letter-spacing: 0.5px;
+            text-align: left; padding: 10px 12px; border-bottom: 2px solid var(--border-hi);
+            text-transform: uppercase; white-space: nowrap;
+        }
+        td { padding: 9px 12px; border-bottom: 1px solid var(--border-dim); color: var(--text-main); vertical-align: top; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: rgba(0,240,255,0.03); }
+        td code { white-space: nowrap; }
+
+        /* Caixas de destaque */
+        .callout {
+            border: 1px solid var(--border-hi); border-left: 4px solid var(--neon-cyan);
+            background: rgba(0,240,255,0.04); padding: 14px 16px; margin: 16px 0;
+            font-size: 13px;
+        }
+        .callout.amber { border-left-color: var(--neon-amber); background: rgba(247,147,26,0.05); }
+        .callout.green { border-left-color: var(--neon-green); background: rgba(0,255,136,0.05); }
+        .callout.red { border-left-color: var(--neon-red); background: rgba(255,51,85,0.05); }
+        .callout .callout-title {
+            font-family: var(--f-pixel); font-size: 8px; margin-bottom: 8px; letter-spacing: 1px;
+        }
+        .callout .callout-title.cyan { color: var(--neon-cyan); }
+        .callout.amber .callout-title { color: var(--neon-amber); }
+        .callout.green .callout-title { color: var(--neon-green); }
+        .callout.red .callout-title { color: var(--neon-red); }
+
+        /* Passos (guia passo a passo) */
+        .steps { counter-reset: step; list-style: none; margin-left: 0; }
+        .steps > li {
+            counter-increment: step; position: relative;
+            padding: 0 0 18px 52px; margin-bottom: 0;
+        }
+        .steps > li::before {
+            content: counter(step, decimal-leading-zero);
+            position: absolute; left: 0; top: 0;
+            font-family: var(--f-pixel); font-size: 10px; color: var(--neon-cyan);
+            border: 1px solid var(--neon-cyan); padding: 6px 8px;
+            background: rgba(0,240,255,0.08); text-shadow: 0 0 6px var(--border-glow);
+        }
+        .steps > li::after {
+            content: ''; position: absolute; left: 21px; top: 34px; bottom: 0;
+            width: 1px; background: var(--border-dim);
+        }
+        .steps > li:last-child::after { display: none; }
+        .steps > li b.step-title { color: var(--neon-green); display: block; margin-bottom: 4px; font-size: 14px; }
+
+        /* Severidade */
+        .sev { font-family: var(--f-pixel); font-size: 7px; padding: 2px 7px; white-space: nowrap; }
+        .sev-alto { color: var(--neon-red); border: 1px solid var(--neon-red); background: rgba(255,51,85,0.1); }
+        .sev-medio { color: var(--neon-amber); border: 1px solid var(--neon-amber); background: rgba(247,147,26,0.1); }
+        .sev-baixo { color: var(--text-dim); border: 1px solid var(--border-hi); background: var(--hull-dark); }
+
+        /* Grid de cards (visão geral) */
+        .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; margin: 16px 0; }
+        .info-card {
+            border: 1px solid var(--border-dim); background: var(--hull-panel);
+            padding: 16px; transition: 0.2s;
+        }
+        .info-card:hover { border-color: var(--neon-cyan); box-shadow: 0 0 12px rgba(0,240,255,0.1); }
+        .info-card .ic-title { font-family: var(--f-pixel); font-size: 8px; color: var(--neon-cyan); margin-bottom: 8px; letter-spacing: 0.5px; }
+        .info-card p { font-size: 12px; color: var(--text-dim); margin: 0; }
+
+        .no-results {
+            display: none; text-align: left; padding: 30px; color: var(--text-dim);
+            border: 1px dashed var(--border-hi); margin: 20px 0; font-size: 13px;
+        }
+        .no-results.show { display: block; }
+
+        footer {
+            border-top: 2px solid var(--border-dim); margin-top: 40px; padding-top: 20px;
+            color: var(--text-dark); font-size: 11px;
+        }
+        footer .foot-brand { font-family: var(--f-pixel); font-size: 8px; color: var(--neon-cyan); margin-bottom: 8px; }
+
+        /* ===== RESPONSIVO ===== */
+        @media (max-width: 900px) {
+            .side-menu { width: 86vw; max-width: 340px; top: 0; height: 100%; padding-top: 60px; }
+            body.menu-open .wiki { margin-right: 0; }
+            .wiki { padding: 76px 14px 60px 14px; }
+            .nav-brand span.sys-box { display: none; }
+        }
+        @media (max-width: 560px) {
+            body { font-size: 13px; }
+            .search-wrap { max-width: 150px; }
+            .btn-menu { padding: 7px 8px; }
+            .btn-menu .menu-label-text { display: none; }
+            .card-grid { grid-template-columns: 1fr; }
+            .section-title { flex-direction: column; gap: 4px; }
+        }
+    </style>
 </head>
 <body>
-  <a class="skip-link" href="#conteudo">Pular para a apresentação</a>
-  <header class="site-header">
-    <nav class="nav" aria-label="Navegação principal">
-      <a class="brand" href="/apresentacao/" aria-current="page"><span class="brand-mark">₿</span> MEMPOOL.MINER</a>
-      <div class="nav-links">
-        <a href="#produto">Produto</a>
-        <a href="#experiencia">Experiência</a>
-        <a href="#arquitetura">Arquitetura</a>
-        <a href="/api/">API pública</a>
-        <a href="/">Documentação</a>
-      </div>
+    <nav>
+        <a href="#topo" class="nav-brand"><span class="sys-box">MM</span> MEMPOOL MINER <span style="color:var(--text-dark);font-size:7px;">// WIKI</span></a>
+        <div class="nav-tools">
+            <div class="search-wrap">
+                <span class="search-ico">⌕</span>
+                <input type="text" id="wiki-search" placeholder="Buscar na wiki..." autocomplete="off" aria-label="Buscar na wiki">
+            </div>
+            <button class="btn-menu" id="btn-menu" aria-expanded="false" aria-controls="side-menu">☰ <span class="menu-label-text">ÍNDICE</span></button>
+        </div>
     </nav>
-  </header>
 
-  <main id="conteudo">
-    <section class="container hero">
-      <div>
-        <p class="eyebrow">Bitcoin events · playable data</p>
-        <h1>A mempool vira uma corrida de palavras.</h1>
-        <p class="lead">Mempool Miner transforma eventos observados em nós
-          Bitcoin isolados por rede em desafios BIP39 ao vivo, numa experiência
-          educacional instalável e pensada primeiro para telas móveis.</p>
-        <div class="actions">
-          <a class="button primary" href="http://localhost:8010/">Abrir o jogo local</a>
-          <a class="button" href="/api/">Ver o contrato público</a>
-          <a class="button" href="/">Visão técnica</a>
-        </div>
-      </div>
-      <div class="hero-visual">
-        <img src="/assets/mempool-miner-banner.svg" alt="Fluxo animado entre Bitcoin e o jogo de caça-palavras">
-      </div>
-    </section>
+    <aside class="side-menu" id="side-menu" aria-label="Índice da wiki">
+        <div class="menu-head">ÍNDICE <button class="menu-close" id="menu-close" aria-label="Fechar índice">✕</button></div>
+        <ul>
+            <li class="menu-label">Fundamentos</li>
+            <li><a href="#visao-geral">01 · Visão Geral</a></li>
+            <li><a href="#inicio-rapido">02 · Início Rápido</a></li>
+            <li class="menu-sep"></li>
+            <li class="menu-label">Jogo</li>
+            <li><a href="#jogo-central">03 · Jogo Central</a></li>
+            <li><a class="sub" href="#geracao-palavras">Geração de palavras</a></li>
+            <li><a class="sub" href="#estrutura-rodada">Estrutura da rodada</a></li>
+            <li><a class="sub" href="#pontuacao">Pontuação</a></li>
+            <li><a class="sub" href="#raridades">Raridades</a></li>
+            <li><a class="sub" href="#boss-block">Boss Block</a></li>
+            <li><a class="sub" href="#sprint">Sprint</a></li>
+            <li><a class="sub" href="#time-freeze">Time Freeze</a></li>
+            <li><a class="sub" href="#energia">Energia</a></li>
+            <li><a class="sub" href="#hardware">Hardware</a></li>
+            <li><a class="sub" href="#decoder">Decoder</a></li>
+            <li class="menu-sep"></li>
+            <li class="menu-label">Meta</li>
+            <li><a href="#economia">04 · Economia</a></li>
+            <li><a href="#progressao">05 · Progressão</a></li>
+            <li><a href="#sistemas-transversais">06 · Sistemas Transversais</a></li>
+            <li class="menu-sep"></li>
+            <li class="menu-label">Técnico</li>
+            <li><a href="#arquitetura">07 · Arquitetura</a></li>
+            <li><a href="#pontas-soltas">08 · Pontas Soltas</a></li>
+            <li><a href="#api">09 · Referência de API</a></li>
+        </ul>
+    </aside>
 
-    <section class="container" aria-label="Resumo numérico">
-      <div class="metrics">
-        <div class="metric"><strong>3</strong><span>redes suportadas</span></div>
-        <div class="metric"><strong>6 TX</strong><span>formam uma rodada</span></div>
-        <div class="metric"><strong>8–15</strong><span>células por eixo</span></div>
-        <div class="metric"><strong>PWA</strong><span>instalável e responsiva</span></div>
-      </div>
-    </section>
+    <main class="wiki" id="topo">
+        <div class="wiki-hero">
+            <h1>MEMPOOL MINER<br>// WIKI COMPLETA DO JOGO</h1>
+            <p>Documentação 100% das mecânicas, economia, progressão e sistemas do Mempool Miner — caça-palavras on-chain. Cada valor, fórmula e comportamento abaixo foi extraído e auditado diretamente do código (frontend + backend), com referência <code>path:linha</code>. Estado: pós-Fases 1–8 + auditoria final.</p>
+            <div class="hero-meta">
+                <span>REDES: <b>regtest · signet · mainnet</b></span>
+                <span>MOEDA: <b>sats (simulados)</b></span>
+                <span>TABS: <b>JOGO · UPGRADES · COMPETIR · PERFIL · SOCIAL</b></span>
+                <span>AUDITORIA: <b>2026-08-23</b></span>
+            </div>
+        </div>
 
-    <section class="section" id="produto">
-      <div class="container">
-        <div class="section-intro">
-          <p class="eyebrow">Proposta</p>
-          <h2>Observar infraestrutura jogando.</h2>
-          <p class="muted">Mempool, TXID, taxa, vsize, bloco e WebSocket deixam
-            de ser termos abstratos e passam a alimentar sinais visuais dentro
-            de um caça-palavras.</p>
-        </div>
-        <div class="grid three">
-          <article class="card">
-            <span class="tag ok">Entrada real</span>
-            <h3>Eventos Bitcoin</h3>
-            <p>Transações e blocos vêm do realm selecionado no início da sessão.</p>
-          </article>
-          <article class="card">
-            <span class="tag">Transformação</span>
-            <h3>Proof of Search</h3>
-            <p>O TXID gera uma palavra BIP39; vsize e taxa informam o desafio visual.</p>
-          </article>
-          <article class="card">
-            <span class="tag warn">Simulação</span>
-            <h3>Economia do jogo</h3>
-            <p>Sats, hardware, recompensa e Lightning não movimentam ativos reais.</p>
-          </article>
-        </div>
-      </div>
-    </section>
+        <div class="no-results" id="no-results">Nenhuma seção corresponde à busca. Tente outro termo.</div>
+        <!-- ============ 01 · VISÃO GERAL ============ -->
+        <section class="section-block" id="visao-geral">
+            <h2 class="section-title"><span class="num">01.</span><span class="hl">Visão Geral</span></h2>
+            <p>O <b>Mempool Miner</b> é um jogo de caça-palavras onde as palavras não são inventadas: elas nascem de <b>transações reais da mempool Bitcoin</b>. Cada transação que entra na rede vira uma palavra BIP39 (derivada do TXID), e o jogador tem um cronômetro para encontrá-las numa grade de letras. Quanto mais rápido e com mais combos, mais <b>sats</b> (a moeda do jogo) você ganha.</p>
+            <div class="card-grid">
+                <div class="info-card"><div class="ic-title">⛏️ O LOOP CENTRAL</div><p>Transação entra na mempool → vira palavra → aparece na grade → você encontra antes do tempo acabar → ganha sats + XP. Bloco novo = rodada nova.</p></div>
+                <div class="info-card"><div class="ic-title">₿ MOEDA</div><p>Sats são 100% simulados (Redis). Você começa com 0. Ganha jogando, em missões, crates, mercado e staking. Gasta em energia, upgrades, crates e mercado.</p></div>
+                <div class="info-card"><div class="ic-title">🌐 REDES</div><p>Regtest (local, com faucet), Signet (pública) e Mainnet (opcional). A mecânica é idêntica; muda a origem das transações.</p></div>
+                <div class="info-card"><div class="ic-title">🏆 PROGRESSÃO</div><p>XP por palavra → níveis → ranks → pontos de skill. Season Pass trimestral com trilhas free/premium. Leaderboard resetado a cada 2016 blocos.</p></div>
+            </div>
+            <h3>As 5 tabs do jogo</h3>
+            <div class="table-wrap"><table>
+                <tr><th>Tab</th><th>Conteúdo</th></tr>
+                <tr><td><b>JOGO</b></td><td>Grade de caça-palavras, cronômetro, energia, boss blocks, RBF, eventos globais, leaderboard ao vivo.</td></tr>
+                <tr><td><b>UPGRADES</b></td><td>Loja: hardware, L2 Lightning, energia, crates, decoder. Inventário de power-ups e utilitários.</td></tr>
+                <tr><td><b>COMPETIR</b></td><td>Missões diárias/semanal, sprint mode, leaderboard global e por pool.</td></tr>
+                <tr><td><b>PERFIL</b></td><td>Nível/rank, skill tree (3 ramos), season pass, cards, conquistas.</td></tr>
+                <tr><td><b>SOCIAL</b></td><td>Chat com rate limit, amigos (status online + bônus co-op), mercado P2P de power-ups, staking.</td></tr>
+            </table></div>
+        </section>
 
-    <section class="section alt" id="experiencia">
-      <div class="container">
-        <div class="section-intro">
-          <p class="eyebrow">Uma rodada</p>
-          <h2>Do realm à grade em quatro passos.</h2>
-        </div>
-        <div class="grid four">
-          <article class="card"><span class="tag">01</span><h3>Escolher</h3><p>Selecione uma rede disponível e informe um nickname local.</p></article>
-          <article class="card"><span class="tag">02</span><h3>Coletar</h3><p>Seis palavras únicas preenchem o buffer isolado da sessão.</p></article>
-          <article class="card"><span class="tag">03</span><h3>Buscar</h3><p>Arraste em linha reta ou use o teclado antes de o tempo terminar.</p></article>
-          <article class="card"><span class="tag">04</span><h3>Evoluir</h3><p>Use score fictício em dicas e upgrades exclusivamente simulados.</p></article>
-        </div>
-      </div>
-    </section>
+        <!-- ============ 02 · INÍCIO RÁPIDO ============ -->
+        <section class="section-block" id="inicio-rapido">
+            <h2 class="section-title"><span class="num">02.</span><span class="hl">Início Rápido (passo a passo)</span></h2>
+            <p>Guia do primeiro acesso à primeira rodada. Não há tutorial in-game — este é o passo a passo.</p>
+            <ol class="steps">
+                <li><b class="step-title">Abra o jogo e escolha a rede</b>
+                    No modal <code>SYSTEM_AUTHENTICATION</code>, selecione a rede no dropdown. Regtest é a mais rápida para começar (tem faucet local). Signet usa mempool pública real. Mainnet aparece desativada se o profile mainnet não estiver rodando.
+                </li>
+                <li><b class="step-title">Defina seu OPERATOR_ID</b>
+                    Nome de 1 a 12 caracteres (letras, números, <code>_</code> e <code>-</code>). Se deixar vazio, o jogo gera <code>Miner_XXXX</code> aleatório. Opcional: escolha um POOL/GUILDA (aparece no leaderboard de pools).
+                </li>
+                <li><b class="step-title">Clique em EXECUTE_NODE</b>
+                    O backend valida a rede (precisa estar <code>playable</code>), cria seu estado de jogador (saldo 0, hardware nível 1, energia 10/10) e abre o WebSocket. Se a rede estiver sincronizando, o jogo mostra o progresso e tenta de novo a cada 10s.
+                </li>
+                <li><b class="step-title">Aguarde a primeira grade</b>
+                    O jogo coleta <b>6 palavras</b> da mempool (eventos <code>transaction_received</code>) e monta a grade 12×12. O cronômetro parte de 60s (+ bônus de hardware/nível/skill).
+                </li>
+                <li><b class="step-title">Encontre as palavras</b>
+                    Selecione letras na grade (arrastando ou clicando). Palavras andam para →, ↓, ↘ e ↙. Encontre as 6 antes do tempo acabar. Cada palavra dá sats + XP. Erros consecutivos (3+) custam 5% do saldo (slashing).
+                </li>
+                <li><b class="step-title">Bloco novo = rodada nova</b>
+                    Quando um bloco é minerado, a rodada atual encerra (ou você pode pagar 100.000 sats pelo <b>RBF</b> para resgatar +15s). Uma nova grade é montada com as 6 palavras do próximo bloco.
+                </li>
+                <li><b class="step-title">Gaste seus sats</b>
+                    Na tab UPGRADES: compre hardware (+10s por nível), energia (2.000 sats → +3), crates (5.000 sats → loot) ou L2 Lightning (1.000.000 sats → modo 8×8 com 10× recompensas).
+                </li>
+            </ol>
+            <div class="callout green"><div class="callout-title">DICA DE NOJO</div>Palavras <b>GOLDEN</b> (douradas, 5×) e <b>HIGH FEE</b> (laranja, 3×) valem muito mais. Priorize-as. Palavras <b>MEV</b> são ocultas no word bank — se encontrar uma que não está listada, são +50.000 sats.</div>
+        </section>
 
-    <section class="section" id="arquitetura">
-      <div class="container">
-        <div class="section-intro">
-          <p class="eyebrow">Arquitetura</p>
-          <h2>Realm isolado, origem pública mínima.</h2>
-          <p class="muted">Regtest e Signet iniciam por padrão. Mainnet podada é
-            opcional. Cada rede possui nó, volume, ingestor, epoch e leaderboard
-            próprios.</p>
-        </div>
-        <div class="flow" aria-label="Fluxo público do sistema">
-          <div class="flow-node">Bitcoin Core</div><div class="flow-arrow">→</div>
-          <div class="flow-node">Ingestor</div><div class="flow-arrow">→</div>
-          <div class="flow-node">Redis</div><div class="flow-arrow">→</div>
-          <div class="flow-node">API</div><div class="flow-arrow">→</div>
-          <div class="flow-node">PWA</div>
-        </div>
-        <div class="grid three">
-          <article class="card">
-            <span class="tag ok">Jogo</span>
-            <h3>Publicação dedicada</h3>
-            <p>O shell PWA e os proxies estritamente necessários vivem na porta local 8010.</p>
-          </article>
-          <article class="card">
-            <span class="tag">Portal</span>
-            <h3>Profile separado</h3>
-            <p>Apresentação e referência pública usam uma imagem estática própria na porta 8020.</p>
-          </article>
-          <article class="card">
-            <span class="tag warn">Operação</span>
-            <h3>Fora da superfície pública</h3>
-            <p>RPC, ZMQ, Redis, credenciais, topologia e diagnósticos detalhados não são publicados.</p>
-          </article>
-        </div>
-      </div>
-    </section>
+        <!-- ============ 03 · JOGO CENTRAL ============ -->
+        <section class="section-block" id="jogo-central">
+            <h2 class="section-title"><span class="num">03.</span><span class="hl">Jogo Central (tab JOGO)</span></h2>
 
-    <section class="section alt">
-      <div class="container grid two">
-        <article class="card">
-          <span class="tag ok">Mobile-first</span>
-          <h2>Jogo ajustado à tela.</h2>
-          <p>Layout, grade e controles partem do celular, respeitam áreas seguras,
-            toque, teclado, orientação e preferência por movimento reduzido.</p>
-        </article>
-        <article class="card">
-          <span class="tag">PWA</span>
-          <h2>Offline sem dados operacionais.</h2>
-          <p>Somente o shell estático entra no cache. API, WebSocket, health e
-            rankings continuam sempre dependentes da rede.</p>
-        </article>
-      </div>
-    </section>
-  </main>
+            <h3 id="geracao-palavras">3.1 Geração de palavras: do TXID ao BIP39</h3>
+            <p>A palavra do jogo é uma <b>função pura do TXID</b> — determinística e independente do nó. O mesmo TXID gera a mesma palavra em qualquer instância do jogo.</p>
+            <div class="table-wrap"><table>
+                <tr><th>Etapa</th><th>Onde</th><th>Detalhe</th></tr>
+                <tr><td>TXID calculado</td><td><code>ingestor.py:446-450</code></td><td>Double SHA256 do hex da transação + reversão de bytes (formato Bitcoin).</td></tr>
+                <tr><td>Entropia</td><td><code>engine.py:92</code></td><td><code>bytes.fromhex(txid[:32])</code> — primeiros <b>128 bits</b> (32 hex) do TXID.</td></tr>
+                <tr><td>Palavra BIP39</td><td><code>engine.py:93</code></td><td><code>Mnemonic("english").to_mnemonic(entropy).split()[0].upper()</code> — <b>primeira palavra</b> do mnemonic BIP39 <b>inglês</b>, em MAIÚSCULAS.</td></tr>
+                <tr><td>Fallback</td><td><code>engine.py:94-96</code></td><td>TXID inválido → <code>"BITCOIN"</code>.</td></tr>
+                <tr><td>Validação frontend</td><td><code>game.js:1176-1190</code></td><td><code>word</code> deve casar <code>/^[A-Z]{1,15}$/</code>; <code>is_high_fee</code>/<code>is_golden</code> booleanos; <code>vsize</code> número &gt; 0.</td></tr>
+            </table></div>
+            <p class="dim">A palavra viaja no evento <code>transaction_received</code> com os campos: <code>word</code>, <code>txid</code>, <code>tx_stub</code> (8 hex), <code>is_golden</code>, <code>is_high_fee</code>, <code>vsize</code>, <code>fee_rate_sat_vb</code>, <code>is_mev</code>, <code>base_reward</code> (500), <code>multiplier</code>.</p>
 
-  <footer class="site-footer">
-    <div class="container footer-row">
-      <span>Mempool Miner · Proof of Search</span>
-      <span>Integração Bitcoin real · economia simulada</span>
-    </div>
-  </footer>
+            <h4>RBF / transação minerada</h4>
+            <div class="table-wrap"><table>
+                <tr><th>Evento</th><th>Comportamento</th></tr>
+                <tr><td>Bloco minerado (backend)</td><td>Epoch avança para o novo <code>block_hash</code>; transações da epoch anterior são drenadas (<code>drain_stale_transactions</code>, <code>ingestor.py:293-321</code>); publica <code>block_mined</code> com <code>is_halving_block = blocks % 210000 == 0</code>.</td></tr>
+                <tr><td>Bloco minerado (frontend)</td><td>Dedup por <code>block_hash</code>/<code>epoch</code>; limpa o buffer de transações; se estiver jogando → oferece <b>Orphan Block Salvage (RBF)</b> uma vez por rodada; senão → prepara o próximo bloco.</td></tr>
+                <tr><td>RBF (resgate)</td><td>Custa <b>100.000 sats</b> e concede <b>+15s</b> (<code>RBF_PRICE</code>/<code>RBF_TIME_BONUS</code>, <code>game.js:3100-3101</code>). Aceitar em 3s reinicia a rodada com 15s + bônus; recusar/expirar encerra a rodada.</td></tr>
+            </table></div>
+
+            <h4>Dedup (evitar palavras repetidas)</h4>
+            <div class="table-wrap"><table>
+                <tr><th>Camada</th><th>Mecanismo</th></tr>
+                <tr><td>Backend (TXID)</td><td>Set Redis de TXIDs já publicados <b>por epoch</b> (<code>{realm}:seen:{epoch}</code>), TTL 3600s. Se o TXID já foi publicado, a transação não é reenviada.</td></tr>
+                <tr><td>Frontend (palavra)</td><td>Ignora palavra duplicada no buffer da rodada (<code>game.js:1649</code>).</td></tr>
+                <tr><td>Frontend (bloco)</td><td>Ignora <code>block_mined</code> com <code>block_hash</code>/<code>epoch</code> já processado (re-entrega ZMQ).</td></tr>
+            </table></div>
+
+            <h3 id="estrutura-rodada">3.2 Estrutura da rodada</h3>
+            <h4>Tamanho do grid e tempo</h4>
+            <div class="table-wrap"><table>
+                <tr><th>Condição</th><th>Grid</th><th>Tempo</th></tr>
+                <tr><td><b>Padrão</b></td><td>12×12</td><td>60s + bônus</td></tr>
+                <tr><td>Bloco pesado (<code>vsize &gt; 1000</code>)</td><td>15×15</td><td>75s + bônus</td></tr>
+                <tr><td>Lightning mode / Lightning Storm</td><td>8×8</td><td>20s</td></tr>
+                <tr><td>Mempool Flood</td><td>15×15</td><td>75s + bônus</td></tr>
+                <tr><td>Boss block</td><td>15×15</td><td>45s + skill</td></tr>
+                <tr><td>Sprint</td><td>10×10</td><td>30s + skill</td></tr>
+            </table></div>
+            <h4>Palavras por bloco</h4>
+            <div class="table-wrap"><table>
+                <tr><th>Modo</th><th>Quantidade</th></tr>
+                <tr><td>Padrão (<code>WORDS_PER_BLOCK</code>)</td><td><b>6</b></td></tr>
+                <tr><td>Boss (<code>bossWordsRequired</code>)</td><td><b>10</b></td></tr>
+                <tr><td>Sprint (<code>SPRINT_WORD_COUNT</code>)</td><td><b>4</b></td></tr>
+            </table></div>
+            <h4>Posicionamento das palavras</h4>
+            <ul>
+                <li>Direções de injeção: <code>[[1,0],[0,1],[1,1],[1,-1]]</code> — horizontal →, vertical ↓, diagonal ↘, diagonal ↙ (sem reversas).</li>
+                <li>Validação da seleção: mesmas 4 direções, mas <b>bidirecional</b> (normaliza caminho forward/reverse).</li>
+                <li><code>injectWordInGrid</code>: até 200 tentativas aleatórias; fallback determinístico (scan horizontal por linha vazia). Palavras maiores que o grid são truncadas.</li>
+                <li><code>fillGridWithoutIncidentalWords</code>: letras A-Z aleatórias, até 50 tentativas, rejeita se o filler criar uma palavra-alvo acidental.</li>
+                <li><code>buildPlayableBlock</code> tenta até 4 vezes; se falhar, "Falha ao montar a grade".</li>
+            </ul>
+            <h4>Tempo limite da rodada (<code>networkTimeLimit</code>)</h4>
+            <div class="table-wrap"><table>
+                <tr><th>Componente</th><th>Valor</th></tr>
+                <tr><td>Base</td><td><b>60s</b></td></tr>
+                <tr><td>Bônus de hardware</td><td><code>+10s × (hardwareLevel − 1)</code></td></tr>
+                <tr><td>Bônus de nível</td><td><code>min(level, 10)</code> s</td></tr>
+                <tr><td>Bônus de skill (Mining)</td><td><code>mining_time_bonus</code> (skill tree)</td></tr>
+                <tr><td>Halving penalty</td><td><code>− min(roundNumber − 1, 30)</code> s (máx 30s)</td></tr>
+                <tr><td><b>Mínimo absoluto</b></td><td><b>15s</b></td></tr>
+            </table></div>
+            <pre><code>networkTimeLimit = max(60 + hardwareBonus + levelBonus + skillBonus − halvingPenalty, 15)</code></pre>
+            <h4>Fim de rodada: tempo esgotar vs todas as palavras</h4>
+            <div class="table-wrap"><table>
+                <tr><th>Cenário</th><th>Comportamento</th></tr>
+                <tr><td><b>Todas as palavras achadas</b></td><td><code>roundSettled = true</code>; <code>showResult(true)</code> após 600ms; <code>roundNumber++</code>, <code>trackBlockCompleted()</code>, <code>claimFreeCrates()</code>.</td></tr>
+                <tr><td><b>Tempo esgotar</b></td><td>O tick do timer verifica <code>roundSettled</code> — se <code>true</code>, <b>não</b> sobrescreve o sucesso (correção da Fase 6). Se <code>false</code>, <code>showResult(false, "O cronômetro da rodada expirou.")</code>.</td></tr>
+                <tr><td>Timer</td><td><code>raceEndTime = now + networkTimeLimit×1000</code> (timestamp absoluto, imune a throttling de aba em 2º plano — correção da Fase 7); tick a cada <b>250ms</b>.</td></tr>
+            </table></div>
+
+            <h3 id="pontuacao">3.3 Pontuação (score → sats)</h3>
+            <h4>Base e halving</h4>
+            <div class="table-wrap"><table>
+                <tr><th>Item</th><th>Valor</th></tr>
+                <tr><td><code>baseReward</code></td><td><b>500 sats</b></td></tr>
+                <tr><td>Halving (recompensa)</td><td><code>−2%</code> a cada 10 blocos, <b>mín 50%</b> (<code>halvingRewardFactor = max(1 − floor(round/10)×0.02, 0.5)</code>)</td></tr>
+                <tr><td><code>effectiveBaseReward</code></td><td><code>floor(500 × halvingRewardFactor × globalRewardMultiplier)</code></td></tr>
+            </table></div>
+            <h4>Multiplicadores</h4>
+            <div class="table-wrap"><table>
+                <tr><th>Multiplicador</th><th>Valor</th></tr>
+                <tr><td><b>Golden</b> (txid prefixo <code>00</code>)</td><td><b>5×</b></td></tr>
+                <tr><td><b>High Fee</b> (fee_rate ≥ 20 sat/vb)</td><td><b>3×</b></td></tr>
+                <tr><td><b>Golden + High Fee</b></td><td><b>15×</b> (5× × 3×)</td></tr>
+                <tr><td><b>MEV</b></td><td>1× (sem multiplicador; bônus fixo +50.000 à parte)</td></tr>
+                <tr><td>Combo</td><td>1.0 → +0.5 a cada palavra em &lt;8s, <b>teto 4.0</b> (6.0 com Double Combo)</td></tr>
+                <tr><td>Lightning mode</td><td>×10</td></tr>
+                <tr><td>Magnet (power-up)</td><td>×1.5</td></tr>
+                <tr><td>Boss</td><td>×5 (<code>bossRewardMultiplier</code>)</td></tr>
+                <tr><td>Skill reward bonus</td><td><code>×(1 + skillRewardBonus)</code></td></tr>
+                <tr><td>Achievement bonus</td><td><code>floor(points × (1 + reward_percent))</code></td></tr>
+            </table></div>
+            <h4>Fórmula completa</h4>
+            <pre><code>points = (
+    (effectiveBaseReward × (1 + skillRewardBonus))   # base ajustada por halving/evento/skill
+    + (word.length × 50)                              # bônus por comprimento
+) × comboMultiplier                                   # combo (1.0–4.0, 6.0 c/ Double Combo)
+  × backendMultiplier                                 # golden 5× / high_fee 3× / golden+high_fee 15×
+  [× 10 se lightningMode]
+  [× 1.5 se magnet]
+  = applyAchievementBonus(points)                    # floor(points × (1 + reward_percent))
+
+balanceSatoshis += floor(points)                     # game.js:2868
+currentRoundEarnings += floor(points)                # game.js:2867</code></pre>
+            <p><b>Bônus fixos (fora da fórmula):</b> MEV <b>+50.000 sats</b>; Boss loot <b>+50.000 sats</b>.</p>
+            <p><b>Slashing (penalidade):</b> 3+ erros consecutivos → <b>5% do saldo</b> debitado. Power-up <b>Precision</b> isenta a rodada.</p>
+            <p><b>XP por palavra:</b> <code>Math.round(word.length × 10 + comboMultiplier × 5)</code>. O XP vai <b>simultaneamente</b> para o nível do jogador e para o season pass.</p>
+            <p><b>Score no leaderboard:</b> <code>submitScore()</code> envia <code>balanceSatoshis</code> (saldo total) como score, após cada palavra.</p>
+            <div class="callout"><div class="callout-title cyan">OBSERVAÇÃO</div>Não há "bônus de tempo restante" no fim da rodada. O "bônus de tempo" refere-se ao <b>tempo extra</b> concedido por hardware/nível/skill (seção 3.7), não a um acréscimo de sats por tempo sobrando.</div>
+
+            <h3 id="raridades">3.4 Raridades</h3>
+            <div class="table-wrap"><table>
+                <tr><th>Raridade</th><th>Critério</th><th>Prob.</th><th>Efeito</th></tr>
+                <tr><td><b>is_golden</b></td><td><code>txid.startswith("00")</code></td><td>~1/256 (0,39%)</td><td><b>5×</b> recompensa; label "(GOLDEN)" em dourado no floating text.</td></tr>
+                <tr><td><b>is_high_fee</b></td><td><code>fee_rate_sat_vb ≥ 20.0</code></td><td>variável</td><td><b>3×</b> recompensa; label "(HIGH FEE)" em laranja.</td></tr>
+                <tr><td><b>is_mev</b></td><td><code>int(txid[:8],16) % 100 &lt; 15</code></td><td>~15%</td><td><b>Palavra oculta</b> (não aparece no word bank); <b>+50.000 sats</b> ao encontrar; sem multiplicador.</td></tr>
+                <tr><td><b>expand_grid</b></td><td><code>vsize &gt; 1000</code></td><td>variável</td><td><b>15×15 grid + 75s</b> (em vez de 12×12 + 60s).</td></tr>
+            </table></div>
+
+            <h3 id="boss-block">3.5 Boss Block</h3>
+            <div class="table-wrap"><table>
+                <tr><th>Parâmetro</th><th>Valor</th></tr>
+                <tr><td>Disparo</td><td><b>A cada 50 blocos</b> (<code>count % 50 == 0</code>)</td></tr>
+                <tr><td>HP</td><td><b>10</b></td></tr>
+                <tr><td>Grid</td><td><b>15×15</b></td></tr>
+                <tr><td>Palavras</td><td><b>10</b></td></tr>
+                <tr><td>Timer</td><td><b>45s</b> + skillTimeBonus</td></tr>
+                <tr><td>Multiplicador</td><td><b>5×</b></td></tr>
+                <tr><td>Loot</td><td><b>+50.000 sats</b></td></tr>
+            </table></div>
+            <p><b>Regras:</b> o evento <code>boss_block</code> chega via WebSocket. É ignorado se estiver jogando, em transição ou com modal de resultado ativo. Coleta 10 palavras do buffer (com dedup). Cada palavra encontrada causa <b>1 dano</b> ao boss e multiplica pontos por <b>5×</b>. HP ≤ 0 → boss derrotado: +50.000 sats de loot, modal de derrota, <code>roundNumber++</code>. Timer expira → "O boss resistiu!". A barra de HP muda de cor: verde → laranja (≤50%) → vermelha (≤20%).</p>
+
+            <h3 id="sprint">3.6 Sprint Mode</h3>
+            <div class="table-wrap"><table>
+                <tr><th>Parâmetro</th><th>Valor</th></tr>
+                <tr><td>Grid</td><td><b>10×10</b></td></tr>
+                <tr><td>Palavras</td><td><b>4</b> (aleatórias do wordlist BIP39 PT)</td></tr>
+                <tr><td>Tempo</td><td><b>30s</b> + skillTimeBonus</td></tr>
+                <tr><td>Recompensa</td><td><b>500 sats/palavra</b> (<code>words_found × 1000 × 0.5</code>)</td></tr>
+                <tr><td>Leaderboard</td><td><b>Separado</b>, top 10, ordenado por <b>menor tempo</b></td></tr>
+            </table></div>
+            <p><b>Regras:</b> ativação pelo botão "Sprint" — a próxima rodada vira sprint. O backend gera as 4 palavras; o frontend monta o grid 10×10 e inicia countdown de 1s. <code>block_mined</code> encerra o sprint. O backend valida <code>time_taken ≤ 35s</code> (30 + 5 de bônus de skill máximo).</p>
+
+            <h3 id="time-freeze">3.7 Time Freeze</h3>
+            <div class="table-wrap"><table>
+                <tr><th>Aspecto</th><th>Detalhe</th></tr>
+                <tr><td>O que é</td><td>Power-up que <b>pausa o cronômetro por 5s</b></td></tr>
+                <tr><td>Custo</td><td><b>10.000 sats</b> (compra na loja)</td></tr>
+                <tr><td>Efeito</td><td><code>powerupEffects.time_freeze += 5</code></td></tr>
+                <tr><td>Mecânica</td><td>No tick do timer, <code>raceEndTime += deltaMs</code> (adianta o endTime pelo tempo real do tick) e decrementa o freeze pelo tempo real.</td></tr>
+                <tr><td>Origem</td><td>Compra na loja de power-ups OU recompensa do Decoder (power-up aleatório)</td></tr>
+            </table></div>
+
+            <h3 id="energia">3.8 Energia</h3>
+            <div class="table-wrap"><table>
+                <tr><th>Parâmetro</th><th>Valor</th></tr>
+                <tr><td>Custo por rodada</td><td><b>1 energy</b></td></tr>
+                <tr><td>Máximo</td><td><b>10</b> (<code>ENERGY_MAX</code>)</td></tr>
+                <tr><td>Recarga automática</td><td><b>1 energy a cada 30 min</b> (<code>ENERGY_REFILL_INTERVAL = 1800s</code>), calculada na leitura (lazy)</td></tr>
+                <tr><td>Compra</td><td><b>3 energy por 2.000 sats</b> (<code>ENERGY_BUY_COST = 2000</code>, <code>ENERGY_BUY_AMOUNT = 3</code>)</td></tr>
+                <tr><td>Sem energia</td><td>"Energia insuficiente. Aguarde a recarga ou compre energia."</td></tr>
+                <tr><td>Refund em falha</td><td>1 energia devolvida se a rodada não iniciar (<code>ENERGY_REFUND_SCRIPT</code>)</td></tr>
+                <tr><td>Idempotência</td><td><code>ENERGY_ROUND_TTL = 86400</code> (24h para retry/refund)</td></tr>
+            </table></div>
+
+            <h3 id="hardware">3.9 Hardware</h3>
+            <div class="table-wrap"><table>
+                <tr><th>Nível</th><th>Nome</th><th>Custo</th><th>Efeito</th></tr>
+                <tr><td>1</td><td>CPU Miner</td><td>— (inicial)</td><td>Base (0s extra)</td></tr>
+                <tr><td>2</td><td>GPU Rig</td><td><b>100.000 sats</b></td><td><b>+10s</b> no tempo da rodada</td></tr>
+                <tr><td>3</td><td>ASIC Antminer</td><td><b>500.000 sats</b></td><td><b>+20s</b> no tempo da rodada</td></tr>
+                <tr><td>4</td><td>Quantum Node</td><td><b>2.000.000 sats</b></td><td><b>+30s</b> no tempo da rodada</td></tr>
+            </table></div>
+            <p><b>Mecânica:</b> <code>networkTimeBonus = (hardwareLevel − 1) × 10</code>. O bônus é somado ao <code>networkTimeLimit</code> via <code>getNetworkTimeBonus()</code>, que também inclui o <code>levelTimeBonus</code> (<code>min(level, 10)</code> s). A compra debita do saldo, incrementa <code>hardwareLevel</code>, atualiza UI, <code>submitScore()</code> e <code>saveSessionState()</code>.</p>
+
+            <h3 id="decoder">3.10 Decoder</h3>
+            <div class="table-wrap"><table>
+                <tr><th>Aspecto</th><th>Detalhe</th></tr>
+                <tr><td>O que é</td><td>Mini-game: adivinhar uma palavra BIP39 a partir de um <b>TXID truncado</b> + <b>primeira letra</b></td></tr>
+                <tr><td>Frequência</td><td><b>A cada 3 rodadas</b> (<code>DECODER_ROUNDS_INTERVAL = 3</code>)</td></tr>
+                <tr><td>Tempo</td><td><b>30s</b> (<code>DECODER_TIME_LIMIT = 30</code>)</td></tr>
+                <tr><td>Cooldown backend</td><td><b>180s</b> entre partidas</td></tr>
+                <tr><td>Wordlist</td><td>Subconjunto BIP39 <b>português</b> (diferente do inglês do jogo principal)</td></tr>
+                <tr><td>TXID truncado</td><td><code>0x{sha256(word)[:4]}...{sha256(word)[-4:]}</code></td></tr>
+                <tr><td>Dica</td><td>Primeira letra da palavra (maiúscula)</td></tr>
+                <tr><td>Recompensa (acerto)</td><td><b>+5.000 sats</b> + <b>1 power-up aleatório</b></td></tr>
+                <tr><td>Streak/Wins</td><td>Persistidos em Redis (TTL 24h)</td></tr>
+            </table></div>
+            <p><b>Fluxo:</b> <code>checkDecoderAvailability()</code> mostra o botão a cada 3 rodadas → <code>startDecoderGame()</code> → POST <code>decoder/start</code> → modal com TXID + dica + timer 30s → <code>submitDecoderAnswer()</code> → POST <code>decoder/submit</code> → feedback + recompensa.</p>
+        </section>
+        <!-- ============ 04 · ECONOMIA ============ -->
+        <section class="section-block" id="economia">
+            <h2 class="section-title"><span class="num">04.</span><span class="hl">Economia</span></h2>
+
+            <h3>4.1 Moeda: sats</h3>
+            <p>O saldo (<code>balanceSatoshis</code>) começa em <b>0</b>. A fonte de verdade é o campo <code>balance</code> do hash Redis do player state — <b>sem TTL</b> (correção da Fase 2: <code>persist()</code> limpa o TTL residual de 24h que zerava o saldo). O frontend espelha o backend: se o backend tiver mais, adota; se o local tiver mais, mantém o local e faz <code>syncPlayerState()</code>.</p>
+            <h4>Fontes de entrada</h4>
+            <div class="table-wrap"><table>
+                <tr><th>Fonte</th><th>Valor</th></tr>
+                <tr><td>Palavra encontrada (jogo)</td><td><code>(500·(1+bônus skill) + len·50) · combo · mult</code></td></tr>
+                <tr><td>MEV secreto</td><td>+50.000</td></tr>
+                <tr><td>Boss derrotado (loot)</td><td>+50.000</td></tr>
+                <tr><td>Missões diárias/semanal</td><td>2.000–50.000 (tabela §4.4)</td></tr>
+                <tr><td>Crate (drop sats, 60%)</td><td>1.000–10.000</td></tr>
+                <tr><td>Decoder (acerto)</td><td>+5.000</td></tr>
+                <tr><td>Venda no mercado P2P</td><td>preço − 5% de taxa</td></tr>
+                <tr><td>PvP (vencedor)</td><td>10% do saldo do perdedor</td></tr>
+                <tr><td>Staking (expiração)</td><td>devolução do <code>amount</code> (bônus <b>não</b> pago — ver §8)</td></tr>
+                <tr><td>Season pass (recompensas)</td><td>variável (500–250.000)</td></tr>
+            </table></div>
+            <h4>Saídas (gastos)</h4>
+            <div class="table-wrap"><table>
+                <tr><th>Gasto</th><th>Valor</th></tr>
+                <tr><td>Dica (hint)</td><td>5.000 (com desconto de conquistas/skill)</td></tr>
+                <tr><td>Hardware (3 níveis)</td><td>100.000 / 500.000 / 2.000.000</td></tr>
+                <tr><td>L2 Lightning</td><td>1.000.000</td></tr>
+                <tr><td>RBF (resgate de bloco órfão)</td><td>100.000</td></tr>
+                <tr><td>Slashing (erro)</td><td>5% do saldo</td></tr>
+                <tr><td>Energia (ENERGY_RECHARGE)</td><td>2.000 por +3</td></tr>
+                <tr><td>Crate</td><td>5.000</td></tr>
+                <tr><td>Compra no mercado P2P</td><td>preço + 5% de taxa</td></tr>
+                <tr><td>Staking</td><td><code>amount</code> travado (mín 1.000)</td></tr>
+                <tr><td>Season premium</td><td>50.000</td></tr>
+            </table></div>
+
+            <h3>4.2 Energia</h3>
+            <p>Ver <a href="#energia">§3.8</a> para a tabela completa. Resumo: máx 10, custo 1/rodada, +1 a cada 30 min, compra 2.000 sats → +3, refund em falha.</p>
+
+            <h3>4.3 Upgrades (tab UPGRADES)</h3>
+            <div class="table-wrap"><table>
+                <tr><th>Upgrade</th><th>Custo</th><th>Efeito</th><th>Máx</th></tr>
+                <tr><td>Hardware (CPU → GPU → ASIC → Quantum)</td><td>100K / 500K / 2M</td><td>+10s permanentes no limite por nível</td><td>3 upgrades (4 tiers)</td></tr>
+                <tr><td>L2 Lightning</td><td>1.000.000</td><td>Grid 8×8, recompensas ×10, canal de 5 blocos</td><td>1 (recompra após expirar)</td></tr>
+                <tr><td>ENERGY_RECHARGE</td><td>2.000</td><td>+3 energia</td><td>ilimitado</td></tr>
+                <tr><td>CRATE</td><td>5.000</td><td>abre crate (drops §4.5)</td><td>ilimitado</td></tr>
+                <tr><td>TX_DECODER</td><td>grátis (mini-game)</td><td>+5.000 sats + power-up aleatório por acerto</td><td>ilimitado</td></tr>
+                <tr><td>Dica (hint, in-game)</td><td>5.000 (desconto por skill/conquistas)</td><td>revela direção de 1 palavra</td><td>ilimitado</td></tr>
+                <tr><td>RBF (in-game)</td><td>100.000</td><td>+15s na rodada (resgate de bloco órfão)</td><td>ilimitado</td></tr>
+                <tr><td>Skill tree (tab PERFIL)</td><td>1 ponto/nó (pontos vêm do nível)</td><td>ramos mining/search/lightning</td><td>5 por ramo</td></tr>
+                <tr><td>Season premium (tab PERFIL)</td><td>50.000</td><td>recompensas premium</td><td>—</td></tr>
+            </table></div>
+
+            <h3>4.4 Missões (recompensas)</h3>
+            <div class="table-wrap"><table>
+                <tr><th>Missão</th><th>Objetivo</th><th>Recompensa</th></tr>
+                <tr><td><code>find_5_high_fee</code></td><td>5 palavras High Fee</td><td>2.000</td></tr>
+                <tr><td><code>earn_50k_round</code></td><td>50K sats em 1 rodada</td><td>3.000</td></tr>
+                <tr><td><code>use_rbf</code></td><td>1 RBF</td><td>5.000</td></tr>
+                <tr><td><code>find_3_mev</code></td><td>3 palavras MEV</td><td>10.000</td></tr>
+                <tr><td><code>complete_3_blocks</code></td><td>3 blocos completos</td><td>4.000</td></tr>
+                <tr><td><code>10_words_no_error</code></td><td>10 palavras</td><td>2.500</td></tr>
+                <tr><td><code>find_100_words_week</code> (semanal)</td><td>100 palavras na semana</td><td>50.000 + achievement</td></tr>
+            </table></div>
+            <p class="dim">Rotação: 3 de 6 diárias por <code>day_of_year % 3</code>. Painel na tab COMPETIR. Claim: <code>POST /claim/{mission_id}</code> (correção: <code>persist()</code> em vez de <code>expire(86400)</code>).</p>
+
+            <h3>4.5 Crates</h3>
+            <p>Preço: <b>5.000 sats</b>. Crate grátis: <b>1 a cada 10 blocos minerados</b> (claim na UI).</p>
+            <div class="table-wrap"><table>
+                <tr><th>Drop</th><th>Probabilidade</th><th>Conteúdo</th></tr>
+                <tr><td>sats (comum)</td><td>60%</td><td>1.000–10.000 sats</td></tr>
+                <tr><td>Power-up (incomum)</td><td>20%</td><td>time_freeze / scanner / double_combo / magnet / precision</td></tr>
+                <tr><td>Block card (raro)</td><td>12%</td><td>raridade rare ou epic</td></tr>
+                <tr><td>Skin (raro)</td><td>6%</td><td>Neon Grid / Retro Terminal / Golden Hash / Dark Matter</td></tr>
+                <tr><td>Legendário</td><td>2%</td><td>Halving Boost / Mempool Lord — bônus permanente +5%</td></tr>
+            </table></div>
+
+            <h3>4.6 Mercado P2P (tab SOCIAL)</h3>
+            <ul>
+                <li><b>Taxa:</b> 5% cobrada <b>na compra</b> — comprador paga <code>preço + 5%</code>, vendedor recebe <code>preço − 5%</code>. Venda não cobra taxa.</li>
+                <li><b>Vender:</b> preço mínimo 100 sats; power-up sai do inventário; listing em Sorted Set ordenado por preço; TTL 7 dias.</li>
+                <li><b>Comprar:</b> transação Lua atômica (valida listing, preço inalterado e saldo; transfere saldo e item).</li>
+                <li><b>Precificação sugerida:</b> mediana dos últimos 50 preços de venda; sem histórico, usa o preço base.</li>
+                <li><b>Preços base de referência:</b> time_freeze 10.000 · scanner 5.000 · double_combo 15.000 · magnet 8.000 · precision 12.000.</li>
+                <li><b>UI:</b> toggle COMPRAR/VENDER (1º clique abre a seção de venda, 2º executa a venda — correção Fase 8). CTA nos estados vazios: "Nenhum item à venda no momento. Venda o seu na seção VENDER acima — ou jogue para ganhar power-ups."</li>
+            </ul>
+
+            <h3>4.7 Staking</h3>
+            <div class="table-wrap"><table>
+                <tr><th>Parâmetro</th><th>Valor</th></tr>
+                <tr><td>Quanto se stakeia</td><td>livre, mínimo 1.000 sats</td></tr>
+                <tr><td>Durações</td><td>1h / 6h / 24h</td></tr>
+                <tr><td>"Rendimento"</td><td>1h: +5% · 6h: +15% · 24h: +30%</td></tr>
+                <tr><td>Cancelamento antecipado</td><td>penalty 10% — devolve 90%</td></tr>
+                <tr><td>Expiração natural</td><td>devolve o <code>amount</code> sem penalty</td></tr>
+                <tr><td>Stakes simultâneos</td><td>1 por jogador (409)</td></tr>
+            </table></div>
+            <div class="callout red"><div class="callout-title">⚠ PONTA SOLTA (ALTO)</div>O bônus de staking (5/15/30%) é armazenado e exibido na UI, mas <b>nunca é creditado</b> — a expiração devolve apenas o <code>amount</code>. O "rendimento" prometido não existe no código atual.</div>
+
+            <h3>4.8 Faucet regtest</h3>
+            <p>Configuração: <code>FAUCET_INTERVAL=20s</code>, <code>FAUCET_TXS=12</code>, <code>BLOCK_INTERVAL=90s</code>. A cada 20s: 12 transações de 0,001 BTC; a cada 90s: 1 bloco minerado. <b>Papel na economia:</b> regtest não tem tráfego orgânico — o faucet é a ÚNICA fonte de transações da mempool (que viram palavras) e de blocos frescos (disparam <code>block_mined</code>: crates grátis, boss blocks). <b>Não é fonte de sats</b> — os sats são 100% simulados (Redis); o faucet é infraestrutura de dados, não de moeda.</p>
+        </section>
+
+        <!-- ============ 05 · PROGRESSÃO ============ -->
+        <section class="section-block" id="progressao">
+            <h2 class="section-title"><span class="num">05.</span><span class="hl">Progressão</span></h2>
+
+            <h3>5.1 XP</h3>
+            <ul>
+                <li><b>Por palavra (única fonte de XP):</b> <code>baseXP = word.length × 10; comboBonus = comboMultiplier × 5; Math.round(baseXP + comboBonus)</code>. O XP vai <b>simultaneamente</b> para o nível do jogador e para o season pass.</li>
+                <li><b>Rodada/bônus:</b> NÃO há XP por rodada completa nem por bônus (MEV, boss, golden).</li>
+                <li><b>Combo:</b> começa 1.0, +0.5 a cada palavra em &lt;8s, teto 4.0 (6.0 com power-up <code>double_combo</code>).</li>
+                <li><b>Curva de nível:</b> <code>xp_to_next_level(level) = level × 100</code> (linear, sem teto). XP total p/ nível N = <code>100·N·(N−1)/2</code>.</li>
+                <li><b>Curva de season:</b> fixa <code>SEASON_XP_PER_LEVEL = 100</code>, teto nível 40.</li>
+                <li><b>Bug float (corrigido):</b> <code>int(float(xp_amount))</code> no season pass e <code>Math.round</code> no frontend. <b>Endpoint de nível ainda vulnerável</b> — grava <code>str(xp)</code> sem coerção; mitigado só pelo <code>Math.round</code> do frontend.</li>
+            </ul>
+
+            <h3>5.2 Níveis e ranks</h3>
+            <div class="table-wrap"><table>
+                <tr><th>Nível</th><th>Rank</th></tr>
+                <tr><td>1–9</td><td>Script Kiddie</td></tr>
+                <tr><td>10–19</td><td>Node Operator</td></tr>
+                <tr><td>20–29</td><td>Hash Crafter</td></tr>
+                <tr><td>30–39</td><td>Block Miner</td></tr>
+                <tr><td>40–49</td><td>Mempool Hunter</td></tr>
+                <tr><td>50–59</td><td>Satoshi Disciple</td></tr>
+                <tr><td>60–69</td><td>Chain Validator</td></tr>
+                <tr><td>70–79</td><td>Hash Rate Lord</td></tr>
+                <tr><td>80–89</td><td>Block King</td></tr>
+                <tr><td>90–99</td><td>Bitcoin Legend</td></tr>
+                <tr><td>100</td><td>Satoshi</td></tr>
+            </table></div>
+            <p><b>Bônus passivos por nível:</b> <code>time_bonus_seconds = min(level, 10)</code> (máx +10s na rodada); <code>hint_discount_percent = min((level//3)×10, 30)</code> (máx 30% de desconto em dicas). Pontos de skill: 1 a cada 10 níveis.</p>
+
+            <h3>5.3 Season Pass</h3>
+            <ul>
+                <li><b>Duração real:</b> <b>trimestre</b> (Q1→04/01, Q2→07/01, Q3→10/01, Q4→01/01). Season ID: <code>season_{ano}_q{trimestre}</code>.</li>
+                <li><b>Estrutura:</b> 20 níveis free + 20 premium (níveis 21–40). <code>XP_PER_LEVEL = 100</code>.</li>
+                <li><b>Premium:</b> 50.000 sats, compra atômica Lua.</li>
+                <li><b>Recompensas free (1–20):</b> sats 500→25.000, hints 1/2/3 (nív. 3, 9, 15), power-ups scanner (6), time_freeze (12), magnet (18), nível 20: 25.000 sats + <code>season_badge</code>.</li>
+                <li><b>Recompensas premium (21–40):</b> sats 30.000→250.000, cards rare (22, 38), epic (26, 34), legendary (30), power-ups precision (24), double_combo (28), scanner (36), bônus <code>reward_plus_5pct</code> 7d (32) e <code>reward_plus_10pct</code> 14d (40).</li>
+                <li><b>Claim:</b> Lua — <b>só credita <code>sats</code>, <code>hint</code>, <code>powerup</code></b>. Tipos <code>card</code>, <code>bonus</code>, <code>season_badge</code> são marcados como reclamados <b>sem creditar nada</b> (ponta solta ALTO).</li>
+                <li><b>Fim da temporada:</b> nenhuma lógica de rollover/claim-deadline; chave com TTL 30 dias.</li>
+            </ul>
+
+            <h3>5.4 Skill Tree (tab PERFIL)</h3>
+            <div class="table-wrap"><table>
+                <tr><th>Ramo</th><th>Efeito por nível</th><th>Máx</th></tr>
+                <tr><td><b>Mining</b> ⛏️</td><td>+1s → +5s no tempo base da rodada</td><td>5</td></tr>
+                <tr><td><b>Search</b> 🔍</td><td>hints −10% → −50%</td><td>5</td></tr>
+                <tr><td><b>Lightning</b> ⚡</td><td>+5% → +25% de recompensa</td><td>5</td></tr>
+            </table></div>
+            <p>Custo: 1 ponto/nó; pontos = <code>player_level // 10</code>; sem pré-requisitos entre ramos.</p>
+            <div class="callout red"><div class="callout-title">⚠ PONTA SOLTA (ALTO)</div>A chave de skills tem <b>TTL 24h</b> — se o jogador não abrir o PERFIL por 1 dia, a árvore <b>reseta</b> (níveis perdidos, pontos recalculados).</div>
+
+            <h3>5.5 Cards</h3>
+            <div class="table-wrap"><table>
+                <tr><th>Raridade</th><th>Probabilidade</th></tr>
+                <tr><td>common</td><td>60%</td></tr>
+                <tr><td>rare</td><td>25%</td></tr>
+                <tr><td>epic</td><td>10%</td></tr>
+                <tr><td>legendary</td><td>5%</td></tr>
+            </table></div>
+            <p><b>Geração:</b> rolagem pura aleatória (1 card por bloco, salvo global). <b>Como se ganha:</b> (a) bloco — todo jogador conectado recebe via WS <code>block_mined</code> → <code>creditBlockCard</code>; (b) crate — 12% rare/epic; (c) season premium — níveis 22/26/30/34/38 (não implementado no claim); (d) mercado — não existe para cards. <b>Bônus de coleção:</b> common 10→+1%, rare 5→+2%, epic 3→+3%, legendary 1→+5% (calculado, mas aplicação nas recompensas não verificada). Sem efeito individual por card.</p>
+
+            <h3>5.6 Missões</h3>
+            <p>Ver <a href="#economia">§4.4</a> para a tabela de recompensas. Painel na tab COMPETIR. Progresso: <code>POST /update</code>. Claim: <code>POST /claim/{mission_id}</code> (correção: <code>persist()</code> em vez de <code>expire(86400)</code>). TTL da chave de missões: 8 dias. Ponta solta: <code>10_words_no_error</code> usa stat cumulativo <code>words_found</code> — "consecutivas sem erro" não é rastreado.</p>
+
+            <h3>5.7 Leaderboard</h3>
+            <ul>
+                <li><b>Global:</b> <code>ZADD GT CH</code>, top 10. Pools: <code>ZADD GT CH</code> por <code>pool_name</code>, top 10.</li>
+                <li><b>Score:</b> <code>balanceSatoshis</code> (saldo total), enviado após cada palavra.</li>
+                <li><b>Reset por epoch:</b> a cada <b>2016 blocos</b> — del leaderboard + pools, incrementa <code>epoch_id</code>, publica <code>leaderboard_reset</code>. Frontend: "Nova temporada! Leaderboard resetado".</li>
+                <li><b>Sprint:</b> leaderboard separado, ordenado por menor tempo.</li>
+            </ul>
+        </section>
+        <!-- ============ 06 · SISTEMAS TRANSVERSAIS ============ -->
+        <section class="section-block" id="sistemas-transversais">
+            <h2 class="section-title"><span class="num">06.</span><span class="hl">Sistemas Transversais</span></h2>
+
+            <h3>6.1 Eventos Globais</h3>
+            <p>Eventos aleatórios que alteram as regras do jogo para <b>todos os jogadores</b> do realm. O scheduler roda em cada instância do backend; lock Redis (<code>SET NX</code>) garante 1 instância por realm. Intervalo entre eventos: <b>aleatório 30–60 min</b>. Pre-anúncio declarado: 120s.</p>
+            <div class="table-wrap"><table>
+                <tr><th>Evento</th><th>Ícone</th><th>Duração</th><th>Efeito anunciado</th></tr>
+                <tr><td><b>Fee Spike</b></td><td>⚡</td><td>600s (10 min)</td><td>Todas as palavras High Fee, 3×</td></tr>
+                <tr><td><b>Golden Rush</b></td><td>🌟</td><td>300s (5 min)</td><td>Golden Hash 3× mais frequente, 5×</td></tr>
+                <tr><td><b>Mempool Flood</b></td><td>🌊</td><td>600s (10 min)</td><td>Grade 15×15 obrigatória, 2×</td></tr>
+                <tr><td><b>Lightning Storm</b></td><td>⛈️</td><td>180s (3 min)</td><td>Lightning Mode para todos, 10×, 8×8</td></tr>
+            </table></div>
+            <p><b>Efeitos no backend</b> (<code>apply_event_effects</code>): <code>fee_spike</code> → <code>is_high_fee=True</code>, multiplier 3× (15× se golden); <code>golden_rush</code> → ~30% das palavras viram golden (5×); <code>mempool_flood</code> → multiplier ×2; <code>lightning_storm</code> → multiplier ×10. <b>Efeitos no frontend</b> (<code>buildPlayableBlock</code>): sobrepõe grade/tempo/multiplicador — Lightning Storm → 8×8/20s/×10; Mempool Flood → 15×15/75s/×2; Fee Spike → ×3; Golden Rush → ×5.</p>
+            <p><b>Notificação:</b> banner <code>#global-event-banner</code> com countdown 1s; pre-anúncio mostra "…em breve!"; ao iniciar sessão, <code>loadActiveGlobalEvent()</code> via REST reconecta o banner se evento já ativo.</p>
+            <div class="callout red"><div class="callout-title">⚠ PONTA SOLTA (ALTO)</div><b>Double-counting de multiplicadores:</b> o backend aplica o multiplicador do evento no <code>multiplier</code> da TX <b>e</b> o frontend aplica <code>globalRewardMultiplier</code> no <code>effectiveBaseReward</code>. Resultado: Fee Spike → 3××3× = <b>9×</b> (deveria ser 3×); Golden Rush → 5××5× = <b>25×</b>; Mempool Flood → 2××2× = <b>4×</b>; Lightning Storm → 10××10× = <b>100×</b>. Além disso, o timing do pre-anúncio está quebrado (publicado no mesmo instante do trigger, não 2 min antes).</div>
+
+            <h3>6.2 Chat / Comms (tab SOCIAL → CHAT)</h3>
+            <div class="table-wrap"><table>
+                <tr><th>Parâmetro</th><th>Valor</th></tr>
+                <tr><td>Rate limit</td><td><b>5 mensagens/min</b> por jogador (janela 60s; excedeu → HTTP 429)</td></tr>
+                <tr><td>Tamanho máx</td><td><b>100 caracteres</b></td></tr>
+                <tr><td>Moderação</td><td>Lista de palavras banidas (substring, case-insensitive) → HTTP 400</td></tr>
+                <tr><td>Emojis</td><td>🪙 ⛏️ ₿ 📡 🔗 ⚡ 💎 🏆</td></tr>
+                <tr><td>Persistência</td><td>Últimas <b>50 mensagens</b> por realm (LPUSH + LTRIM)</td></tr>
+                <tr><td>Frontend</td><td>Carrega 20 mensagens ao abrir a aba; teto local 50</td></tr>
+            </table></div>
+            <div class="callout red"><div class="callout-title">⚠ PONTA SOLTA (ALTO)</div><b>Chat não é entregue em tempo real:</b> <code>chat_message</code> não está em <code>PUBLIC_EVENT_FIELDS</code> e o backend nunca publica a mensagem no canal <code>events</code>. O jogador só vê as próprias mensagens (resposta do POST) e o histórico ao abrir a aba. Dois jogadores na mesma aba <b>não veem as mensagens um do outro</b> em tempo real.</div>
+
+            <h3>6.3 Social (Amigos / Co-op)</h3>
+            <ul>
+                <li><b>Amigos:</b> adicionar/remover por username (unidirecional, imediato). Armazenado em SET Redis por realm.</li>
+                <li><b>Status online:</b> heartbeat via WS (<code>player_heartbeat</code> → hash <code>online_key</code>, TTL 86400).</li>
+                <li><b>Bônus co-op:</b> <code>min(online_count × 0.05, 0.20)</code> → +5% por amigo online, teto +20% (4 amigos).</li>
+            </ul>
+            <div class="callout red"><div class="callout-title">⚠ PONTA SOLTA (ALTO)</div>O bônus co-op é <b>calculado e exibido na UI</b> ("Bônus Co-op: +X%"), mas <b>nunca é aplicado</b> a recompensas/score — a mecânica é cosmética.</div>
+            <p class="dim"><b>Placeholders (não implementados):</b> pedido de amizade/aceitação mútua, amizade cross-realm, ranking social (amigos no leaderboard), chat em tempo real entre amigos.</p>
+
+            <h3>6.4 Arquitetura Multi-rede</h3>
+            <div class="table-wrap"><table>
+                <tr><th>realm_id</th><th>Rede</th><th>node_id</th><th>Label</th><th>Opcional</th></tr>
+                <tr><td><code>regtest</code></td><td>regtest</td><td><code>regtest-local</code></td><td>Regtest local</td><td>não</td></tr>
+                <tr><td><code>signet</code></td><td>signet</td><td><code>signet-public</code></td><td>Signet pública</td><td>não</td></tr>
+                <tr><td><code>mainnet</code></td><td>mainnet</td><td><code>mainnet-pruned</code></td><td>Mainnet podada</td><td><b>sim</b></td></tr>
+            </table></div>
+            <ul>
+                <li><b>Estado <code>playable</code>:</b> <code>playable = observed.playable AND has_live_heartbeat AND runtime_status == "ready"</code>. Ingestor atualiza a cada 10s; <code>status = "syncing" if IBD else "ready"</code>; RPC indisponível → <code>unavailable</code>, <code>playable=False</code>.</li>
+                <li><b>Gating:</b> pontuação exige <code>playable</code> (senão HTTP 409); ingestor descarta TX se <code>not playable</code>.</li>
+                <li><b>Troca de rede:</b> botão TROCAR REDE → <code>teardownSession</code> + modal auth + recarrega catálogo. Preferência persistida em <code>localStorage["mempool-miner-realm"]</code>. Troca de realm zera estado local (saldo 0, hardware 1, rodada 1).</li>
+                <li><b>Retry:</b> catálogo re-tentado a cada 10s enquanto houver rede <code>starting/syncing/unavailable</code>.</li>
+            </ul>
+
+            <h3>6.5 WebSocket — eventos recebidos</h3>
+            <p>Endpoint: <code>WS /ws/v1/game/{realm_id}</code>. Handshake: valida origem (CORS) e realm; envia <code>game_start</code> com snapshot; depois fan-out via <code>EventRelay</code> (fila por conexão, maxsize 1000). Heartbeat do servidor a cada 30s de inatividade; timeout de 300s sem mensagem do cliente encerra a conexão.</p>
+            <div class="table-wrap"><table>
+                <tr><th>action</th><th>Efeito na UI</th></tr>
+                <tr><td><code>game_start</code></td><td>Handshake: <code>sessionReady = playable</code>; se false → overlay + modal + retry 10s; se true → inicia polling e <code>prepareNextBlock()</code>.</td></tr>
+                <tr><td><code>network_status</code></td><td>Atualiza status do nó; <code>playable=false</code> → teardown + overlay + catálogo.</td></tr>
+                <tr><td><code>transaction_received</code></td><td>Enche <code>txBuffer</code> (dedup por palavra; troca de epoch zera buffer; roteia p/ boss se ativo); com 6 palavras → agenda build em 500ms.</td></tr>
+                <tr><td><code>block_mined</code></td><td>Dedup por hash/epoch; flash de halving; credita card do bloco; encerra sprint; oferece Orphan Salvage; decrementa Lightning; <code>prepareNextBlock()</code>.</td></tr>
+                <tr><td><code>leaderboard_reset</code></td><td>"Nova temporada!" + refetch do leaderboard.</td></tr>
+                <tr><td><code>market_sale</code></td><td>Se o vendedor é o jogador: recarrega mercado/inventário/estado + toast.</td></tr>
+                <tr><td><code>boss_block</code></td><td><code>handleBossBlock</code> (ver §3.5).</td></tr>
+                <tr><td><code>event_preannounce/started/ended</code></td><td>Banner global + countdown + toasts.</td></tr>
+                <tr><td><code>pvp_*</code></td><td>Toasts de desafio/início/fim; <b><code>pvp_score_update</code> e <code>pvp_timer</code> têm handlers vazios</b> (ponta solta).</td></tr>
+                <tr><td><code>heartbeat</code></td><td>Cliente responde <code>player_heartbeat</code> (status online).</td></tr>
+            </table></div>
+            <p class="dim">Códigos de fechamento: <b>1008</b> (origem/rede inválida), <b>4001</b> (realm divergente), <b>4002</b> (timeout de handshake 10s), <b>4003</b> (epoch divergente em <code>block_mined</code> → reconecta em 1s).</p>
+
+            <h3>6.6 Resiliência</h3>
+            <ul>
+                <li><b>Backend fora do ar:</b> retry com backoff exponencial — 5 tentativas, <code>delay = 1000 × 2^(n−1)</code> (1s, 2s, 4s, 8s, 16s); após 5 falhas → "Falha na reconexão. Recarregue a página."</li>
+                <li><b>WebSocket inativo:</b> timeout de 300s sem mensagem do cliente → encerra; heartbeat do servidor (30s) permite ao cliente detectar inatividade.</li>
+                <li><b>Rede do navegador:</b> <code>navigator.onLine</code> → offline desabilita catálogo ("Sem conexão"); ao voltar online, recarrega catálogo.</li>
+                <li><b>PWA:</b> service worker registrado com atualização sob decisão do jogador.</li>
+                <li><b>Backpressure:</b> fila do relay cheia (1000) → evento descartado com warning.</li>
+            </ul>
+        </section>
+
+        <!-- ============ 07 · ARQUITETURA ============ -->
+        <section class="section-block" id="arquitetura">
+            <h2 class="section-title"><span class="num">07.</span><span class="hl">Arquitetura (visão técnica)</span></h2>
+            <p>Fluxo de dados completo, do nó Bitcoin ao frontend:</p>
+            <pre><code>┌─────────────────┐   ZMQ rawtx/hashblock   ┌──────────────────┐
+│  Bitcoin Core   │ ───────────────────────▶ │  Ingestor        │
+│  (nó local)     │   (SUB: rawtx, hashblock)│  (singleton/rede)│
+└─────────────────┘                          └────────┬─────────┘
+                                                      │ txid (double SHA256)
+                                                      ▼
+                                             ┌──────────────────┐
+                                             │  GameEngine      │
+                                             │  get_tx_metadata │
+                                             │  (RPC: vsize,fee)│
+                                             │  tx_to_word      │
+                                             │  (BIP39 128 bits)│
+                                             └────────┬─────────┘
+                                                      │ dedup (SADD por epoch)
+                                                      ▼
+                                             ┌──────────────────┐
+                                             │  Redis PubSub    │
+                                             │  {realm}:events  │
+                                             └────────┬─────────┘
+                                                      │ EventRelay (fila 1000)
+                                                      ▼
+                                             ┌──────────────────┐
+                                             │  WebSocket       │
+                                             │  /ws/v1/game/{id}│
+                                             └────────┬─────────┘
+                                                      ▼
+                                             ┌──────────────────┐
+                                             │  Frontend        │
+                                             │  game.js         │
+                                             │  (grade, timer,  │
+                                             │   sats, XP)      │
+                                             └──────────────────┘</code></pre>
+            <h3>Stack</h3>
+            <div class="table-wrap"><table>
+                <tr><th>Camada</th><th>Tecnologia</th></tr>
+                <tr><td>Backend</td><td>FastAPI (Python 3.13), asyncio</td></tr>
+                <tr><td>Estado</td><td>Redis (hashes, sets, sorted sets, PubSub, scripts Lua atômicos)</td></tr>
+                <tr><td>Frontend</td><td>HTML/CSS/JS vanilla (sem framework), PWA + service worker</td></tr>
+                <tr><td>Bitcoin</td><td>Bitcoin Core (regtest/signet/mainnet) + ZMQ + RPC</td></tr>
+                <tr><td>Infra</td><td>Docker Compose (7 serviços: api, redis, bitcoin-regtest, nginx, etc.)</td></tr>
+            </table></div>
+            <h3>Singleton por rede</h3>
+            <p>O ingestor é um <b>singleton por <code>realm_id</code></b> — cada rede tem seu próprio listener ZMQ, fila, dedup e epoch. Trocar a fonte de dados (ex.: API pública em vez de ZMQ local) afeta apenas o "producer"; todo o resto do pipeline (dedup, epoch, lease, PubSub, WebSocket, frontend) permanece intacto. A palavra é função pura do TXID, então é agnóstica à fonte.</p>
+        </section>
+
+        <!-- ============ 08 · PONTAS SOLTAS ============ -->
+        <section class="section-block" id="pontas-soltas">
+            <h2 class="section-title"><span class="num">08.</span><span class="hl">Pontas Soltas (auditoria)</span></h2>
+            <p>Lista consolidada de bugs, inconsistências e mecânicas incompletas encontrados na auditoria de 2026-08-23. Severidade: <span class="sev sev-alto">ALTO</span> = quebra funcional/econômica; <span class="sev sev-medio">MÉDIO</span> = comportamento inesperado; <span class="sev sev-baixo">BAIXO</span> = cosmético/edge case.</p>
+
+            <h3>ALTO</h3>
+            <div class="table-wrap"><table>
+                <tr><th>#</th><th>Ponta solta</th><th>Local</th></tr>
+                <tr><td>1</td><td><b>Double-counting de multiplicadores em eventos globais</b> — backend aplica no <code>multiplier</code> da TX e frontend aplica no <code>effectiveBaseReward</code>. Fee Spike → 9× (deveria 3×); Golden Rush → 25×; Flood → 4×; Lightning → 100×.</td><td><code>engine.py:374-401</code> + <code>game.js:2313-2348</code></td></tr>
+                <tr><td>2</td><td><b>Golden Rush quebra palavras G-Z</b> — <code>int(word[:2], 16)</code> lança <code>ValueError</code> para palavras iniciadas com G-Z (não hex); a TX é descartada silenciosamente.</td><td><code>engine.py:388</code></td></tr>
+                <tr><td>3</td><td><b>Timing do pre-anúncio de eventos globais quebrado</b> — publicado no mesmo instante do trigger, não 2 min antes; <code>started_at</code>/<code>ends_at</code> não batem com o início/fim reais; countdown zera antes do evento acabar.</td><td><code>global_events.py:223-295</code></td></tr>
+                <tr><td>4</td><td><b>Chat não é entregue em tempo real</b> — <code>chat_message</code> não está em <code>PUBLIC_EVENT_FIELDS</code>; backend nunca publica no canal <code>events</code>.</td><td><code>main.py:97-189, 2357-2381</code></td></tr>
+                <tr><td>5</td><td><b>Bônus co-op de amigos nunca aplicado</b> — calculado e exibido, mas nenhum cálculo de recompensa consome o valor.</td><td><code>main.py:4388-4390</code></td></tr>
+                <tr><td>6</td><td><b>Bônus de staking nunca creditado</b> — 5/15/30% armazenado e exibido, mas a expiração devolve apenas o <code>amount</code>.</td><td><code>main.py:4188-4195</code></td></tr>
+                <tr><td>7</td><td><b>Skill tree com TTL 24h</b> — reseta após 1 dia sem abrir PERFIL (níveis perdidos).</td><td><code>main.py:1714, 1820</code></td></tr>
+                <tr><td>8</td><td><b>Recompensas season <code>card</code>/<code>bonus</code>/<code>season_badge</code> marcadas como reclamadas sem creditar</b>.</td><td><code>season_pass.py:274-280</code></td></tr>
+                <tr><td>9</td><td><b>Endpoint de nível sem <code>int(float)</code></b> — bug float só corrigido no season; se chegar float, grava "67.5" e a próxima leitura quebra com 500.</td><td><code>main.py:5137-5186</code></td></tr>
+            </table></div>
+
+            <h3>MÉDIO</h3>
+            <div class="table-wrap"><table>
+                <tr><th>#</th><th>Ponta solta</th><th>Local</th></tr>
+                <tr><td>10</td><td><b>Boss block não consome energia</b> — rodada do boss é gratuita (diverge do fluxo normal).</td><td><code>game.js:3623-3717</code></td></tr>
+                <tr><td>11</td><td><b><code>boss_grid_size</code> enviado pelo backend é ignorado</b> — frontend hardcodeia 15.</td><td><code>ingestor.py:664</code> vs <code>game.js:3641</code></td></tr>
+                <tr><td>12</td><td><b>Sprint: <code>skillTimeBonus</code> pode exceder o teto do backend</b> — se &gt;5s, backend rejeita o submit (HTTP 422).</td><td><code>game.js:6694</code> vs <code>main.py:4982-4985</code></td></tr>
+                <tr><td>13</td><td><b>Decoder usa wordlist PT; jogo principal usa BIP39 EN</b> — inconsistência de vocabulário.</td><td><code>main.py:4609+</code> vs <code>engine.py:44</code></td></tr>
+                <tr><td>14</td><td><b>Raridade de card: docstring alega base em eventos, código é aleatório puro</b>.</td><td><code>ingestor.py:696-700</code> vs <code>747-767</code></td></tr>
+                <tr><td>15</td><td><b>Bônus de coleção de cards calculado mas aplicação não verificada</b>.</td><td><code>main.py:3508-3513</code></td></tr>
+                <tr><td>16</td><td><b>Compras in-game (hint, hardware, lightning, RBF) e slashing são apenas frontend</b> — sem endpoint backend que debite; se <code>syncPlayerState</code> falhar, saldo diverge.</td><td><code>game.js:2110-2188, 3129-3130, 2939-2942</code></td></tr>
+                <tr><td>17</td><td><b>Inventário de power-ups com TTL 24h</b> — power-ups podem sumir se o jogador não operar por 24h.</td><td><code>main.py:2231, 2252, 2685</code></td></tr>
+                <tr><td>18</td><td><b>Sincronização de saldo "quem tiver mais, vence"</b> — sessões concorrentes podem duplicar créditos.</td><td><code>game.js:2056-2058</code></td></tr>
+                <tr><td>19</td><td><b>Missão "sem erro" não rastreia erro</b> — usa <code>words_found</code> cumulativo.</td><td><code>main.py:1546</code></td></tr>
+                <tr><td>20</td><td><b>Sem lógica de fim de temporada</b> (rollover, carryover, prazo de claim).</td><td><code>season_pass.py</code></td></tr>
+            </table></div>
+
+            <h3>BAIXO</h3>
+            <div class="table-wrap"><table>
+                <tr><th>#</th><th>Ponta solta</th><th>Local</th></tr>
+                <tr><td>21</td><td><b>RBF: rodada de resgate tem apenas 15s + bônus</b> — muito curto para 6 palavras.</td><td><code>game.js:3143</code></td></tr>
+                <tr><td>22</td><td><b>Boss: modal de derrota agendado em 1000ms pode sobrepor-se ao resultado</b>.</td><td><code>game.js:2851</code></td></tr>
+                <tr><td>23</td><td><b>Boss: <code>handleBossBlock</code> ignorado se <code>isPlaying</code></b> — boss só dispara entre rodadas.</td><td><code>game.js:3506-3508</code></td></tr>
+                <tr><td>24</td><td><b><code>injectWordInGrid</code> trunca palavras &gt; grid</b> (nunca dispara em grids ≥8×8).</td><td><code>game.js:2401</code></td></tr>
+                <tr><td>25</td><td><b><code>fillGridWithoutIncidentalWords</code> pode falhar</b> — após 50 tentativas + 4 retries, "Falha ao montar a grade".</td><td><code>game.js:2509-2526, 2371-2378</code></td></tr>
+                <tr><td>26</td><td><b>Logger de staking imprime "(+.1f% bonus)"</b> em vez do valor (format specifier fora do %).</td><td><code>main.py:4071</code></td></tr>
+                <tr><td>27</td><td><b><code>SEASON_DURATION_DAYS=28</code> e <code>PREMIUM_UNLOCK_DAYS=7</code> definidos e não usados</b>.</td><td><code>season_pass.py:10, 14</code></td></tr>
+                <tr><td>28</td><td><b><code>xp_progress=0</code> ao level-up</b> (UI) — em vez do resto real.</td><td><code>game.js:7346</code></td></tr>
+                <tr><td>29</td><td><b>Venda no mercado: frontend valida só <code>price &gt; 0</code></b>; backend impõe mínimo de 100 sats (erro 400).</td><td><code>game.js:6376</code>; <code>main.py:2463</code></td></tr>
+                <tr><td>30</td><td><b>Onboarding sem tutorial</b> — comentário "modal de tutorial" é enganoso; é apenas o modal de autenticação.</td><td><code>game.js:1364-1404</code></td></tr>
+                <tr><td>31</td><td><b>Mainnet opcional desativada por padrão</b> — sem heartbeat do profile mainnet, a rede aparece <code>disabled</code>.</td><td><code>main.py:624-625</code></td></tr>
+                <tr><td>32</td><td><b>PvP: <code>pvp_score_update</code> e <code>pvp_timer</code> têm handlers vazios</b> — jogador não vê placar/tempo ao vivo.</td><td><code>game.js:1757-1776</code></td></tr>
+            </table></div>
+        </section>
+
+        <!-- ============ 09 · REFERÊNCIA DE API ============ -->
+        <section class="section-block" id="api">
+            <h2 class="section-title"><span class="num">09.</span><span class="hl">Referência de API (endpoints)</span></h2>
+            <div class="table-wrap"><table>
+                <tr><th>Endpoint</th><th>Descrição</th></tr>
+                <tr><td><code>GET /api/v1/networks</code></td><td>Catálogo de redes (realm_id, status, playable).</td></tr>
+                <tr><td><code>GET /api/v1/networks/{realm}/health</code></td><td>Health da rede (IBD, progresso, playable).</td></tr>
+                <tr><td><code>GET /api/v1/networks/{realm}/global-events</code></td><td>Evento global ativo + definições dos 4 eventos.</td></tr>
+                <tr><td><code>WS /ws/v1/game/{realm}</code></td><td>WebSocket do jogo (game_start, transaction_received, block_mined, etc.).</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/player/sync</code></td><td>Sincroniza estado do jogador (saldo, hardware, combo).</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/score/submit</code></td><td>Envia score (saldo) para o leaderboard.</td></tr>
+                <tr><td><code>GET /api/v1/networks/{realm}/leaderboard</code></td><td>Top 10 global + por pool.</td></tr>
+                <tr><td><code>GET /api/v1/networks/{realm}/energy/status</code></td><td>Estado de energia (current, max, next_refill).</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/energy/spend</code></td><td>Consome 1 energia (idempotente por round_id).</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/energy/buy</code></td><td>Compra 3 energia por 2.000 sats.</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/crates/open</code></td><td>Abre crate (5.000 sats ou crate grátis).</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/crates/claim-free</code></td><td>Claim de crate grátis (1 a cada 10 blocos).</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/market/list</code></td><td>Lista power-up para venda (mín 100 sats).</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/market/buy</code></td><td>Compra listing (preço + 5% de taxa).</td></tr>
+                <tr><td><code>GET /api/v1/networks/{realm}/market/browse</code></td><td>Lista listings ativos.</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/chat/send</code></td><td>Envia mensagem de chat (rate limit 5/min, 100 chars).</td></tr>
+                <tr><td><code>GET /api/v1/networks/{realm}/chat/history</code></td><td>Últimas 20 mensagens.</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/friends/add</code></td><td>Adiciona amigo.</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/friends/remove</code></td><td>Remove amigo.</td></tr>
+                <tr><td><code>GET /api/v1/networks/{realm}/friends/{username}</code></td><td>Lista amigos com status online + bônus co-op.</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/missions/update</code></td><td>Atualiza progresso de missões.</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/missions/claim/{id}</code></td><td>Claim de missão (credita sats + achievement).</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/sprint/start</code></td><td>Inicia sprint (gera 4 palavras).</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/sprint/submit</code></td><td>Envia resultado do sprint (valida time ≤ 35s).</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/decoder/start</code></td><td>Inicia decoder (TXID truncado + dica).</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/decoder/submit</code></td><td>Envia resposta do decoder (+5.000 sats + power-up).</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/staking/start</code></td><td>Inicia stake (1h/6h/24h).</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/staking/cancel</code></td><td>Cancela stake (penalty 10%).</td></tr>
+                <tr><td><code>GET /api/v1/networks/{realm}/staking/status</code></td><td>Estado do stake atual.</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/skill/upgrade</code></td><td>Upgrade de skill tree (1 ponto/nó).</td></tr>
+                <tr><td><code>GET /api/v1/networks/{realm}/skill/tree</code></td><td>Estado da skill tree.</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/season/buy-premium</code></td><td>Compra season premium (50.000 sats).</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/season/claim/{level}</code></td><td>Claim de recompensa de season.</td></tr>
+                <tr><td><code>GET /api/v1/networks/{realm}/season/status</code></td><td>Estado da season (nível, XP, premium).</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/cards/{username}/credit</code></td><td>Credita card do bloco.</td></tr>
+                <tr><td><code>GET /api/v1/networks/{realm}/cards/{username}</code></td><td>Lista cards do jogador.</td></tr>
+            </table></div>
+        </section>
+
+        <footer>
+            <div class="foot-brand">MEMPOOL MINER // WIKI</div>
+            <p>Documentação gerada por auditoria completa do código (frontend + backend). Valores extraídos de <code>game.js</code>, <code>engine.py</code>, <code>ingestor.py</code>, <code>main.py</code>, <code>season_pass.py</code>, <code>global_events.py</code>, <code>config.py</code>, <code>storage.py</code>. Estado: pós-Fases 1–8 + auditoria final. Data: 2026-08-23.</p>
+        </footer>
+    </main>
+
+    <script>
+        // ===== MENU LATERAL =====
+        const btnMenu = document.getElementById('btn-menu');
+        const sideMenu = document.getElementById('side-menu');
+        const menuClose = document.getElementById('menu-close');
+
+        function toggleMenu(open) {
+            const isOpen = open !== undefined ? open : !sideMenu.classList.contains('open');
+            sideMenu.classList.toggle('open', isOpen);
+            document.body.classList.toggle('menu-open', isOpen);
+            btnMenu.classList.toggle('active', isOpen);
+            btnMenu.setAttribute('aria-expanded', String(isOpen));
+        }
+        btnMenu.addEventListener('click', () => toggleMenu());
+        menuClose.addEventListener('click', () => toggleMenu(false));
+        // Fecha o menu ao clicar em um link (mobile)
+        sideMenu.querySelectorAll('a').forEach(a => a.addEventListener('click', () => {
+            if (window.innerWidth <= 900) toggleMenu(false);
+        }));
+        // Abre por padrão em telas grandes
+        if (window.innerWidth > 900) toggleMenu(true);
+
+        // ===== SCROLL SPY (destaca a seção ativa no menu) =====
+        const menuLinks = Array.from(sideMenu.querySelectorAll('a[href^="#"]'));
+        const sections = menuLinks.map(a => document.querySelector(a.getAttribute('href'))).filter(Boolean);
+        function updateScrollSpy() {
+            const pos = window.scrollY + 100;
+            let active = sections[0];
+            for (const s of sections) {
+                if (s.offsetTop <= pos) active = s;
+            }
+            menuLinks.forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + active.id));
+        }
+        window.addEventListener('scroll', updateScrollSpy, { passive: true });
+        updateScrollSpy();
+
+        // ===== BUSCA =====
+        const searchInput = document.getElementById('wiki-search');
+        const noResults = document.getElementById('no-results');
+        const allBlocks = Array.from(document.querySelectorAll('.section-block'));
+        let searchTimer = null;
+
+        function doSearch() {
+            const q = searchInput.value.trim().toLowerCase();
+            if (!q) {
+                allBlocks.forEach(b => b.style.display = '');
+                noResults.classList.remove('show');
+                return;
+            }
+            let anyVisible = false;
+            allBlocks.forEach(b => {
+                const text = b.textContent.toLowerCase();
+                const match = text.includes(q);
+                b.style.display = match ? '' : 'none';
+                if (match) anyVisible = true;
+            });
+            noResults.classList.toggle('show', !anyVisible);
+        }
+        searchInput.addEventListener('input', () => {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(doSearch, 150);
+        });
+        // Atalho: "/" foca a busca
+        document.addEventListener('keydown', (e) => {
+            if (e.key === '/' && document.activeElement !== searchInput) {
+                e.preventDefault();
+                searchInput.focus();
+            }
+            if (e.key === 'Escape' && document.activeElement === searchInput) {
+                searchInput.value = '';
+                doSearch();
+                searchInput.blur();
+            }
+        });
+    </script>
 </body>
 </html>

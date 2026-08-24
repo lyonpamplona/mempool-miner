@@ -97,6 +97,62 @@ else
     ) &
 fi
 
+# ============================================
+# Faucet contínuo (regtest)
+# Mantém a mempool populada e o tip fresco:
+#   - A cada FAUCET_INTERVAL (20s): envia FAUCET_TXS (12) transações
+#   - A cada BLOCK_INTERVAL (90s): minera 1 bloco (evita IBD, emite block_mined)
+# Configuração via variáveis de ambiente (docker-compose).
+# ============================================
+FAUCET_INTERVAL="${FAUCET_INTERVAL:-20}"
+FAUCET_TXS="${FAUCET_TXS:-12}"
+BLOCK_INTERVAL="${BLOCK_INTERVAL:-90}"
+
+echo "[entrypoint] Iniciando faucet contínuo (txs a cada ${FAUCET_INTERVAL}s, bloco a cada ${BLOCK_INTERVAL}s)..."
+(
+    FAUCET_ADDR=""
+    last_faucet=0
+    last_block=0
+    while true; do
+        # Aguarda RPC ficar disponível
+        if ! rpc getblockcount >/dev/null 2>&1; then
+            sleep 10
+            continue
+        fi
+        # Garante que a wallet existe
+        if ! rpc listwallets 2>/dev/null | grep -q '"miner"'; then
+            rpc createwallet miner 2>/dev/null
+            rpc loadwallet miner 2>/dev/null || true
+        fi
+        NOW=$(date +%s)
+        # Faucet de transações (mantém a mempool populada)
+        if [ $((NOW - last_faucet)) -ge "$FAUCET_INTERVAL" ]; then
+            if [ -z "$FAUCET_ADDR" ]; then
+                FAUCET_ADDR=$(rpc -rpcwallet=miner getnewaddress 2>/dev/null)
+            fi
+            if [ -n "$FAUCET_ADDR" ]; then
+                for i in $(seq 1 "$FAUCET_TXS"); do
+                    rpc -rpcwallet=miner sendtoaddress "$FAUCET_ADDR" 0.001 "" "" false >/dev/null 2>&1
+                done
+                echo "[faucet] ${FAUCET_TXS} transações enviadas (mempool populada)"
+            fi
+            last_faucet=$NOW
+        fi
+        # Gerador de blocos (mantém o tip fresco, evita IBD, emite block_mined)
+        if [ $((NOW - last_block)) -ge "$BLOCK_INTERVAL" ]; then
+            BLOCK_ADDR=$(rpc -rpcwallet=miner getnewaddress 2>/dev/null)
+            if [ -n "$BLOCK_ADDR" ]; then
+                rpc -rpcwallet=miner generatetoaddress 1 "$BLOCK_ADDR" >/dev/null 2>&1
+                echo "[faucet] 1 bloco minerado (tip fresco)"
+            fi
+            last_block=$NOW
+        fi
+        sleep 10
+    done
+) &
+FAUCET_PID=$!
+echo "[entrypoint] Faucet iniciado (PID $FAUCET_PID)"
+
 # Mantém o container vivo aguardando o bitcoind (child process)
 echo "[entrypoint] Aguardando bitcoind..."
 wait "$BITCOIND_PID"

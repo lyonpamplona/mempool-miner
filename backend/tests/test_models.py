@@ -3,15 +3,15 @@
 import asyncio
 import json
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
+import app.main as main_module
 import httpx
 import pytest
+from app.main import MAX_SCORE, ScoreSubmit, app
 from fastapi import HTTPException
 from pydantic import ValidationError
-
-import app.main as main_module
-from app.main import MAX_SCORE, ScoreSubmit, app
 
 
 def test_score_submit_normalizes_username() -> None:
@@ -98,6 +98,23 @@ def test_sprint_submit_rejects_impossible_result() -> None:
             username="Miner",
             words_found=5,
             time_taken=10,
+        )
+
+
+def test_sprint_submit_accepts_only_base_time_plus_max_skill_bonus() -> None:
+    """Mining pode ampliar o Sprint em no máximo cinco segundos."""
+    accepted = main_module.SprintSubmitRequest(
+        username="Miner",
+        words_found=4,
+        time_taken=35.0,
+    )
+    assert accepted.time_taken == 35.0
+
+    with pytest.raises(ValidationError):
+        main_module.SprintSubmitRequest(
+            username="Miner",
+            words_found=4,
+            time_taken=35.001,
         )
 
 
@@ -348,6 +365,7 @@ def test_public_event_removes_runtime_and_source_identity() -> None:
         "realm_id",
         "epoch",
         "word",
+        "txid",
         "tx_stub",
         "is_golden",
         "is_high_fee",
@@ -363,7 +381,6 @@ def test_public_event_removes_runtime_and_source_identity() -> None:
         "_runtime_token",
         "queue_depth",
         "rpc_url",
-        "txid",
         "mempool_count",
         "game_mode",
     }.isdisjoint(public_event)
@@ -492,8 +509,8 @@ async def test_ws_sender_filters_each_redis_message() -> None:
         """Fornece um evento pela fila usada pelo relay persistente."""
 
         def __init__(self) -> None:
-            self.queue = asyncio.Queue()
-            self.queue.put_nowait(
+            self._queue = asyncio.Queue()
+            self._queue.put_nowait(
                 json.dumps(
                     {
                         "schema_version": 2,
@@ -512,6 +529,13 @@ async def test_ws_sender_filters_each_redis_message() -> None:
                     }
                 )
             )
+
+        def add_queue(self) -> asyncio.Queue:
+            """Retorna a fila única do relay fake (contrato do EventRelay)."""
+            return self._queue
+
+        def remove_queue(self, queue: asyncio.Queue) -> None:
+            """No-op — o relay fake não gerencia múltiplas filas."""
 
     websocket = MagicMock()
     websocket.send_text = AsyncMock(side_effect=[None, RuntimeError("closed")])
@@ -556,11 +580,15 @@ async def test_public_websocket_handshake_remains_compatible(
         async def subscribe(self, _channel: str) -> None:
             """Simula a assinatura Redis sem I/O externo."""
 
-        async def unsubscribe(self, _channel: str) -> None:
-            """Simula a remoção da assinatura."""
+        async def unsubscribe(self, *_args: Any, **_kwargs: Any) -> None:
+            """Simula a remoção da assinatura (compatível com EventRelay.stop)."""
 
         async def aclose(self) -> None:
             """Simula o fechamento do Pub/Sub."""
+
+        async def get_message(self, **_kwargs: Any) -> None:
+            """Sem mensagens — o listener fica ocioso até ser cancelado."""
+            await asyncio.sleep(1)
 
         async def listen(self):
             """Espera indefinidamente até o cancelamento pelo servidor."""
