@@ -34,9 +34,9 @@ Na stack local, o portal usa um serviço opcional separado do jogo:
 docker compose --profile docs up -d --build docs
 ```
 
-- portal: `http://localhost:8020/`;
-- API pública: `http://localhost:8020/api/`;
-- apresentação: `http://localhost:8020/apresentacao/`.
+- portal: `http://localhost:8010/`;
+- API pública: `http://localhost:8010/api/`;
+- apresentação: `http://localhost:8010/apresentacao/`.
 
 Os SVGs em [assets](assets/) possuem título, descrição e alternativa sem
 movimento para usuários com preferência de animação reduzida.
