@@ -220,7 +220,7 @@ def test_service_worker_cache_version_tracks_frontend_fixes() -> None:
     """O navegador não pode servir assets anteriores às correções publicadas."""
     service_worker = SERVICE_WORKER.read_text(encoding="utf-8")
 
-    assert "const CACHE_VERSION = 'v42';" in service_worker
+    assert "const CACHE_VERSION = 'v53';" in service_worker
 
 
 def test_ui_uses_local_svg_icons_instead_of_emoji_glyphs() -> None:
@@ -888,7 +888,9 @@ def test_boss_and_sprint_respect_modal_lifecycle_and_skill_time() -> None:
     assert "result-modal" in boss
     assert "classList.contains('active')" in boss
     assert "networkTimeLimit = bossTimer + skillTimeBonus;" in javascript
-    assert "sprintTimeLimit = data.time_limit + skillTimeBonus;" in javascript
+    # Fase 4.3: cap do sprintTimeLimit em SPRINT_TIME_LIMIT + SPRINT_MAX_SKILL_TIME_BONUS
+    assert "SPRINT_TIME_LIMIT + SPRINT_MAX_SKILL_TIME_BONUS" in javascript
+    assert "sprintTimeLimit = Math.min(" in javascript
     assert "if (sprintRoundActive)" in block_mined
     sprint_branch = block_mined.split("if (sprintRoundActive)", 1)[1].split(
         "else if (isPlaying)", 1
@@ -995,7 +997,8 @@ def test_external_text_is_not_interpolated_raw_into_frontend_html() -> None:
 
     assert "marketBrowseEl.innerHTML = html" not in market
     assert "${listing.listing_id}" not in market
-    assert ".textContent = `Vendedor: ${listing.seller}`;" in market
+    # Fase B4/C2: texto do vendedor usa ternário (seu listing vs. vendedor)
+    assert "seller.textContent = isOwn ? 'Seu listing' : `Vendedor: ${listing.seller}`;" in market
     assert "buyButton.dataset.listingId = String(listing.listing_id);" in market
     assert "select.innerHTML +=" not in dropdown
     assert "option.textContent =" in dropdown
@@ -1122,4 +1125,166 @@ def test_ultrawide_breakpoint_scales_fixed_pixel_controls_and_labels() -> None:
     assert ".chat-emoji-btn" in ultrawide
     assert "min-height: 44px;" in ultrawide
     assert "min-height: 52px;" in ultrawide
+
+
+# ==========================================================================
+# Fase 4 — Consistência mecânica (regressão)
+# ==========================================================================
+
+
+def test_boss_round_consumes_energy_like_normal_rounds() -> None:
+    """Fase 4.1: o boss block consome 1 energia (decisão: consistência).
+
+    Antes da correção, buildBossPlayableBlock era chamado diretamente e a
+    rodada do boss era gratuita. Agora um gate (requestBossPlayableBlockBuild)
+    reserva o spend, chama spendEnergy e trata os resultados com refund.
+    """
+    javascript = GAME_JS.read_text(encoding="utf-8")
+
+    # O gate existe e é chamado no fluxo do boss
+    assert "async function requestBossPlayableBlockBuild()" in javascript
+    assert "void requestBossPlayableBlockBuild();" in javascript
+
+    # O gate consome energia (mesmo mecanismo das rodadas normais)
+    gate = javascript.split("async function requestBossPlayableBlockBuild()", 1)[1].split(
+        "\n}", 1
+    )[0]
+    assert "reservePendingEnergySpend(" in gate
+    assert "await spendEnergy(" in gate
+    assert "queueEnergyRefund(" in gate
+
+    # Sem energia → boss descartado (resetBossState)
+    assert "resetBossState();" in gate
+
+    # Fase 4.1 (auditoria): no descarte do boss, o txBuffer é limpo — as 10
+    # palavras do boss não valem para a rodada normal (que exige 6). Sem isso,
+    # o jogador ficava travado até o próximo block_mined.
+    assert "txBuffer = [];" in gate
+
+    # buildBossPlayableBlock retorna true/false (o gate depende disso)
+    build = javascript.split("function buildBossPlayableBlock()", 1)[1].split(
+        "\n}", 1
+    )[0]
+    assert "return false;" in build
+    assert "return true;" in build
+
+
+def test_boss_grid_size_read_from_backend() -> None:
+    """Fase 4.2: o frontend lê data.boss_grid_size em vez de hardcodear 15."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+
+    # Estado inicial
+    assert "let bossGridSize = 15;" in javascript
+    # Lido do evento boss_block
+    assert "bossGridSize = data.boss_grid_size || 15;" in javascript
+    # Usado no build da grade (não mais hardcode 15)
+    assert "currentGridSize = bossGridSize;" in javascript
+    # O hardcode antigo foi removido do buildBossPlayableBlock
+    build = javascript.split("function buildBossPlayableBlock()", 1)[1].split(
+        "\n}", 1
+    )[0]
+    assert "currentGridSize = 15;" not in build
+
+
+def test_collection_bonus_applied_to_rewards() -> None:
+    """Fase 4.6: o bônus de coleção de cards é aplicado nas recompensas.
+
+    O backend calcula collection_bonus em _get_player_cards; o frontend soma
+    o value de cada raridade completa em getCollectionBonus() e aplica no
+    applyAchievementBonus (mesmo ponto do bônus de conquistas).
+    """
+    javascript = GAME_JS.read_text(encoding="utf-8")
+
+    # Helper existe e lê collection_bonus
+    assert "function getCollectionBonus()" in javascript
+    helper = javascript.split("function getCollectionBonus()", 1)[1].split(
+        "\n}", 1
+    )[0]
+    assert "cardsData.collection_bonus" in helper
+    assert "entry.complete" in helper
+
+    # Integrado ao applyAchievementBonus
+    apply = javascript.split("function applyAchievementBonus(points)", 1)[1].split(
+        "\n}", 1
+    )[0]
+    assert "getCollectionBonus()" in apply
+
+
+# ---------------------------------------------------------------------------
+# Fase 5: economia/progressão — saldo no backend, streak sem erro, rollover
+# ---------------------------------------------------------------------------
+
+
+def test_balance_earn_spend_helpers_exist() -> None:
+    """Fase 5.1/5.3: o frontend tem earnBalance/spendBalance (backend é a
+    fonte de verdade do saldo)."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+
+    assert "async function earnBalance(" in javascript
+    assert "async function spendBalance(" in javascript
+
+    # earnBalance chama o endpoint /earn
+    earn = javascript.split("async function earnBalance(", 1)[1].split("\n}", 1)[0]
+    assert "/earn" in earn
+
+    # spendBalance chama o endpoint /spend e retorna null em falha
+    spend = javascript.split("async function spendBalance(", 1)[1].split("\n}", 1)[0]
+    assert "/spend" in spend
+
+
+def test_purchases_debit_backend_before_local_apply() -> None:
+    """Fase 5.1: as compras (hint/hardware/lightning) só debitam localmente
+    se o backend confirmar o débito (sem compra de graça)."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+
+    for fn in ("buyHint", "buyHardware", "buyLightning"):
+        body = javascript.split(f"function {fn}()", 1)[1].split("\n}", 1)[0]
+        assert "spendBalance(" in body, f"{fn} não valida o débito no backend"
+        # O saldo local é espelhado do backend (confirmed) após a confirmação
+        assert "balanceSatoshis = confirmed;" in body, f"{fn} não espelha o saldo do backend"
+        # Recusa do backend aborta a compra
+        assert "confirmed === null" in body, f"{fn} não trata a recusa do backend"
+
+
+def test_rbf_and_slashing_debit_backend() -> None:
+    """Fase 5.1: RBF e slashing debitam no backend antes de aplicar localmente."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+
+    # RBF: o handler é async e chama spendBalance
+    assert "const rbfHandler = async () =>" in javascript
+    rbf_block = javascript.split("const rbfHandler = async () =>", 1)[1].split(
+        "rbfBtn.addEventListener", 1
+    )[0]
+    assert "spendBalance(" in rbf_block
+
+    # Slashing: penalidade debitada no backend (txId spend-slash-)
+    assert "spendBalance(penalty, txId)" in javascript
+    assert "spend-slash-" in javascript
+
+
+def test_words_without_error_streak_tracked() -> None:
+    """Fase 5.4: a streak de palavras sem erro é rastreada e enviada ao
+    backend (reseta a cada erro)."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+
+    assert "let wordsWithoutErrorStreak = 0;" in javascript
+    # Incrementa ao encontrar palavra
+    track = javascript.split("function trackWordFound(", 1)[1].split("\n}", 1)[0]
+    assert "wordsWithoutErrorStreak++" in track
+    assert "words_without_error: wordsWithoutErrorStreak" in track
+    # Reseta a cada erro
+    assert "wordsWithoutErrorStreak = 0;" in javascript
+    assert "void pushStats({ words_without_error: 0 });" in javascript
+
+
+def test_season_rollover_ui_shows_claim_period() -> None:
+    """Fase 5.5: a UI da temporada exibe o prazo de claim quando a
+    temporada está encerrada."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+
+    render = javascript.split("function renderSeasonUI()", 1)[1].split("\n}", 1)[0]
+    assert "season_ended" in render
+    assert "claim_period_active" in render
+    assert "claim_deadline" in render
+    assert "para reclamar" in render
 

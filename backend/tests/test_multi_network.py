@@ -132,6 +132,10 @@ async def test_score_uses_selected_realm(monkeypatch: pytest.MonkeyPatch) -> Non
         "network_snapshot",
         AsyncMock(return_value={"playable": True}),
     )
+    # Isola a lógica co-op (Fase 2.3): sem amigos online, bônus = 0.
+    monkeypatch.setattr(
+        main_module, "_calculate_co_op_bonus", AsyncMock(return_value=0.0)
+    )
 
     result = await main_module.submit_score_for_realm(
         "signet", ScoreSubmit(username="Miner", score=7)

@@ -318,6 +318,7 @@ function saveSessionState() {
             hardwareLevel,
             networkTimeBonus,
             roundNumber,
+            roundAttempt,
             isLightningMode,
             lightningBlocksRemaining,
             comboMultiplier,
@@ -360,6 +361,13 @@ function operatorDisplayName() {
 }
 
 let roundNumber = 1;
+/* Fase C1: contador de TENTATIVAS de rodada — incrementa a cada início de
+ * rodada (prepareNextBlock), inclusive após falha. Usado SOMENTE nos tx_ids
+ * de earn para garantir unicidade entre rodadas: antes, o tx_id usava
+ * roundNumber (que só sobe no sucesso), então uma rodada repetida colidia
+ * com o marcador da anterior (TTL 7d) e as palavras não eram creditadas.
+ * roundNumber continua sendo o "número do bloco" p/ halving/decoder/display. */
+let roundAttempt = 0;
 let baseReward = 500;
 let effectiveBaseReward = 500; /* Fase 2: Halving — recompensa ajustada */
 let wordsFoundInBlock = 0;
@@ -369,6 +377,12 @@ let currentRoundEarnings = 0;
 let consecutiveErrors = 0;
 const SLASHING_THRESHOLD = 3;       /* erros consecutivos para disparar slashing */
 const SLASHING_PENALTY = 0.05;      /* 5% do saldo */
+
+/* Fase 5.4: streak de palavras encontradas sem erro (reseta a cada erro).
+ * Diferente de wordsFoundTotal (cumulativo), este é o valor atual da streak.
+ * Persiste entre rodadas (só reseta em erro real), para a missão
+ * "10 palavras sem erro" ser atingível ao longo de várias rodadas. */
+let wordsWithoutErrorStreak = 0;
 
 let networkTimeLimit = 60;
 let networkTimePassed = 0;
@@ -382,6 +396,12 @@ let networkInterval;
 let leaderboardInterval;
 let networkHealthInterval;
 let pendingBuildTimeout;
+/* Fase A3: watchdog de buffer — força reconexão se o buffer ficar parado
+ * por 45s sem completar as 6 palavras (evita travar em "aguardando
+ * transações" após queda de WS ou perda de eventos). */
+let txBufferWatchdog;
+let lastTxActivityTime = 0;
+const TX_BUFFER_STALL_MS = 45000;
 let energyGatePending = false;
 let lastFoundTime = 0;
 let comboMultiplier = 1;
@@ -1041,6 +1061,8 @@ function teardownSession(reason = 'realm-switch') {
     clearInterval(eventCountdownInterval);
     clearInterval(stakeCountdownInterval);
     clearInterval(stakePollInterval);
+    clearInterval(txBufferWatchdog); /* Fase A3 */
+    txBufferWatchdog = null;
 
     clearTimeout(achievementToastTimeout);
     clearTimeout(rbfTimeout);
@@ -1241,6 +1263,7 @@ let bossRewardMultiplier = 5;
 let bossLoot = 50000;
 let bossWordsRequired = 10;
 let bossTimer = 45;
+let bossGridSize = 15; /* Fase 4.2: lido do evento boss_block (data.boss_grid_size) */
 let bossDefeatHandled = false;
 
 /* ==========================================================================
@@ -1372,6 +1395,7 @@ updateConnectivityStatus();
             hardwareLevel = saved.hardwareLevel ?? 1;
             networkTimeBonus = saved.networkTimeBonus ?? 0;
             roundNumber = saved.roundNumber ?? 1;
+            roundAttempt = saved.roundAttempt ?? 0;
             isLightningMode = saved.isLightningMode ?? false;
             lightningBlocksRemaining = saved.lightningBlocksRemaining ?? 0;
             comboMultiplier = saved.comboMultiplier ?? 1;
@@ -1393,7 +1417,11 @@ updateConnectivityStatus();
             announceGameStatus('Restaurando sessão anterior...');
             await startSession(activeRealmId);
         } else {
-            // Sem sessão anterior — mostra modal de tutorial
+            // Sem sessão anterior — mostra modal de auth
+            // Fase 6.10: onboarding sem tutorial — o modal de auth serve como
+            // ponto de entrada, mas não há walkthrough. Isso é aceitável para
+            // um jogo de caça-palavras com UI auto-explicativa (grade + palavras).
+            // TODO: adicionar tutorial interativo em versão futura.
             setModalState(document.getElementById('auth-modal'), true);
         }
     } catch (error) {
@@ -1470,6 +1498,7 @@ async function startSession(realmIdOverride = null) {
         hardwareLevel = 1;
         networkTimeBonus = 0;
         roundNumber = 1;
+        roundAttempt = 0; /* Fase C1: nova contagem de tentativas no realm */
         isLightningMode = false;
         document.body.classList.remove('lightning-theme');
         document.getElementById('ui-balance').innerText = '0';
@@ -1564,7 +1593,8 @@ async function startSession(realmIdOverride = null) {
             'boss_block' /* Boss Battles */,
             'event_preannounce', 'event_started', 'event_ended' /* Fase 8: Eventos Globais */,
             'pvp_challenge', 'pvp_start', 'pvp_score_update', 'pvp_end', 'pvp_timer' /* Fase 3: PvP */,
-            'heartbeat' /* Fase 11: Online Status */
+            'heartbeat' /* Fase 11: Online Status */,
+            'chat_message' /* Fase 9: Chat em Tempo Real */
         ]);
         if (scopedActions.has(data.action) && data.realm_id !== activeRealmId) {
             if (data.action === 'game_start') socket.close(4001, 'Realm divergente');
@@ -1588,6 +1618,19 @@ async function startSession(realmIdOverride = null) {
             }
             announceGameStatus(`${selectedNetwork.display_name} conectada. Aguardando transações.`);
             prepareNextBlock();
+            /* Fase A2: replay de transações pendentes — o backend reenvia as
+             * transações da epoch atual que ainda não foram consumidas. Isso
+             * evita o estado "aguardando transações" após queda de WS ou
+             * mudança de epoch. O handler de transaction_received deduplica
+             * por `word`, então reenviar é seguro. */
+            if (Array.isArray(data.pending_transactions) && data.pending_transactions.length > 0) {
+                console.log(`Recebendo ${data.pending_transactions.length} transações pendentes (replay).`);
+                for (const pendingTx of data.pending_transactions) {
+                    // Reenvia como transaction_received para reutilizar o handler existente
+                    // (que deduplica por word e respeita isPlaying/isBossActive).
+                    handleTransactionEvent(pendingTx);
+                }
+            }
             void fetchLeaderboard(activeRealmId, generation);
             clearInterval(leaderboardInterval);
             leaderboardInterval = setInterval(
@@ -1631,34 +1674,32 @@ async function startSession(realmIdOverride = null) {
             }
             return;
         }
+        if (data.action === 'chat_message') {
+            /* Fase 9: Chat em Tempo Real — mensagem broadcast via WebSocket.
+             * Dedup: o remetente já adicionou a própria mensagem na resposta
+             * do POST /chat/send (game.js:4473). Comparamos por
+             * username+message+timestamp para não duplicar. */
+            const already = chatMessages.some(
+                m => m.username === data.username
+                    && m.message === data.message
+                    && m.timestamp === data.timestamp
+            );
+            if (!already) {
+                chatMessages.push({
+                    username: data.username,
+                    message: data.message,
+                    timestamp: data.timestamp,
+                });
+                if (chatMessages.length > CHAT_MAX_MESSAGES) chatMessages.shift();
+                appendChatMessage(
+                    { username: data.username, message: data.message, timestamp: data.timestamp },
+                    true
+                );
+            }
+            return;
+        }
         if (data.action === "transaction_received" && sessionReady && !isPlaying) {
-            if (!isValidTransactionEvent(data)) {
-                console.warn("Evento de transação fora do contrato foi ignorado.");
-                return;
-            }
-            if (activeEpoch && data.epoch && data.epoch !== activeEpoch) {
-                txBuffer = [];
-                activeEpoch = data.epoch;
-            }
-            // Boss Battles: roteia transações para o buffer do boss quando ativo
-            if (isBossActive) {
-                handleBossTransaction(data);
-                return;
-            }
-            if (txBuffer.length < WORDS_PER_BLOCK) {
-                if (!txBuffer.find(t => t.word === data.word)) {
-                    txBuffer.push({ word: data.word, isHighFee: data.is_high_fee, isGolden: data.is_golden, vsize: data.vsize, isMev: data.is_mev, multiplier: data.multiplier });
-                    const loadingText = document.getElementById('tx-loading-bank');
-                    if (loadingText) loadingText.innerText = `Aguardando transações (${txBuffer.length}/${WORDS_PER_BLOCK})...`;
-                    if (txBuffer.length === WORDS_PER_BLOCK && !isTransitioning) {
-                        cancelSessionTimeout(pendingBuildTimeout);
-                        pendingBuildTimeout = scheduleForSession(() => {
-                            pendingBuildTimeout = undefined;
-                            void requestPlayableBlockBuild();
-                        }, 500, generation);
-                    }
-                }
-            }
+            handleTransactionEvent(data);
         }
         else if (data.action === "block_mined") {
             /* Fase 3 (pontas soltas): dedup — ignora block_mined com o mesmo
@@ -1763,7 +1804,9 @@ async function startSession(realmIdOverride = null) {
             return;
         }
         if (data.action === 'pvp_score_update') {
-            // Atualiza progresso PvP em tempo real
+            /* Fase 6.12: handler vazio — PvP ainda não implementado.
+             * O evento é reconhecido para evitar warnings no console,
+             * mas não há lógica de jogo PvP ativa. */
             return;
         }
         if (data.action === 'pvp_end') {
@@ -1771,7 +1814,7 @@ async function startSession(realmIdOverride = null) {
             return;
         }
         if (data.action === 'pvp_timer') {
-            // Atualiza timer PvP
+            /* Fase 6.12: handler vazio — PvP ainda não implementado. */
             return;
         }
 
@@ -1988,9 +2031,14 @@ async function submitScore() {
 /**
  * Fase 3: Sincroniza estado do jogador com o backend.
  *
+ * Fase 5.3: o backend é a fonte de verdade do saldo (earn/spend via
+ * /earn e /spend). O sync envia o saldo local, mas o backend só o aplica
+ * quando o saldo armazenado é 0 (migração do primeiro uso) — um saldo
+ * local inflado (earn em falha de rede) ou stale (duas abas) NÃO
+ * sobrescreve o saldo do backend.
+ *
  * Fase 2 (pontas soltas): retry com backoff — o sync é a ponte entre o
- * saldo local (localStorage) e o backend (Redis). Se falhar em silêncio,
- * o backend fica com saldo 0 e as compras retornam "saldo insuficiente".
+ * estado local (hardware/lightning) e o backend (Redis).
  */
 async function syncPlayerState(retries = 2) {
     const realmId = activeRealmId;
@@ -2033,13 +2081,107 @@ async function syncPlayerState(retries = 2) {
 }
 
 /**
+ * Fase 5.1/5.3: Credita sats ao saldo no backend (fonte de verdade).
+ *
+ * O backend é a fonte de verdade do saldo: o frontend envia o crédito
+ * (recompensa da rodada, loot do boss, bônus MEV) e espelha o saldo
+ * retornado. Idempotente por tx_id — reenviar o mesmo tx_id não credita
+ * em dobro (retry após falha de rede é seguro).
+ *
+ * @param {number} amount - Sats a creditar.
+ * @param {string} txId - Identificador único da transação (UUID).
+ * @returns {Promise<number|null>} Novo saldo do backend, ou null em falha.
+ */
+async function earnBalance(amount, txId) {
+    if (!activeRealmId || !minerName || amount <= 0) return null;
+    /* Fase C4: retry com backoff — o tx_id é idempotente (marcador no
+     * backend), então reenviar em falha de rede/5xx NÃO credita em dobro.
+     * Antes era fire-and-forget: uma falha de rede perdia o crédito
+     * (saldo local inflado, backend sem o valor). */
+    const MAX_ATTEMPTS = 3;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        const controller = new AbortController();
+        requestControllers.add(controller);
+        try {
+            const response = await fetch(
+                playerStateUrl(activeRealmId, minerName) + '/earn',
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: minerName, amount, tx_id: txId }),
+                    signal: controller.signal,
+                }
+            );
+            if (!response.ok) {
+                // 4xx (exceto 429) não tem retry — erro de validação/saldo
+                if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+                    return null;
+                }
+                if (attempt === MAX_ATTEMPTS) return null;
+            } else {
+                const data = await response.json();
+                return data.balance ?? null;
+            }
+        } catch (error) {
+            if (error.name !== 'AbortError' && attempt === MAX_ATTEMPTS) {
+                console.warn('Erro ao creditar saldo no backend (tentativas esgotadas).', error);
+            }
+        } finally {
+            requestControllers.delete(controller);
+        }
+        // Backoff exponencial: 500ms, 1000ms
+        await new Promise(r => setTimeout(r, 500 * attempt));
+    }
+    return null;
+}
+
+/**
+ * Fase 5.1/5.3: Debita sats do saldo no backend (fonte de verdade).
+ *
+ * O backend valida o saldo antes de aceitar o débito — sem isso, o
+ * frontend poderia "comprar" com saldo local que não existe no backend
+ * (compra de graça). Idempotente por tx_id.
+ *
+ * @param {number} amount - Sats a debitar.
+ * @param {string} txId - Identificador único da transação (UUID).
+ * @returns {Promise<number|null>} Novo saldo do backend, ou null em falha
+ *   (inclui saldo insuficiente — o caller deve reverter a compra local).
+ */
+async function spendBalance(amount, txId) {
+    if (!activeRealmId || !minerName || amount <= 0) return null;
+    const controller = new AbortController();
+    requestControllers.add(controller);
+    try {
+        const response = await fetch(
+            playerStateUrl(activeRealmId, minerName) + '/spend',
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: minerName, amount, tx_id: txId }),
+                signal: controller.signal,
+            }
+        );
+        if (!response.ok) return null;
+        const data = await response.json();
+        return data.balance ?? null;
+    } catch (error) {
+        if (error.name !== 'AbortError') {
+            console.warn('Erro ao debitar saldo no backend.', error);
+        }
+        return null;
+    } finally {
+        requestControllers.delete(controller);
+    }
+}
+
+/**
  * Fase 3: Carrega estado do jogador do backend ao iniciar sessão.
  *
- * Reconciliação de saldo (Fase 2 — pontas soltas):
- * - Backend é a fonte de verdade. Se o backend tem saldo > 0, espelha no local.
- * - Se o backend está 0 mas o local tem saldo > 0 (ex.: primeiro uso, ou o
- *   backend perdeu o estado), empurra o valor local para o backend via
- *   syncPlayerState() para que compras funcionem.
+ * Fase 5.3: backend é a fonte de verdade do saldo — o frontend ESPELHA o
+ * saldo do backend (não mais "quem tiver mais, vence"). Se o backend está
+ * 0 mas o local tem saldo > 0 (ex.: primeiro uso, ou o backend perdeu o
+ * estado), empurra o valor local para o backend via syncPlayerState() para
+ * que compras funcionem.
  */
 async function loadPlayerState(realmId, username) {
     if (!realmId || !username) return;
@@ -2049,13 +2191,16 @@ async function loadPlayerState(realmId, username) {
         if (!response.ok) return;
         const state = await response.json();
         if (!isSessionContextCurrent(sessionContext)) return;
-        // Reconciliação: backend é a fonte de verdade, mas NUNCA apaga um
-        // saldo local maior (ex.: backend zerou/expirou, local tem 10.720).
-        // Toma o máximo dos dois lados e empurra o local para o backend
-        // quando o local é maior, para que compras funcionem.
-        if (state.balance > balanceSatoshis) {
+        // Fase 5.3: espelha o saldo do backend (fonte de verdade).
+        // O local só é empurrado para o backend quando o backend está 0
+        // (primeiro uso / migração) — nunca quando o backend tem saldo,
+        // para não sobrescrever o valor da fonte de verdade.
+        // Fase A1: espelha SEMPRE quando o backend tem saldo > 0 (antes:
+        // só quando backend > local, o que impedia o débito de energia
+        // de atualizar o HUD — "cold wallet não desconta").
+        if (state.balance > 0) {
             balanceSatoshis = state.balance;
-        } else if (balanceSatoshis > state.balance) {
+        } else if (balanceSatoshis > 0 && state.balance === 0) {
             void syncPlayerState();
         }
         if (state.hardware_level > 1) {
@@ -2067,6 +2212,8 @@ async function loadPlayerState(realmId, username) {
             lightningBlocksRemaining = state.lightning_blocks_remaining;
             document.body.classList.add('lightning-theme');
         }
+        /* Season Pass: bônus de recompensa temporário (+5%/+10%) */
+        seasonRewardBonus = state.reward_bonus_percent || 0;
         document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString();
         document.getElementById('ui-hw').innerText = hardwareNames[hardwareLevel - 1];
         saveSessionState(); /* Fase 1: salva após carregar estado */
@@ -2106,85 +2253,189 @@ function updateStoreUI() {
 
 /**
  * Compra e aplica uma dica à primeira palavra ainda não encontrada.
+ *
+ * Fase 5.1: o débito é validado no backend (fonte de verdade do saldo).
+ * A dica só é aplicada localmente se o backend confirmar o débito — sem
+ * isso, o jogador poderia "comprar" com saldo local que não existe no
+ * backend (compra de graça).
+ *
+ * Fase 5 (auditoria): trava de "em andamento" — dois cliques no mesmo
+ * milissegundo gerariam o mesmo tx_id e o 2º spend seria tratado como
+ * idempotente (confirmado) → 2ª dica grátis.
  */
-function buyHint() {
-    /* Fase 7: usa preço com desconto de conquistas/skill tree */
-    const price = getHintPrice();
-    if (balanceSatoshis >= price && isPlaying) {
+let hintPurchaseInFlight = false;
+async function buyHint() {
+    if (hintPurchaseInFlight) return;
+    hintPurchaseInFlight = true;
+    try {
+        /* Fase 7: usa preço com desconto de conquistas/skill tree */
+        const price = getHintPrice();
+        if (balanceSatoshis < price || !isPlaying) return;
         const unfound = blockWords.find(w => !w.found && !w.hinted);
-        if (unfound) {
-            balanceSatoshis -= price; document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString(); playSound('buy');
-            unfound.hinted = true;
-            grid[unfound.startY][unfound.startX].element.classList.add('hint-glow');
-            updateStoreUI(); submitScore();
-            saveSessionState(); /* Fase 1: salva após compra de dica */
-            // Fase 3: Sincroniza estado do jogador
-            void syncPlayerState();
-        }
+        if (!unfound) return;
+        const txId = `spend-hint-${activeRealmId}-${roundNumber}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const confirmed = await spendBalance(price, txId);
+        if (confirmed === null) return; /* backend recusou (saldo insuficiente/falha) */
+        /* Backend confirmou o débito — aplica a dica e espelha o saldo */
+        balanceSatoshis = confirmed;
+        document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString();
+        playSound('buy');
+        unfound.hinted = true;
+        grid[unfound.startY][unfound.startX].element.classList.add('hint-glow');
+        updateStoreUI(); submitScore();
+        saveSessionState(); /* Fase 1: salva após compra de dica */
+    } finally {
+        hintPurchaseInFlight = false;
     }
 }
 
 /**
  * Compra o próximo nível de hardware e amplia o tempo de rodada.
+ *
+ * Fase 5.1: o débito é validado no backend (fonte de verdade do saldo).
+ * O upgrade só é aplicado localmente se o backend confirmar o débito.
  */
-function buyHardware() {
-    if (hardwareLevel < hardwareNames.length) {
-        const nextPrice = hardwarePrices[hardwareLevel - 1];
-        if (balanceSatoshis < nextPrice) return;
-        balanceSatoshis -= nextPrice; document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString(); playSound('buy');
-        networkTimeBonus += 10;
-        if(isPlaying && !isLightningMode) {
-            networkTimeLimit += 10;
-            /* Fase 7: estende o endTime do timer por timestamp — sem isso,
-             * o +10s do hardware não valeria na rodada em andamento. */
-            raceEndTime += 10 * 1000;
-            updateRaceLimitLabel();
-        }
-        document.getElementById('ui-hw').innerText = hardwareNames[hardwareLevel];
-        hardwareLevel++; updateStoreUI(); submitScore();
-        saveSessionState(); /* Fase 1: salva após compra de hardware */
-        // Fase 3: Sincroniza estado do jogador
-        void syncPlayerState();
+async function buyHardware() {
+    if (hardwareLevel >= hardwareNames.length) return;
+    const nextPrice = hardwarePrices[hardwareLevel - 1];
+    if (balanceSatoshis < nextPrice) return;
+    const txId = `spend-hw-${activeRealmId}-${hardwareLevel}-${Date.now()}`;
+    const confirmed = await spendBalance(nextPrice, txId);
+    if (confirmed === null) return; /* backend recusou */
+    /* Backend confirmou o débito — aplica o upgrade e espelha o saldo */
+    balanceSatoshis = confirmed;
+    document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString();
+    playSound('buy');
+    networkTimeBonus += 10;
+    if (isPlaying && !isLightningMode) {
+        networkTimeLimit += 10;
+        /* Fase 7: estende o endTime do timer por timestamp — sem isso,
+         * o +10s do hardware não valeria na rodada em andamento. */
+        raceEndTime += 10 * 1000;
+        updateRaceLimitLabel();
     }
+    document.getElementById('ui-hw').innerText = hardwareNames[hardwareLevel];
+    hardwareLevel++; updateStoreUI(); submitScore();
+    saveSessionState(); /* Fase 1: salva após compra de hardware */
+    // Sincroniza hardware_level no backend (o saldo já foi debitado via /spend)
+    void syncPlayerState();
 }
 
 /**
  * Ativa o upgrade Lightning simulado depois de debitar o saldo fictício.
+ *
+ * Fase 5.1: o débito é validado no backend (fonte de verdade do saldo).
+ * O estado do Lightning só é ativado localmente se o backend confirmar o
+ * débito — sem isso, o jogador poderia ativar o Lightning de graça.
  */
-function buyLightning() {
-    if (balanceSatoshis >= LIGHTNING_PRICE && !isLightningMode && !isPlaying && !isTransitioning) {
-        isTransitioning = true;
-        isLightningMode = true;
-        /* Fase 3: Lightning Channel Liquidity — canal dura LIGHTNING_CHANNEL_DURATION blocos */
-        lightningBlocksRemaining = LIGHTNING_CHANNEL_DURATION;
-        balanceSatoshis -= LIGHTNING_PRICE; document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString(); playSound('buy');
-        document.body.classList.add('lightning-theme');
-        document.getElementById('result-title').style.color = "var(--lightning-blue)";
-        updateStoreUI(); submitScore();
-        saveSessionState(); /* Fase 1: salva após compra de Lightning */
-        // Fase 3: Sincroniza estado do jogador
-        void syncPlayerState();
+async function buyLightning() {
+    if (balanceSatoshis < LIGHTNING_PRICE || isLightningMode || isPlaying || isTransitioning) return;
+    const txId = `spend-ln-${activeRealmId}-${Date.now()}`;
+    const confirmed = await spendBalance(LIGHTNING_PRICE, txId);
+    if (confirmed === null) return; /* backend recusou */
+    /* Backend confirmou o débito — ativa o Lightning e espelha o saldo */
+    isTransitioning = true;
+    isLightningMode = true;
+    /* Fase 3: Lightning Channel Liquidity — canal dura LIGHTNING_CHANNEL_DURATION blocos */
+    lightningBlocksRemaining = LIGHTNING_CHANNEL_DURATION;
+    balanceSatoshis = confirmed;
+    document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString();
+    playSound('buy');
+    document.body.classList.add('lightning-theme');
+    document.getElementById('result-title').style.color = "var(--lightning-blue)";
+    updateStoreUI(); submitScore();
+    saveSessionState(); /* Fase 1: salva após compra de Lightning */
+    // Sincroniza lightning_active no backend (o saldo já foi debitado via /spend)
+    void syncPlayerState();
 
-        const term = document.getElementById('lightning-modal');
-        const termText = document.getElementById('lightning-text');
-        setModalState(term, true);
-        termText.textContent = "> INIT LIGHTNING_DAEMON\n";
+    const term = document.getElementById('lightning-modal');
+    const termText = document.getElementById('lightning-text');
+    setModalState(term, true);
+    termText.textContent = "> INIT LIGHTNING_DAEMON\n";
 
-        const generation = sessionGeneration;
-        scheduleForSession(() => { termText.textContent += "> FINDING PEERS... [OK]\n"; }, 800, generation);
-        scheduleForSession(() => { termText.textContent += "> OPENING CHANNEL (SIMULADO)... [OK]\n"; }, 1600, generation);
+    const generation = sessionGeneration;
+    scheduleForSession(() => { termText.textContent += "> FINDING PEERS... [OK]\n"; }, 800, generation);
+    scheduleForSession(() => { termText.textContent += "> OPENING CHANNEL (SIMULADO)... [OK]\n"; }, 1600, generation);
+    scheduleForSession(() => {
+        termText.textContent += `> ZERO-CONF SIMULADO. LIGHTNING MODE ACTIVE.\n`;
+        termText.textContent += `> CHANNEL CAPACITY: ${LIGHTNING_CHANNEL_DURATION} BLOCKS\n`;
         scheduleForSession(() => {
-            termText.textContent += `> ZERO-CONF SIMULADO. LIGHTNING MODE ACTIVE.\n`;
-            termText.textContent += `> CHANNEL CAPACITY: ${LIGHTNING_CHANNEL_DURATION} BLOCKS\n`;
-            scheduleForSession(() => {
-                setModalState(term, false);
-                isTransitioning = false;
-                if (!isPlaying && txBuffer.length === WORDS_PER_BLOCK) {
-                    void requestPlayableBlockBuild();
-                }
-            }, 1500, generation);
-        }, 2500, generation);
+            setModalState(term, false);
+            isTransitioning = false;
+            if (!isPlaying && txBuffer.length === WORDS_PER_BLOCK) {
+                void requestPlayableBlockBuild();
+            }
+        }, 1500, generation);
+    }, 2500, generation);
+}
+
+/**
+ * Fase A2: processa um evento de transação (ao vivo ou replay).
+ *
+ * Extrai a lógica do handler de `transaction_received` para que o replay de
+ * transações pendentes no `game_start` possa reutilizá-la. Deduplica por
+ * `word`, respeita `isBossActive` e dispara o build quando o buffer completa.
+ */
+function handleTransactionEvent(data) {
+    if (!isValidTransactionEvent(data)) {
+        console.warn("Evento de transação fora do contrato foi ignorado.");
+        return;
     }
+    if (activeEpoch && data.epoch && data.epoch !== activeEpoch) {
+        txBuffer = [];
+        activeEpoch = data.epoch;
+    }
+    // Boss Battles: roteia transações para o buffer do boss quando ativo
+    if (isBossActive) {
+        handleBossTransaction(data);
+        return;
+    }
+    if (txBuffer.length < WORDS_PER_BLOCK) {
+        if (!txBuffer.find(t => t.word === data.word)) {
+            txBuffer.push({ word: data.word, isHighFee: data.is_high_fee, isGolden: data.is_golden, vsize: data.vsize, isMev: data.is_mev, multiplier: data.multiplier });
+            const loadingText = document.getElementById('tx-loading-bank');
+            if (loadingText) loadingText.innerText = `Aguardando transações (${txBuffer.length}/${WORDS_PER_BLOCK})...`;
+            /* Fase A3: registra atividade e reinicia o watchdog de buffer */
+            lastTxActivityTime = Date.now();
+            startTxBufferWatchdog();
+            if (txBuffer.length === WORDS_PER_BLOCK && !isTransitioning) {
+                cancelSessionTimeout(pendingBuildTimeout);
+                pendingBuildTimeout = scheduleForSession(() => {
+                    pendingBuildTimeout = undefined;
+                    void requestPlayableBlockBuild();
+                }, 500, generation);
+            }
+        }
+    }
+}
+
+/**
+ * Fase A3: watchdog de buffer — se o buffer ficar parado por 45s sem
+ * completar as 6 palavras e a rede estiver jogável, força reconexão.
+ * A reconexão dispara o replay de transações pendentes (Fase A2), o que
+ * normalmente completa o buffer e destrava o jogo.
+ */
+function startTxBufferWatchdog() {
+    if (txBufferWatchdog) return; // já ativo
+    txBufferWatchdog = setInterval(() => {
+        // Só age se a sessão está pronta, não está jogando, não está em boss
+        // block e o buffer está incompleto MAS já tem algumas palavras
+        // (parou no meio, não é buffer recém-limpo com 0 palavras).
+        if (!sessionReady || isPlaying || isBossActive || txBuffer.length >= WORDS_PER_BLOCK) {
+            return;
+        }
+        if (txBuffer.length === 0) return; // buffer vazio — ainda não começou
+        const stalled = Date.now() - lastTxActivityTime > TX_BUFFER_STALL_MS;
+        if (stalled) {
+            console.warn(`Watchdog: buffer parado há ${Math.round((Date.now() - lastTxActivityTime) / 1000)}s com ${txBuffer.length}/${WORDS_PER_BLOCK} palavras. Forçando reconexão.`);
+            clearInterval(txBufferWatchdog);
+            txBufferWatchdog = null;
+            // Força reconexão: teardown + startSession
+            const realmToReconnect = activeRealmId;
+            teardownSession('tx-buffer-stall');
+            void startSession(realmToReconnect);
+        }
+    }, 5000); // verifica a cada 5s
 }
 
 /**
@@ -2203,6 +2454,8 @@ function prepareNextBlock() {
     activePointerId = null;
     isPlaying = false; txBuffer = []; wordsFoundInBlock = 0; currentRoundEarnings = 0; networkTimePassed = 0; netProgressEl.style.width = '0%';
     roundSettled = false; /* Fase 6: nova rodada — libera o timer para expirar de novo */
+    lastTxActivityTime = Date.now(); /* Fase A3: reseta o watchdog para a nova rodada */
+    roundAttempt++; /* Fase C1: nova tentativa de rodada — tx_ids de earn ficam únicos */
     netProgressEl.setAttribute('aria-valuenow', '0');
     netProgressEl.setAttribute('aria-valuetext', 'Aguardando uma rodada');
     bankEl.innerHTML = `<div class="loading-state" id="tx-loading-bank">Aguardando transacoes (0/${WORDS_PER_BLOCK})...</div>`;
@@ -2215,7 +2468,7 @@ function prepareNextBlock() {
 /**
  * Mantém a coleta visível quando não há energia para iniciar uma rodada.
  */
-function showPendingEnergyState() {
+function showPendingEnergyState(bossDiscarded = false) {
     isPlaying = false;
     overlayEl.classList.remove('hidden');
     const loaderText = overlayEl.querySelector('#tx-loading');
@@ -2224,9 +2477,14 @@ function showPendingEnergyState() {
     }
     const bankLoadingText = document.getElementById('tx-loading-bank');
     if (bankLoadingText) {
-        bankLoadingText.innerText = `Rodada pronta (${WORDS_PER_BLOCK}/${WORDS_PER_BLOCK}). Aguardando energia...`;
+        /* Fase 4.1: no descarte do boss o buffer foi limpo — a rodada recomeça de 0 */
+        bankLoadingText.innerText = bossDiscarded
+            ? `Boss descartado. Aguardando transações (0/${WORDS_PER_BLOCK})...`
+            : `Rodada pronta (${WORDS_PER_BLOCK}/${WORDS_PER_BLOCK}). Aguardando energia...`;
     }
-    announceGameStatus('Rodada pronta. Aguarde a recarga ou compre energia para continuar.');
+    announceGameStatus(bossDiscarded
+        ? 'Boss descartado. Aguarde a recarga ou compre energia para continuar.'
+        : 'Rodada pronta. Aguarde a recarga ou compre energia para continuar.');
 }
 
 /**
@@ -2308,24 +2566,21 @@ function buildPlayableBlock(buildAttempt = 0) {
     // Análise Dinâmica de Tamanho (vsize)
     const maxVsize = Math.max(...txBuffer.map(t => t.vsize));
 
-    /* Fase 3: Eventos Globais — sobrepõem grade/tempo/recompensa */
+    /* Fase 3: Eventos Globais — sobrepõem grade/tempo.
+       A recompensa do evento é aplicada pelo BACKEND via match.multiplier
+       (game.js:2819), então NÃO se multiplica aqui (evita double-counting). */
     const globalEventType = activeGlobalEvent?.type || null;
-    let globalRewardMultiplier = 1;
     if (globalEventType === 'lightning_storm') {
         currentGridSize = 8; // Condensado
         networkTimeLimit = 20; // Ultra rápido
-        globalRewardMultiplier = 10;
     } else if (globalEventType === 'mempool_flood') {
         currentGridSize = 15; // Grade pesada obrigatória
         networkTimeLimit = 75 + getNetworkTimeBonus();
-        globalRewardMultiplier = 2;
     } else if (globalEventType === 'fee_spike') {
-        globalRewardMultiplier = 3;
         if (isLightningMode) { currentGridSize = 8; networkTimeLimit = 20; }
         else if (maxVsize > 1000) { currentGridSize = 15; networkTimeLimit = 75 + getNetworkTimeBonus(); }
         else { currentGridSize = 12; networkTimeLimit = 60 + getNetworkTimeBonus(); }
     } else if (globalEventType === 'golden_rush') {
-        globalRewardMultiplier = 5;
         if (isLightningMode) { currentGridSize = 8; networkTimeLimit = 20; }
         else if (maxVsize > 1000) { currentGridSize = 15; networkTimeLimit = 75 + getNetworkTimeBonus(); }
         else { currentGridSize = 12; networkTimeLimit = 60 + getNetworkTimeBonus(); }
@@ -2345,7 +2600,9 @@ function buildPlayableBlock(buildAttempt = 0) {
     networkTimeLimit = Math.max(networkTimeLimit - halvingPenalty, 15); // Mínimo 15s
     // Fase 2: Halving Protocol — baseReward decresce 2% a cada 10 blocos
     const halvingRewardFactor = Math.max(1 - (Math.floor(roundNumber / 10) * 0.02), 0.5); // Mínimo 50%
-    effectiveBaseReward = Math.floor(baseReward * halvingRewardFactor * globalRewardMultiplier);
+    // O multiplicador do evento global é aplicado pelo backend (match.multiplier),
+    // então aqui só entra o fator de halving (evita double-counting).
+    effectiveBaseReward = Math.floor(baseReward * halvingRewardFactor);
 
     configureGridSize(currentGridSize);
 
@@ -2398,7 +2655,9 @@ function buildPlayableBlock(buildAttempt = 0) {
  * Fase 6: palavras MEV sao injetadas sem aparecer no word bank.
  */
 function injectWordInGrid(word, isHighFee, isGolden, isMev = false, multiplier = 1.0) {
-    if (word.length > currentGridSize) word = word.substring(0, currentGridSize);
+    /* Fase 6.4: removido o truncamento de palavras > grid — as palavras
+     * BIP39 têm no máximo 6 caracteres e o grid mínimo é 8×8 (normal) ou
+     * 15×15 (boss), então o truncamento nunca dispara. */
 
     const dirs = [[1, 0], [0, 1], [1, 1], [1, -1]];
     for (let attempts = 0; attempts < 200; attempts++) {
@@ -2506,7 +2765,7 @@ function hasIncidentalTargetOccurrence() {
     return false;
 }
 
-function fillGridWithoutIncidentalWords(maxAttempts = 50) {
+function fillGridWithoutIncidentalWords(maxAttempts = 200) {
     const officialCells = new Set(
         blockWords.flatMap(target => target.coords.map(({ x, y }) => `${x},${y}`))
     );
@@ -2522,7 +2781,12 @@ function fillGridWithoutIncidentalWords(maxAttempts = 50) {
         });
         if (!hasIncidentalTargetOccurrence()) return true;
     }
-    return false;
+    /* Fase 6.5: fallback — se 200 tentativas não bastaram, preenche com
+     * letras que não formam palavras do word bank (mais seguro que falhar). */
+    fillerCells.forEach(cell => {
+        cell.char = 'X';
+    });
+    return true;
 }
 
 /**
@@ -2842,10 +3106,17 @@ function endSelection() {
             // Boss derrotado — todas as palavras encontradas
             if (bossHp <= 0 && !bossDefeatHandled) {
                 bossDefeatHandled = true;
+                /* Fase 6.2: marca a rodada como finalizada ANTES de qualquer
+                 * delay — o tick do timer em andamento verifica essa flag e
+                 * não dispara showResult("expirou") sobrepondo o modal de
+                 * derrota do boss. */
+                roundSettled = true;
                 // Bonus de loot
                 balanceSatoshis += bossLoot;
                 currentRoundEarnings += bossLoot;
                 document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString();
+                /* Fase 5.1/5.3: credita o loot do boss no backend */
+                void earnBalance(bossLoot, `earn-boss-${activeRealmId}-${roundAttempt}`);
                 announceGameStatus(`BOSS DERROTADO! +${bossLoot.toLocaleString()} sats de loot!`);
                 // Mostra modal de derrota do boss
                 scheduleForSession(() => showBossDefeatModal(), 1000, sessionGeneration);
@@ -2861,6 +3132,8 @@ function endSelection() {
             balanceSatoshis += mevBonus;
             currentRoundEarnings += mevBonus;
             document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString();
+            /* Fase 5.1/5.3: credita o bônus MEV no backend */
+            void earnBalance(mevBonus, `earn-mev-${activeRealmId}-${roundAttempt}-${wordsFoundInBlock}`);
             announceGameStatus(`MEV SECRETO ENCONTRADO! +${mevBonus.toLocaleString()} sats bonus.`);
         }
 
@@ -2897,8 +3170,11 @@ function endSelection() {
             );
         }
         updateStoreUI(); submitScore();
-        // Fase 3: Sincroniza estado do jogador (combo, MEV, balance)
-        void syncPlayerState();
+        /* Fase 5.1/5.3: backend é a fonte de verdade do saldo — credita a
+         * recompensa da palavra no backend (idempotente por tx_id). O saldo
+         * local já foi atualizado acima para feedback imediato; o valor
+         * retornado pelo backend é a referência. */
+        void earnBalance(Math.floor(points), `earn-${activeRealmId}-${roundAttempt}-${wordsFoundInBlock}`);
 
         if (wordsFoundInBlock === blockWords.length) {
             clearInterval(networkInterval);
@@ -2927,6 +3203,9 @@ function endSelection() {
     } else {
         /* Fase 1: Slashing — penalidade por erro repetido */
         consecutiveErrors++;
+        /* Fase 5.4: erro quebra a streak de palavras sem erro */
+        wordsWithoutErrorStreak = 0;
+        void pushStats({ words_without_error: 0 });
         selectedCells.forEach(c => {
             c.cell.classList.remove('selected');
             c.cell.setAttribute('aria-selected', 'false');
@@ -2938,11 +3217,18 @@ function endSelection() {
         if (consecutiveErrors >= SLASHING_THRESHOLD && !powerupEffects.precision) {
             const penalty = Math.floor(balanceSatoshis * SLASHING_PENALTY);
             if (penalty > 0) {
-                balanceSatoshis -= penalty;
-                document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString();
-                announceGameStatus(`SLASHING: ${penalty.toLocaleString()} sats debitados por ${consecutiveErrors} erros consecutivos.`);
-                showFloatingText(selectedCells[0]?.cell, -penalty, false, false);
-                updateStoreUI();
+                /* Fase 5.1: débito validado no backend — só aplica se confirmado.
+                 * Captura a célula antes do async (selectedCells é limpo no fim). */
+                const slashCell = selectedCells[0]?.cell;
+                const txId = `spend-slash-${activeRealmId}-${roundNumber}-${Date.now()}`;
+                void spendBalance(penalty, txId).then(confirmed => {
+                    if (confirmed === null) return; /* backend recusou */
+                    balanceSatoshis = confirmed;
+                    document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString();
+                    announceGameStatus(`SLASHING: ${penalty.toLocaleString()} sats debitados por ${consecutiveErrors} erros consecutivos.`);
+                    showFloatingText(slashCell, -penalty, false, false);
+                    updateStoreUI();
+                });
             }
             /* Flash vermelho na tela */
             document.body.classList.add('slashing-flash');
@@ -3098,8 +3384,10 @@ function showResult(success, message) {
 
 /* Fase 2: Orphan Block Salvage (RBF) — oferece resgate com 100K sats */
 const RBF_PRICE = 100000;
-const RBF_TIME_BONUS = 15; /* segundos extras */
 let rbfTimeout = null;
+/* Fase 6.1: tempo original da rodada (salvo ao mostrar o RBF) — o resgate
+ * reinicia a rodada com o tempo que o jogador tinha, não com 15s fixos. */
+let rbfOriginalTimeLimit = 0;
 
 function showOrphanBlockSalvage() {
     const modal = document.getElementById('result-modal');
@@ -3107,10 +3395,13 @@ function showOrphanBlockSalvage() {
     const text = document.getElementById('result-text');
     const btn = document.getElementById('next-btn');
 
+    /* Fase 6.1: salva o tempo original da rodada para o resgate */
+    rbfOriginalTimeLimit = networkTimeLimit;
+
     setModalState(modal, true);
     title.innerText = "Bloco minerado!";
     title.style.color = "var(--warning-orange)";
-    text.innerText = "Um novo bloco real encerrou esta rodada. Gastar 100.000 sats para RBF (15s extras)?";
+    text.innerText = `Um novo bloco real encerrou esta rodada. Gastar ${RBF_PRICE.toLocaleString()} sats para RBF (recomeça com ${rbfOriginalTimeLimit}s)?`;
     btn.innerText = `Resgatar (${RBF_PRICE.toLocaleString()} sats)`;
     btn.style.display = 'inline-flex';
     saveSessionState(); /* Fase 1: salva estado ao mostrar RBF */
@@ -3121,35 +3412,40 @@ function showOrphanBlockSalvage() {
         showResult(false, "O tempo de RBF expirou.");
     }, 3000, generation);
 
-    const rbfHandler = () => {
+    const rbfHandler = async () => {
         if (rbfTimeout) {
             cancelSessionTimeout(rbfTimeout);
             rbfTimeout = null;
         }
-        if (balanceSatoshis >= RBF_PRICE) {
-            balanceSatoshis -= RBF_PRICE;
-            rbfUsedTotal++;
-            void pushStats({ rbf_used: rbfUsedTotal });
-            document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString();
-            announceGameStatus(`RBF ativado: ${RBF_TIME_BONUS}s adicionados.`);
-            playSound('buy');
-            updateStoreUI();
-            // Fase 3: Sincroniza estado do jogador (RBF usado)
-            void syncPlayerState();
-
-            /* Reinicia a rodada com tempo extra (hardware + nível) */
-            isPlaying = true;
-            networkTimePassed = 0;
-            networkTimeLimit = RBF_TIME_BONUS + getNetworkTimeBonus();
-            netProgressEl.style.width = '0%';
-            netProgressEl.setAttribute('aria-valuenow', '0');
-            netProgressEl.setAttribute('aria-valuetext', `${RBF_TIME_BONUS + getNetworkTimeBonus()} segundos restantes`);
-            setModalState(modal, false);
-            startNetworkRace();
-        } else {
+        if (balanceSatoshis < RBF_PRICE) {
             announceGameStatus("Saldo insuficiente para RBF.");
             scheduleForSession(() => showResult(false, "Saldo insuficiente para RBF."), 500, generation);
+            return;
         }
+        /* Fase 5.1: débito validado no backend — só resgata se confirmado */
+        const txId = `spend-rbf-${activeRealmId}-${roundNumber}-${Date.now()}`;
+        const confirmed = await spendBalance(RBF_PRICE, txId);
+        if (confirmed === null) {
+            announceGameStatus("Falha ao confirmar o RBF. Tente novamente.");
+            return;
+        }
+        balanceSatoshis = confirmed;
+        rbfUsedTotal++;
+        void pushStats({ rbf_used: rbfUsedTotal });
+        document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString();
+        announceGameStatus(`RBF ativado: rodada reinicia com ${rbfOriginalTimeLimit}s.`);
+        playSound('buy');
+        updateStoreUI();
+
+        /* Fase 6.1: reinicia a rodada com o tempo original (hardware + nível) */
+        isPlaying = true;
+        networkTimePassed = 0;
+        networkTimeLimit = rbfOriginalTimeLimit;
+        netProgressEl.style.width = '0%';
+        netProgressEl.setAttribute('aria-valuenow', '0');
+        netProgressEl.setAttribute('aria-valuetext', `${rbfOriginalTimeLimit} segundos restantes`);
+        setModalState(modal, false);
+        startNetworkRace();
     };
     setNextButtonAction(rbfHandler);
 }
@@ -3158,6 +3454,8 @@ function showOrphanBlockSalvage() {
 let achievementsData = null;
 let achievementsFilter = 'all';
 let achievementBonuses = { reward_percent: 0, hint_discount: 0 };
+/* Bônus de recompensa temporário do Season Pass (ex.: +5%/+10%) */
+let seasonRewardBonus = 0;
 let realmsPlayed = new Set();
 let epochsSurvived = 0;
 let scoresSubmitted = 0;
@@ -3373,6 +3671,9 @@ function trackWordFound(isGolden, isHighFee, isMev) {
     if (isHighFee) highFeeFoundTotal++;
     if (isMev) mevFoundTotal++;
 
+    /* Fase 5.4: streak de palavras sem erro — incrementa a cada acerto */
+    wordsWithoutErrorStreak++;
+
     /* Verificar velocidade (fast finds) */
     const now = Date.now();
     if (lastWordFoundTime > 0) {
@@ -3388,7 +3689,8 @@ function trackWordFound(isGolden, isHighFee, isMev) {
         high_fee_found: highFeeFoundTotal,
         mev_found: mevFoundTotal,
         fast_finds: fastFindsTotal,
-        ultra_fast_finds: ultraFastFindsTotal
+        ultra_fast_finds: ultraFastFindsTotal,
+        words_without_error: wordsWithoutErrorStreak
     });
 }
 
@@ -3445,8 +3747,24 @@ function getHintPrice() {
 
 /* Fase 7: Aplicar bônus de achievements a recompensa */
 function applyAchievementBonus(points) {
-    const bonus = achievementBonuses.reward_percent || 0;
+    const bonus = (achievementBonuses.reward_percent || 0) + seasonRewardBonus + getCollectionBonus();
     return Math.floor(points * (1 + bonus));
+}
+
+/* Fase 4.6: Bônus de coleção de cards (recompensa % por coleção completa).
+ * Soma o value de cada raridade cuja coleção está completa (owned >= required).
+ * O backend já calcula collection_bonus em _get_player_cards; aqui só somamos.
+ * Retorna 0 se a coleção ainda não foi carregada (cardsData nulo). */
+function getCollectionBonus() {
+    if (!cardsData || !cardsData.collection_bonus) return 0;
+    let total = 0;
+    for (const rarity of Object.keys(cardsData.collection_bonus)) {
+        const entry = cardsData.collection_bonus[rarity];
+        if (entry && entry.complete && entry.bonus && entry.bonus.type === 'reward_percent') {
+            total += entry.bonus.value || 0;
+        }
+    }
+    return total;
 }
 
 /* Fase 7: Event listeners para achievements */
@@ -3458,6 +3776,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (btnCloseAchievements) {
         btnCloseAchievements.addEventListener('click', closeAchievementsModal);
+    }
+    /* Fase C1: atalho de missões — o jogador procurava missões no PERFIL;
+     * elas ficam em COMPETIR. Navega direto para a seção de missões. */
+    const btnMissionsShortcut = document.getElementById('btn-missions-shortcut');
+    if (btnMissionsShortcut) {
+        btnMissionsShortcut.addEventListener('click', () => {
+            showTab('competir');
+            activateMechanicSection('competir', 'missions', true);
+        });
     }
 });
 
@@ -3504,7 +3831,13 @@ function handleBossBlock(data, generation) {
         return;
     }
     if (isPlaying) {
-        console.warn('Boss block recebido mas rodada já em andamento — ignorado.');
+        /* Fase 6.3 (decisão de design): o boss block é ignorado se o jogador
+         * está no meio de uma rodada. Interromper a rodada atual para
+         * enfileirar o boss exigiria salvar/restaurar o estado da rodada em
+         * curso (risco alto de regressão). Como o boss block recorre a cada
+         * 50 blocos (~10 min), perder um por estar em rodada é aceitável —
+         * o próximo boss block será a oportunidade. */
+        console.warn('Boss block recebido mas rodada já em andamento — ignorado (design: o próximo boss block será a oportunidade).');
         return;
     }
     if (isTransitioning) {
@@ -3520,6 +3853,7 @@ function handleBossBlock(data, generation) {
     bossLoot = data.boss_loot || 50000;
     bossWordsRequired = data.boss_words || 10;
     bossTimer = data.boss_timer || 45;
+    bossGridSize = data.boss_grid_size || 15; /* Fase 4.2: backend é a fonte de verdade */
     bossDefeatHandled = false;
 
     // Efeitos visuais dramáticos
@@ -3599,6 +3933,12 @@ function handleBossTransaction(data) {
         isBoss: true, // flag especial para palavras do boss
     });
 
+    /* Fase A3 (ponta solta da auditoria): atualiza o watchdog também no boss
+     * block — antes, handleBossTransaction não tocava lastTxActivityTime,
+     * então um buffer do boss parcial parado >45s podia disparar reconexão
+     * no meio da luta (timer do boss é 45s — janela estreita). */
+    lastTxActivityTime = Date.now();
+
     const loadingText = document.getElementById('tx-loading-bank');
     if (loadingText) {
         loadingText.innerText = `Aguardando transações do boss (${txBuffer.length}/${bossWordsRequired})...`;
@@ -3609,11 +3949,94 @@ function handleBossTransaction(data) {
         cancelSessionTimeout(pendingBuildTimeout);
         pendingBuildTimeout = scheduleForSession(() => {
             pendingBuildTimeout = undefined;
-            buildBossPlayableBlock();
+            void requestBossPlayableBlockBuild();
         }, 500, sessionGeneration);
     }
 
     return true;
+}
+
+/**
+ * Fase 4.1: gate de energia do boss block.
+ *
+ * O boss consome 1 energia como qualquer rodada (decisão do usuário:
+ * consistência). Antes da correção, buildBossPlayableBlock era chamado
+ * diretamente e a rodada do boss era gratuita. Este gate espelha
+ * requestPlayableBlockBuild: reserva o spend, chama spendEnergy e trata os
+ * três resultados (sem energia / erro / falha no build) com refund quando
+ * aplicável. Se o jogador não tem energia, o boss é descartado (resetBossState)
+ * e o jogo volta ao fluxo normal.
+ */
+async function requestBossPlayableBlockBuild() {
+    if (
+        energyGatePending
+        || isTransitioning
+        || isPlaying
+        || !sessionReady
+        || !ws
+        || ws.readyState !== WebSocket.OPEN
+        || !isBossActive
+        || txBuffer.length !== bossWordsRequired
+    ) return;
+
+    const generation = sessionGeneration;
+    const roundRealm = activeRealmId;
+    const roundMiner = minerName;
+    const roundId = reservePendingEnergySpend(roundRealm, roundMiner);
+    energyGatePending = true;
+    try {
+        const hasEnergy = await spendEnergy(roundId, roundRealm, roundMiner);
+        if (
+            generation !== sessionGeneration
+            || !sessionReady
+            || !isBossActive
+            || txBuffer.length !== bossWordsRequired
+        ) {
+            if (hasEnergy) {
+                await queueEnergyRefund(roundId, roundRealm, roundMiner);
+                clearPendingEnergySpend(roundId);
+            } else if (hasEnergy === false) {
+                clearPendingEnergySpend(roundId);
+            }
+            pendingEnergyRoundId = null;
+            return;
+        }
+        if (hasEnergy === null) {
+            // Erro de rede: não confirma energia — descarta o boss e volta ao normal.
+            clearPendingEnergySpend(roundId);
+            pendingEnergyRoundId = null;
+            resetBossState();
+            txBuffer = []; /* Fase 4.1: as palavras do boss não valem para a rodada normal */
+            isPlaying = false;
+            overlayEl.classList.remove('hidden');
+            announceGameStatus('Não foi possível confirmar a energia. Boss descartado.');
+            return;
+        }
+        if (hasEnergy === false) {
+            // Sem energia: o boss é descartado (decisão Fase 4.1).
+            clearPendingEnergySpend(roundId);
+            pendingEnergyRoundId = null;
+            resetBossState();
+            txBuffer = []; /* Fase 4.1: as palavras do boss não valem para a rodada normal */
+            showPendingEnergyState(true);
+            return;
+        }
+        const blockStarted = buildBossPlayableBlock();
+        if (!blockStarted) {
+            await queueEnergyRefund(roundId, roundRealm, roundMiner);
+            clearPendingEnergySpend(roundId);
+            pendingEnergyRoundId = null;
+            resetBossState();
+            txBuffer = []; /* Fase 4.1: as palavras do boss não valem para a rodada normal */
+            showPendingEnergyState(true);
+            return;
+        }
+        clearPendingEnergySpend(roundId);
+    } finally {
+        if (generation === sessionGeneration) {
+            energyGatePending = false;
+        }
+    }
 }
 
 /**
@@ -3627,7 +4050,7 @@ function buildBossPlayableBlock() {
         || !ws
         || ws.readyState !== WebSocket.OPEN
         || txBuffer.length !== bossWordsRequired
-    ) return;
+    ) return false;
 
     overlayEl.classList.add('hidden');
     gridEl.innerHTML = '';
@@ -3637,8 +4060,8 @@ function buildBossPlayableBlock() {
     blockWords = [];
     isPlaying = true;
 
-    // Boss: sempre 15×15
-    currentGridSize = 15;
+    // Boss: grade definida pelo backend (data.boss_grid_size), fallback 15
+    currentGridSize = bossGridSize;
     networkTimeLimit = bossTimer + skillTimeBonus;
 
     configureGridSize(currentGridSize);
@@ -3694,7 +4117,7 @@ function buildBossPlayableBlock() {
             overlayEl.classList.remove('hidden');
             const loaderText = overlayEl.querySelector('#tx-loading');
             if (loaderText) loaderText.innerText = "Falha ao montar a grade do boss. Aguarde o próximo conjunto.";
-            return;
+            return false;
         }
     }
 
@@ -3714,6 +4137,7 @@ function buildBossPlayableBlock() {
     updateStoreUI();
     announceGameStatus(`BOSS BLOCK! Encontre todas as ${bossWordsRequired} palavras em ${bossTimer}s!`);
     startBossNetworkRace();
+    return true;
 }
 
 /**
@@ -3808,6 +4232,7 @@ function resetBossState() {
     bossLoot = 50000;
     bossWordsRequired = 10;
     bossTimer = 45;
+    bossGridSize = 15; /* Fase 4.2: reseta junto com os demais campos do boss */
     bossDefeatHandled = false;
 
     // Esconde HUD do boss
@@ -3837,6 +4262,13 @@ function showBossDefeatModal() {
     const title = document.getElementById('boss-defeat-title');
     const text = document.getElementById('boss-defeat-text');
     const btn = document.getElementById('boss-defeat-btn');
+
+    /* Fase 6.2: fecha o modal de resultado (se aberto) antes de mostrar o
+     * modal de derrota do boss — evita sobreposição de dois modais. */
+    const resultModal = document.getElementById('result-modal');
+    if (resultModal && resultModal.classList.contains('active')) {
+        setModalState(resultModal, false);
+    }
 
     // Atualiza loot
     text.innerHTML = `
@@ -4447,7 +4879,7 @@ async function sendChatMessage() {
                 appendChatMessage(data.message, true);
             }
             chatInputEl.value = '';
-            updateRateLimitInfo(4); // Assume 1 usado
+            updateRateLimitInfo(remaining - 1);
         } else {
             appendSystemMessage('Erro ao enviar mensagem.');
         }
@@ -4735,7 +5167,9 @@ async function loadStakingHistory() {
 
             const amountText = safeType === 'unstake'
                 ? `${entry.returned.toLocaleString()} sats (penalty: ${entry.penalty.toLocaleString()})`
-                : `${entry.amount.toLocaleString()} sats`;
+                : safeType === 'expired' && entry.bonus
+                    ? `${entry.amount.toLocaleString()} sats (+${entry.bonus.toLocaleString()} bônus)`
+                    : `${entry.amount.toLocaleString()} sats`;
 
             const date = entry.timestamp
                 ? new Date(entry.timestamp * 1000).toLocaleString('pt-BR', {
@@ -4943,12 +5377,20 @@ const decoderCloseBtnEl = document.getElementById('btn-close-decoder');
 const decoderLaunchBtnEl = document.getElementById('btn-decoder-launch');
 
 // Verifica se o decoder está disponível a cada 3 rodadas
+// Fase B1: sempre visível — quando indisponível, mostra cooldown (desabilitado)
 function checkDecoderAvailability() {
-    if (!sessionReady || !activeRealmId) return;
-    if (roundNumber % DECODER_ROUNDS_INTERVAL === 0 && !decoderActive) {
-        decoderLaunchBtnEl.classList.remove('hidden');
+    if (!sessionReady || !activeRealmId || !decoderLaunchBtnEl) return;
+    const available = roundNumber % DECODER_ROUNDS_INTERVAL === 0 && !decoderActive;
+    // Sempre visível (remove hidden)
+    decoderLaunchBtnEl.classList.remove('hidden');
+    if (available) {
+        decoderLaunchBtnEl.disabled = false;
+        decoderLaunchBtnEl.textContent = 'LAUNCH';
+        decoderLaunchBtnEl.classList.remove('decoder-cooldown');
     } else {
-        decoderLaunchBtnEl.classList.add('hidden');
+        decoderLaunchBtnEl.disabled = true;
+        decoderLaunchBtnEl.textContent = 'COOLDOWN';
+        decoderLaunchBtnEl.classList.add('decoder-cooldown');
     }
 }
 
@@ -5724,7 +6166,7 @@ async function addSeasonXP(xpAmount) {
 function renderSeasonUI() {
     if (!seasonData) return;
 
-    const { season_id, level, xp, xp_for_next, xp_remaining, is_premium, free_rewards, premium_rewards, season_end_seconds } = seasonData;
+    const { season_id, level, xp, xp_for_next, xp_remaining, is_premium, free_rewards, premium_rewards, season_end_seconds, season_ended, claim_period_active, claim_deadline } = seasonData;
 
     // Atualiza header
     if (seasonIdValueEl) seasonIdValueEl.textContent = season_id;
@@ -5740,10 +6182,24 @@ function renderSeasonUI() {
     if (seasonProgressTextEl) seasonProgressTextEl.textContent = `${Math.round(percent)}%`;
 
     // Atualiza timer
-    if (seasonTimerEl && season_end_seconds > 0) {
-        const days = Math.floor(season_end_seconds / 86400);
-        const hours = Math.floor((season_end_seconds % 86400) / 3600);
-        seasonTimerEl.innerHTML = `${iconSvg('timer')}<span>${days}d ${hours}h restantes</span>`;
+    if (seasonTimerEl) {
+        if (season_ended && claim_period_active && claim_deadline) {
+            // Fase 5.5: temporada encerrada — mostra o prazo de claim
+            const deadline = new Date(claim_deadline);
+            const now = new Date();
+            const remainingMs = deadline.getTime() - now.getTime();
+            if (remainingMs > 0) {
+                const days = Math.floor(remainingMs / 86400000);
+                const hours = Math.floor((remainingMs % 86400000) / 3600000);
+                seasonTimerEl.innerHTML = `${iconSvg('timer')}<span>Temporada encerrada — ${days}d ${hours}h para reclamar</span>`;
+            } else {
+                seasonTimerEl.innerHTML = `${iconSvg('timer')}<span>Temporada encerrada</span>`;
+            }
+        } else if (season_end_seconds > 0) {
+            const days = Math.floor(season_end_seconds / 86400);
+            const hours = Math.floor((season_end_seconds % 86400) / 3600);
+            seasonTimerEl.innerHTML = `${iconSvg('timer')}<span>${days}d ${hours}h restantes</span>`;
+        }
     }
 
     // Renderiza recompensas
@@ -5752,7 +6208,7 @@ function renderSeasonUI() {
 
     // Atualiza botão premium
     if (btnBuySeasonPremiumEl) {
-        btnBuySeasonPremiumEl.disabled = is_premium;
+        btnBuySeasonPremiumEl.disabled = is_premium || season_ended;
         btnBuySeasonPremiumEl.innerHTML = `${iconSvg('crown')}<span>${is_premium ? 'Premium Ativo' : 'Premium (50.000 SATS)'}</span>`;
     }
 
@@ -5832,8 +6288,10 @@ async function claimSeasonReward(level) {
         playSound('success');
         showNotification('Recompensa reclamada!', 'success');
 
-        // Recarrega dados
+        // Recarrega dados: season (nível/claims) + player state (saldo,
+        // bônus de recompensa temporário, badge) para atualizar a UI.
         await loadSeasonData();
+        await loadPlayerState(activeRealmId, minerName);
     } catch (error) {
         console.error('Erro ao reclamar recompensa:', error);
         showNotification('Erro ao reclamar recompensa', 'error');
@@ -5960,8 +6418,9 @@ function renderCardsUI() {
     if (cardsBonusEl && collection_bonus) {
         const complete = Object.values(collection_bonus).filter(b => b.complete);
         if (complete.length > 0) {
+            const pct = (getCollectionBonus() * 100).toFixed(1).replace(/\.0$/, '');
             cardsBonusEl.innerHTML = iconSvg('gift');
-            cardsBonusEl.append(document.createTextNode(` Bônus: ${complete.length} coleção(ões) completa(s)`));
+            cardsBonusEl.append(document.createTextNode(` Bônus: +${pct}% recompensa (${complete.length} coleção(ões) completa(s))`));
         } else {
             cardsBonusEl.innerHTML = iconSvg('gift');
             cardsBonusEl.append(document.createTextNode(' Bônus: -'));
@@ -6077,20 +6536,42 @@ registerSessionInitializer('cards', async () => {
 // Credita o card de um bloco minerado na coleção do jogador
 async function creditBlockCard(blockHash) {
     if (!blockHash || !minerName) return;
-    try {
-        const response = await fetch(activeNetworkApiUrl(`cards/${encodeURIComponent(minerName)}/credit`), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: minerName, block_hash: blockHash })
-        });
-        if (!response.ok) return; // card global ainda não existe ou já processado
-        const result = await response.json();
-        if (result.new && result.card) {
-            showCardPullAnimation(result.card);
-            await loadCardsData();
+    /* Fase C5: retry em 404 — o card global é criado pelo ingestor ao
+     * minerar o bloco; o evento WS pode chegar ANTES do card existir no
+     * Redis (corrida). Antes, um 404 descartava o card para sempre.
+     * O endpoint é idempotente (sadd no set do jogador), então retry é
+     * seguro. */
+    const MAX_ATTEMPTS = 3;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        try {
+            const response = await fetch(activeNetworkApiUrl(`cards/${encodeURIComponent(minerName)}/credit`), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: minerName, block_hash: blockHash })
+            });
+            if (response.status === 404) {
+                // card global ainda não existe — tenta de novo
+                if (attempt === MAX_ATTEMPTS) {
+                    console.warn('Card global ainda não existe após', MAX_ATTEMPTS, 'tentativas:', blockHash);
+                    return;
+                }
+                await new Promise(r => setTimeout(r, 1000 * attempt));
+                continue;
+            }
+            if (!response.ok) return; // 4xx/5xx não-404 — não tem retry
+            const result = await response.json();
+            if (result.new && result.card) {
+                showCardPullAnimation(result.card);
+                await loadCardsData();
+            }
+            return;
+        } catch (error) {
+            if (attempt === MAX_ATTEMPTS) {
+                console.error('Erro ao creditar card:', error);
+            } else {
+                await new Promise(r => setTimeout(r, 1000 * attempt));
+            }
         }
-    } catch (error) {
-        console.error('Erro ao creditar card:', error);
     }
 }
 
@@ -6232,9 +6713,11 @@ function renderMarketList() {
     for (const listing of filtered) {
         const iconName = POWERUP_ICON_NAMES[listing.powerup_id] || 'bolt';
         const name = POWERUP_NAMES[listing.powerup_id] || listing.powerup_id;
+        const isOwn = minerName && listing.seller === minerName;
 
         const row = document.createElement('div');
         row.className = 'market-listing';
+        if (isOwn) row.classList.add('market-listing-own');
 
         const icon = document.createElement('div');
         icon.className = 'market-listing-icon';
@@ -6247,7 +6730,7 @@ function renderMarketList() {
         nameElement.textContent = String(name);
         const seller = document.createElement('div');
         seller.className = 'market-listing-seller';
-        seller.textContent = `Vendedor: ${listing.seller}`;
+        seller.textContent = isOwn ? 'Seu listing' : `Vendedor: ${listing.seller}`;
         info.append(nameElement, seller);
 
         const price = document.createElement('div');
@@ -6260,16 +6743,51 @@ function renderMarketList() {
         priceLabel.textContent = 'SATS';
         price.append(priceValue, priceLabel);
 
-        const buyButton = document.createElement('button');
-        buyButton.type = 'button';
-        buyButton.className = 'market-listing-buy-btn';
-        buyButton.dataset.listingId = String(listing.listing_id);
-        buyButton.dataset.price = String(listing.price);
-        buyButton.textContent = 'Comprar';
-        buyButton.addEventListener('click', () => buyMarketListing(buyButton.dataset.listingId));
+        if (isOwn) {
+            // Fase B4: o próprio vendedor cancela em vez de comprar
+            const cancelButton = document.createElement('button');
+            cancelButton.type = 'button';
+            cancelButton.className = 'market-listing-cancel-btn';
+            cancelButton.dataset.listingId = String(listing.listing_id);
+            cancelButton.textContent = 'Cancelar';
+            cancelButton.addEventListener('click', () => cancelMarketListing(cancelButton.dataset.listingId));
+            row.append(icon, info, price, cancelButton);
+        } else {
+            const buyButton = document.createElement('button');
+            buyButton.type = 'button';
+            buyButton.className = 'market-listing-buy-btn';
+            buyButton.dataset.listingId = String(listing.listing_id);
+            buyButton.dataset.price = String(listing.price);
+            buyButton.textContent = 'Comprar';
+            buyButton.addEventListener('click', () => buyMarketListing(buyButton.dataset.listingId));
+            row.append(icon, info, price, buyButton);
+        }
 
-        row.append(icon, info, price, buyButton);
         marketBrowseEl.appendChild(row);
+    }
+}
+
+// Fase B4: cancela um listing próprio e devolve o power-up ao inventário
+async function cancelMarketListing(listingId) {
+    if (!confirm('Cancelar este listing? O power-up voltará para o seu inventário.')) return;
+    try {
+        const response = await fetch(activeNetworkApiUrl('market/cancel'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ listing_id: listingId, username: minerName })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            showNotification(error.detail || 'Falha ao cancelar listing', 'error');
+            return;
+        }
+
+        showNotification('Listing cancelado — power-up devolvido ao inventário.', 'success');
+        await Promise.all([loadMarketList(), loadMarketInventory()]);
+    } catch (error) {
+        console.error('Erro ao cancelar listing:', error);
+        showNotification('Erro ao cancelar listing', 'error');
     }
 }
 
@@ -6378,6 +6896,13 @@ async function sellMarketPowerup() {
         return;
     }
 
+    /* Fase 6.9: valida o mínimo de 100 sats do backend no frontend — evita
+     * erro 422 desnecessário ao enviar o pedido. */
+    if (price < 100) {
+        showNotification('Preço mínimo é 100 sats', 'error');
+        return;
+    }
+
     const btn = document.getElementById('btn-market-sell');
     if (btn) {
         btn.disabled = true;
@@ -6403,6 +6928,10 @@ async function sellMarketPowerup() {
         // Limpa formulário
         select.value = '';
         input.value = '';
+        // Fase B3: fecha a seção de venda e reseta o botão para "VENDER"
+        marketSellEl.classList.remove('market-sell-open');
+        const hint = document.getElementById('market-sell-hint');
+        if (hint) { hint.hidden = true; hint.textContent = ''; }
 
         // Recarrega dados
         await Promise.all([loadMarketList(), loadMarketHistory(), loadMarketInventory()]);
@@ -6412,7 +6941,7 @@ async function sellMarketPowerup() {
     } finally {
         if (btn) {
             btn.disabled = false;
-            btn.textContent = 'Vender';
+            btn.textContent = 'VENDER';
         }
     }
 }
@@ -6421,6 +6950,8 @@ async function sellMarketPowerup() {
 // estava com display:none permanente (u-inline-040), então o CTA de venda
 // (market-sell-empty) nunca aparecia. Agora VENDER alterna a seção: fecha→abre
 // (e popula o dropdown/CTA); já aberta→executa a venda.
+// Fase B3: 2 passos explícitos — "ABRIR VENDA" (abre) → "CONFIRMAR VENDA"
+// (executa). O texto do botão deixa claro o estado atual.
 const btnMarketSell = document.getElementById('btn-market-sell');
 if (btnMarketSell && marketSellEl) {
     btnMarketSell.addEventListener('click', () => {
@@ -6428,10 +6959,51 @@ if (btnMarketSell && marketSellEl) {
         if (!isOpen) {
             marketSellEl.classList.add('market-sell-open');
             populateSellDropdown();
+            updateSellHint();
+            btnMarketSell.textContent = 'CONFIRMAR VENDA';
         } else {
             sellMarketPowerup();
         }
     });
+}
+
+// Fase B3: atualiza o hint de preço sugerido + taxa de 5% conforme o
+// power-up selecionado. Também pré-preenche o campo de preço com a
+// sugestão (o jogador pode editar).
+function updateSellHint() {
+    const select = document.getElementById('market-sell-select');
+    const input = document.getElementById('market-sell-price');
+    const hint = document.getElementById('market-sell-hint');
+    if (!select || !hint) return;
+
+    const powerupId = select.value;
+    if (!powerupId) {
+        hint.hidden = true;
+        hint.textContent = '';
+        return;
+    }
+
+    const suggested = marketData?.suggested_prices?.[powerupId];
+    const name = POWERUP_NAMES[powerupId] || powerupId;
+    let text = '';
+    if (suggested && suggested > 0) {
+        text = `Preço sugerido: ${suggested.toLocaleString()} SATS`;
+        // Pré-preenche o preço apenas se o campo está vazio (não sobrescreve
+        // um valor que o jogador já digitou).
+        if (input && !input.value) {
+            input.value = String(suggested);
+        }
+    } else {
+        text = 'Sem histórico de vendas — defina o preço.';
+    }
+    // Fase B5: informa a taxa de 5% (cobrada na compra, não na venda).
+    text += ' · Taxa de 5% cobrada na compra';
+    hint.textContent = text;
+    hint.hidden = false;
+}
+
+if (document.getElementById('market-sell-select')) {
+    document.getElementById('market-sell-select').addEventListener('change', updateSellHint);
 }
 
 if (marketFilterPowerupEl) {
@@ -6614,7 +7186,10 @@ async function loadActiveGlobalEvent() {
                 endsAt: data.active_event.event_ends_at,
                 preannounced: data.active_event.event_preannounced === true,
             };
-            renderGlobalEventBanner(activeGlobalEvent, false);
+            // Fase 3.2: passa o estado de pre-anúncio ao banner — antes era
+            // sempre `false`, então um evento em pre-anúncio (REST com
+            // event_preannounced=true) era renderizado como "ativo".
+            renderGlobalEventBanner(activeGlobalEvent, activeGlobalEvent.preannounced);
         }
     } catch (error) {
         console.error('Erro ao carregar eventos globais:', error);
@@ -6691,7 +7266,15 @@ async function startSprintRound() {
         if (!renderWordBank()) throw new Error('Falha ao montar grade Sprint');
 
         // Inicia timer
-        sprintTimeLimit = data.time_limit + skillTimeBonus;
+        // Fase 4.3: cap em SPRINT_TIME_LIMIT + SPRINT_MAX_SKILL_TIME_BONUS (30+5=35s).
+        // O backend limita skillTimeBonus a 5s; o cap garante que o frontend
+        // nunca exceda o teto mesmo se o bônus vier maior (defesa em profundidade).
+        const SPRINT_TIME_LIMIT = 30;
+        const SPRINT_MAX_SKILL_TIME_BONUS = 5;
+        sprintTimeLimit = Math.min(
+            data.time_limit + skillTimeBonus,
+            SPRINT_TIME_LIMIT + SPRINT_MAX_SKILL_TIME_BONUS
+        );
         sprintTimeLeft = sprintTimeLimit;
         sprintWordsFound = 0;
         sprintStartTime = Date.now();
@@ -7343,7 +7926,9 @@ async function addXP(xpAmount) {
         levelState.level = result.level;
         levelState.xp = result.xp;
         levelState.xp_to_next = result.xp_to_next;
-        levelState.xp_progress = result.leveled_up ? 0 : (result.xp / result.xp_to_next) * 100;
+        /* Fase 6.8: ao fazer level-up, xp_progress deve ser 100% (não 0) —
+         * o jogador completou o nível anterior e agora está no novo nível. */
+        levelState.xp_progress = result.leveled_up ? 100 : (result.xp / result.xp_to_next) * 100;
         levelState.rank = result.rank;
         levelState.bonuses = result.bonuses;
 

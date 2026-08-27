@@ -355,6 +355,11 @@
 
                     <div class="u-inline-028">ACHIEVEMENT_REGISTRY:</div>
                     <button class="btn-action-small u-inline-056" id="btn-achievements" type="button">VER CONQUISTAS</button>
+
+                    <!-- Fase C1: atalho para missões — o jogador procurava
+                         missões no PERFIL; elas ficam em COMPETIR. -->
+                    <div class="u-inline-028">DAILY_MISSIONS:</div>
+                    <button class="btn-action-small u-inline-056" id="btn-missions-shortcut" type="button">VER MISSÕES</button>
                     </section>
 
                     <!-- STAKING (Fase 7: Staking) -->
@@ -478,7 +483,9 @@
                     <div class="u-inline-028">MARKETPLACE:</div>
                     <div id="market-panel">
                         <div class="u-inline-037">
-                            <button class="btn-action-small u-inline-038" id="btn-market" type="button">COMPRAR</button>
+                            <!-- Fase B2: "COMPRAR" não comprava — só abria o
+                                 painel. Renomeado para "VER MERCADO" (claro). -->
+                            <button class="btn-action-small u-inline-038" id="btn-market" type="button">VER MERCADO</button>
                             <button class="btn-action-small u-inline-038" id="btn-market-sell" type="button">VENDER</button>
                             <button class="btn-action-small" id="btn-refresh-market" type="button" aria-label="Atualizar mercado">ATUALIZAR</button>
                         </div>
@@ -486,6 +493,10 @@
                         <div class="u-inline-040" id="market-sell">
                             <select class="input-mecha u-inline-035" id="market-sell-select"></select>
                             <input type="number" class="input-mecha u-inline-035" id="market-sell-price" placeholder="Preço (SATS)">
+                            <!-- Fase B3/B5: preço sugerido + taxa de 5% — antes o
+                                 jogador não sabia quanto cobrar nem que a taxa
+                                 era cobrada na compra. -->
+                            <div class="market-sell-hint" id="market-sell-hint" hidden></div>
                             <!-- Fase 8 (pontas soltas): CTA quando o inventário
                                  está vazio — antes a aba VENDER era um
                                  "botão morto" (select vazio + botão inerte). -->

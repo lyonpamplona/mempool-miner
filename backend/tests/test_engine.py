@@ -116,3 +116,58 @@ async def test_rpc_rejects_non_object_json(
 
     assert await engine._rpc_call("getblockchaininfo", []) is None
     await engine.close()
+
+
+@pytest.mark.parametrize(
+    "word",
+    ["GALAXY", "CHAVE", "BITCOIN", "ZEBRA", "ABANDON", "MINER", "HASH", "0F1E"],
+)
+def test_golden_rush_no_valueerror_on_non_hex_prefix(word: str) -> None:
+    """Golden Rush não pode lançar ValueError para palavras cujo prefixo não é hex.
+
+    Regressão da auditoria 2026-08-23: ``int(word[:2], 16)`` quebrava para
+    palavras como "GALAXY" (prefixo "GA") e fazia a TX ser descartada
+    silenciosamente pelo try/except do ingestor. A correção usa um hash
+    determinístico (SHA-256) da palavra inteira.
+    """
+    from app.global_events import GlobalEventType
+
+    metadata = {"word": word, "is_golden": False, "multiplier": 1.0}
+    # Não deve lançar exceção para nenhuma palavra.
+    result = GameEngine.apply_event_effects(
+        dict(metadata), GlobalEventType.GOLDEN_RUSH
+    )
+    # O resultado é determinístico: a mesma palavra sempre dá o mesmo efeito.
+    result2 = GameEngine.apply_event_effects(
+        dict(metadata), GlobalEventType.GOLDEN_RUSH
+    )
+    assert result["is_golden"] == result2["is_golden"]
+    if result["is_golden"]:
+        # Golden puro = 5×; Golden + High Fee = 15× (consistente com
+        # _calculate_multiplier e com o ramo FEE_SPIKE).
+        assert result["multiplier"] in (5.0, 15.0)
+
+
+def test_golden_rush_high_fee_word_gets_15x() -> None:
+    """Palavra high_fee que vira golden no Golden Rush deve valer 15× (não 5×).
+
+    Regressão da auditoria independente da Fase 1 (2026-08-24): o ramo
+    GOLDEN_RUSH fixava multiplier=5.0 mesmo quando a palavra já era
+    high_fee, inconsistente com _calculate_multiplier (golden+high_fee=15×).
+    """
+    from app.global_events import GlobalEventType
+
+    # Encontra uma palavra que vira golden no Golden Rush (hash % 100 < 30).
+    golden_word = None
+    for candidate in [f"WORD{i:04d}" for i in range(200)]:
+        metadata = {"word": candidate, "is_golden": False, "is_high_fee": False, "multiplier": 1.0}
+        if GameEngine.apply_event_effects(dict(metadata), GlobalEventType.GOLDEN_RUSH)["is_golden"]:
+            golden_word = candidate
+            break
+    assert golden_word is not None, "Nenhuma palavra virou golden no teste"
+
+    # Mesma palavra, mas já high_fee → deve valer 15×.
+    metadata = {"word": golden_word, "is_golden": False, "is_high_fee": True, "multiplier": 3.0}
+    result = GameEngine.apply_event_effects(metadata, GlobalEventType.GOLDEN_RUSH)
+    assert result["is_golden"] is True
+    assert result["multiplier"] == 15.0

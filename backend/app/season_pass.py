@@ -3,15 +3,21 @@
 # ==========================================================================
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 # Configurações da temporada
-SEASON_DURATION_DAYS = 28  # 4 semanas
+# SEASON_DURATION_DAYS e SEASON_PREMIUM_UNLOCK_DAYS foram removidos:
+#   - SEASON_DURATION_DAYS: a duração é calculada dinamicamente via
+#     _get_current_season_id() (trimestre atual) + SEASON_CLAIM_PERIOD_DAYS.
+#   - SEASON_PREMIUM_UNLOCK_DAYS: não há "7 dias grátis após completar" —
+#     o premium é comprado a qualquer momento via buy_season_premium().
 SEASON_FREE_LEVELS = 20
 SEASON_PREMIUM_LEVELS = 20  # 21-40
 SEASON_XP_PER_LEVEL = 100
-SEASON_PREMIUM_UNLOCK_DAYS = 7  # 7 dias grátis após completar
+# Fase 5.5: prazo para reclamar recompensas não coletadas após o fim da
+# temporada. Depois disso, a temporada reseta (nível/XP/premium/claimed → 0).
+SEASON_CLAIM_PERIOD_DAYS = 7
 
 # Definição de recompensas por nível
 SEASON_FREE_REWARDS = {
@@ -101,6 +107,99 @@ def _get_season_start_date() -> str:
     return start.isoformat()
 
 
+def _get_season_end_for_season_id(season_id: str) -> datetime:
+    """Retorna a data de fim (UTC) da temporada identificada por ``season_id``.
+
+    ``season_id`` tem o formato ``season_{ano}_q{trimestre}`` (ex.:
+    ``season_2026_q3``). O fim é o primeiro dia do trimestre seguinte.
+    """
+    try:
+        _, year_part, q_part = season_id.split("_")
+        year = int(year_part)
+        quarter = int(q_part.lstrip("q"))
+    except (ValueError, IndexError):
+        # season_id inválido — usa o fim da temporada atual
+        return datetime.fromisoformat(_get_season_end_date())
+    start_month = (quarter - 1) * 3 + 1
+    if quarter == 4:
+        return datetime(year + 1, 1, 1, tzinfo=UTC)
+    return datetime(year, start_month + 3, 1, tzinfo=UTC)
+
+
+async def ensure_season_rollover(
+    realm_id: str,
+    username: str,
+    season_key_fn,
+    redis_client,
+    get_network_definition_fn,
+) -> dict[str, Any]:
+    """Fase 5.5: aplica o rollover de temporada.
+
+    A chave ``season:{username}`` não inclui o ``season_id`` — quando o
+    trimestre muda, os dados da temporada anterior (nível, XP, premium,
+    ``claimed_rewards``) permaneciam e eram tratados como da nova (carryover),
+    e as recompensas não reclamadas se perdiam sem prazo de claim.
+
+    Esta função, chamada no início de cada acesso à temporada:
+
+    1. Compara o ``season_id`` gravado com o atual.
+    2. Se mudou (chave legada sem ``season_id`` assume a temporada atual):
+       - Se ainda estamos no prazo de claim (7 dias após o fim), mantém os
+         dados para o jogador reclamar as recompensas pendentes
+         (``season_ended=True``; XP novo não é somado).
+       - Se o prazo expirou, reseta a temporada (nível/XP/premium/claimed → 0).
+    3. Grava o ``season_id`` atual na chave (idempotente).
+
+    Retorna ``{"season_id", "is_new_season", "season_ended",
+    "claim_period_active", "claim_deadline"}``.
+    """
+    definition = get_network_definition_fn(realm_id)
+    sk_key = season_key_fn(definition.realm_id, username)
+    raw = await redis_client.hgetall(sk_key)
+    stored_season_id = raw.get("season_id", "")
+    current_season_id = _get_current_season_id()
+    now = datetime.now(UTC)
+
+    # Chave legada sem season_id: assume que pertence à temporada atual
+    # (não reseta — evita perder dados de jogadores com progresso antigo).
+    is_new_season = bool(stored_season_id) and stored_season_id != current_season_id
+    season_ended = False
+    claim_period_active = False
+    claim_deadline = ""
+
+    if is_new_season:
+        season_end = _get_season_end_for_season_id(stored_season_id)
+        claim_deadline_dt = season_end + timedelta(days=SEASON_CLAIM_PERIOD_DAYS)
+        claim_deadline = claim_deadline_dt.isoformat()
+        if now <= claim_deadline_dt:
+            # Prazo de claim ativo: mantém os dados (recompensas ainda reclamáveis).
+            season_ended = True
+            claim_period_active = True
+        else:
+            # Prazo expirou: reseta a temporada.
+            await redis_client.hset(
+                sk_key,
+                mapping={
+                    "level": "0",
+                    "xp": "0",
+                    "premium": "0",
+                    "claimed_rewards": "[]",
+                },
+            )
+
+    # Grava o season_id atual (idempotente) e renova o TTL.
+    await redis_client.hset(sk_key, "season_id", current_season_id)
+    await redis_client.expire(sk_key, 86400 * 30)
+
+    return {
+        "season_id": current_season_id,
+        "is_new_season": is_new_season,
+        "season_ended": season_ended,
+        "claim_period_active": claim_period_active,
+        "claim_deadline": claim_deadline,
+    }
+
+
 async def get_season_data(
     realm_id: str,
     username: str,
@@ -114,6 +213,11 @@ async def get_season_data(
     definition = get_network_definition_fn(realm_id)
     season_id = _get_current_season_id()
     sk_key = season_key_fn(definition.realm_id, username)
+
+    # Fase 5.5: aplica o rollover antes de ler (reset se prazo de claim expirou).
+    rollover = await ensure_season_rollover(
+        realm_id, username, season_key_fn, redis_client, get_network_definition_fn
+    )
 
     raw = await redis_client.hgetall(sk_key)
     current_level = int(raw.get("level", 0))
@@ -169,6 +273,10 @@ async def get_season_data(
         "season_end": season_end,
         "season_end_seconds": remaining_seconds,
         "claimed_rewards": claimed_rewards,
+        # Fase 5.5: estado do rollover (prazo de claim / temporada encerrada)
+        "season_ended": rollover["season_ended"],
+        "claim_period_active": rollover["claim_period_active"],
+        "claim_deadline": rollover["claim_deadline"],
     }
 
 
@@ -191,6 +299,22 @@ async def add_season_xp(
 
     definition = get_network_definition_fn(realm_id)
     sk_key = season_key_fn(definition.realm_id, username)
+
+    # Fase 5.5: aplica o rollover e não soma XP em temporada encerrada
+    # (prazo de claim ativo) — o XP novo não pertence à temporada antiga.
+    rollover = await ensure_season_rollover(
+        realm_id, username, season_key_fn, redis_client, get_network_definition_fn
+    )
+    if rollover["season_ended"]:
+        raw = await redis_client.hgetall(sk_key)
+        return {
+            "level": int(raw.get("level", 0)),
+            "xp": int(float(raw.get("xp", 0))),
+            "xp_added": 0,
+            "leveled_up": False,
+            "season_ended": True,
+        }
+
     raw = await redis_client.hgetall(sk_key)
     current_level = int(raw.get("level", 0))
     # Fase 4: int(float(...)) tolera valores legados gravados como "67.5".
@@ -226,11 +350,32 @@ async def claim_season_reward(
     season_key_fn,
     player_state_key_fn,
     powerups_key_fn,
+    cards_set_key_fn,
+    card_detail_key_fn,
     redis_client,
     get_network_definition_fn,
 ) -> dict[str, Any]:
-    """Reclama uma recompensa com validação e crédito atômicos no Redis."""
+    """Reclama uma recompensa com validação e crédito atômicos no Redis.
+
+    Credita os 5 tipos de recompensa:
+    - ``sats``: soma ao saldo (e, no nível 20, grava o ``season_badge``).
+    - ``hint``: soma ao contador de dicas.
+    - ``powerup``: soma ao inventário de power-ups.
+    - ``card``: credita um card sintético na coleção (raridade = valor).
+    - ``bonus``: grava bônus de recompensa temporário (5%/10%) no player state.
+
+    Antes da correção (auditoria 2026-08-23), ``card``/``bonus``/``season_badge``
+    eram marcados como reclamados sem creditar nada.
+
+    Fase 5.5: roda o rollover antes de claimar — se o prazo de 7 dias
+    expirou e o reset ainda não foi disparado (nenhum get/add-xp ocorreu),
+    o rollover reseta a temporada e o claim falha com ``level_locked``.
+    """
     definition = get_network_definition_fn(realm_id)
+    # Fase 5.5: garante que o rollover foi aplicado antes de claimar.
+    await ensure_season_rollover(
+        realm_id, username, season_key_fn, redis_client, get_network_definition_fn
+    )
     if reward_level in SEASON_FREE_REWARDS:
         reward = SEASON_FREE_REWARDS[reward_level]
     elif reward_level in SEASON_PREMIUM_REWARDS:
@@ -241,16 +386,44 @@ async def claim_season_reward(
     sk_key = season_key_fn(definition.realm_id, username)
     ps_key = player_state_key_fn(definition.realm_id, username)
     pu_key = powerups_key_fn(definition.realm_id, username)
+    cards_key = cards_set_key_fn(definition.realm_id, username)
     premium_required = "1" if reward_level > SEASON_FREE_LEVELS else "0"
+
+    # Valores extras por tipo de recompensa
+    season_id = _get_current_season_id()
+    card_id = ""
+    if reward["type"] == "card":
+        card_id = f"season_{season_id}_L{reward_level}_{username}"
+    bonus_percent = 0.0
+    bonus_expires = 0
+    if reward["type"] == "bonus":
+        if "10pct" in reward["value"]:
+            bonus_percent = 0.10
+        elif "5pct" in reward["value"]:
+            bonus_percent = 0.05
+        duration_days = reward.get("duration_days", 7)
+        bonus_expires = int(datetime.now(UTC).timestamp()) + duration_days * 86400
+    season_badge = ""
+    if reward.get("bonus") == "season_badge":
+        season_badge = season_id
+    now_iso = datetime.now(UTC).isoformat()
 
     lua_script = """
     local season_key = KEYS[1]
     local player_key = KEYS[2]
     local powerups_key = KEYS[3]
+    local cards_set_key = KEYS[4]
+    local card_detail_key = KEYS[5]
     local reward_level = tonumber(ARGV[1])
     local premium_required = ARGV[2] == '1'
     local reward_type = ARGV[3]
     local reward_value = ARGV[4]
+    local card_id = ARGV[5]
+    local bonus_percent = tonumber(ARGV[6])
+    local bonus_expires = tonumber(ARGV[7])
+    local season_badge = ARGV[8]
+    local now_iso = ARGV[9]
+    local realm_id = ARGV[10]
 
     local current_level = tonumber(redis.call('hget', season_key, 'level') or '0')
     if current_level < reward_level then
@@ -277,6 +450,31 @@ async def claim_season_reward(
         redis.call('hincrby', player_key, 'hints', tonumber(reward_value))
     elseif reward_type == 'powerup' then
         redis.call('hincrby', powerups_key, reward_value, 1)
+    elseif reward_type == 'card' then
+        redis.call('sadd', cards_set_key, card_id)
+        redis.call('expire', cards_set_key, 2592000)
+        redis.call('hset', card_detail_key,
+            'block_hash', card_id,
+            'rarity', reward_value,
+            'mempool_count', '0',
+            'discarded_backlog', '0',
+            'block_number', '0',
+            'is_halving', 'false',
+            'timestamp', now_iso,
+            'realm_id', realm_id,
+            'source', 'season')
+        redis.call('expire', card_detail_key, 2592000)
+    elseif reward_type == 'bonus' then
+        local existing = tonumber(redis.call('hget', player_key, 'reward_bonus_percent') or '0')
+        if bonus_percent > existing then
+            redis.call('hset', player_key,
+                'reward_bonus_percent', tostring(bonus_percent),
+                'reward_bonus_expires', tostring(bonus_expires))
+        end
+    end
+
+    if season_badge ~= '' then
+        redis.call('hset', player_key, 'season_badge', season_badge)
     end
 
     table.insert(claimed, reward_level)
@@ -286,14 +484,22 @@ async def claim_season_reward(
     """
     result = await redis_client.eval(
         lua_script,
-        3,
+        5,
         sk_key,
         ps_key,
         pu_key,
+        cards_key,
+        card_detail_key_fn(definition.realm_id, username, card_id),
         str(reward_level),
         premium_required,
         reward["type"],
         str(reward["value"]),
+        card_id,
+        str(bonus_percent),
+        str(bonus_expires),
+        season_badge,
+        now_iso,
+        definition.realm_id,
     )
     status = result.decode() if isinstance(result, bytes) else str(result)
     if status == "already_claimed":
@@ -305,7 +511,13 @@ async def claim_season_reward(
     if status != "ok":
         raise RuntimeError(f"Resultado inesperado ao reclamar recompensa: {status}")
 
-    return {"reward": reward, "claimed_level": reward_level}
+    return {
+        "reward": reward,
+        "claimed_level": reward_level,
+        "card_id": card_id,
+        "season_badge": season_badge,
+        "bonus_percent": bonus_percent,
+    }
 
 
 async def buy_season_premium(
@@ -317,8 +529,20 @@ async def buy_season_premium(
     redis_client,
     get_network_definition_fn,
 ) -> dict[str, Any]:
-    """Compra acesso premium com débito e ativação atômicos no Redis."""
+    """Compra acesso premium com débito e ativação atômicos no Redis.
+
+    Fase 5.5: roda o rollover antes — se a temporada está encerrada
+    (prazo de claim ativo), a compra é rejeitada. Sem isso, o jogador
+    compraria premium na temporada antiga e claimaria as recompensas
+    premium antigas (até ~1,5M sats por 50k).
+    """
     definition = get_network_definition_fn(realm_id)
+    # Fase 5.5: garante o rollover e bloqueia a compra em temporada encerrada.
+    rollover = await ensure_season_rollover(
+        realm_id, username, season_key_fn, redis_client, get_network_definition_fn
+    )
+    if rollover["season_ended"]:
+        raise ValueError("Temporada encerrada — passe premium indisponível")
     ps_key = player_state_key_fn(definition.realm_id, username)
     sk_key = season_key_fn(definition.realm_id, username)
     premium_cost = 50000

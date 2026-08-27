@@ -104,3 +104,33 @@ new-design.html
 gemini-code-*.html
 prototype-*.html
 prototype-pixel-*.html
+
+# ===== Relatórios gerados (auditoria / análise / game-design) — NÃO commitar =====
+# Regra: novos .md de auditoria, análise, game-design e scripts de teste/auditoria
+# gerados pelo agente não entram no git/github. Documentação de projeto escrita à
+# mão (API.md, ARQUITETURA.md, README.md, etc.) continua versionada.
+# Auditorias
+docs/*auditoria*.md
+docs/*AUDITORIA*.md
+docs/auditoria-mecanicas/
+# Análises
+docs/*análise*.md
+docs/*ANALISE*.md
+# Relatórios / planos / fechamentos / baselines
+docs/*relatorio*.md
+docs/*RELATORIO*.md
+docs/*PLANO*.md
+docs/*FECHAMENTO*.md
+docs/baseline-*.md
+# Game-design
+docs/*game-design*.md
+
+# ===== Pastas de trabalho / auditoria / testes gerados — NÃO commitar =====
+/tests/            # scripts de teste gerados (a suíte real é backend/tests/)
+.hermes/           # dados de sessão do Hermes Agent (root)
+/examples/
+/references/
+/scripts/
+audit_phase*
+visual_audit*
+audit_browser*

@@ -37,6 +37,7 @@ from app.storage import (
     leaderboard_key,
     mempool_count_key,
     node_status_key,
+    pending_txs_key,  # Fase A2: replay de transações em game_start
     pool_leaderboard_key,  # Fase 2: reset pools no epoch
     realm_state_key,
 )
@@ -77,6 +78,9 @@ end
 local event = cjson.decode(ARGV[5])
 event['mempool_count'] = count
 redis.call('publish', KEYS[4], cjson.encode(event))
+-- Fase A2: adiciona à lista de transações pendentes para replay em game_start
+redis.call('rpush', KEYS[5], cjson.encode(event))
+redis.call('expire', KEYS[5], ARGV[3])
 return {1, count}
 """
 COMMIT_BLOCK_SCRIPT = """
@@ -89,6 +93,10 @@ redis.call('set', KEYS[2], ARGV[2])
 redis.call('set', KEYS[3], ARGV[3])
 if epoch_changed and ARGV[4] ~= '' then
   redis.call('publish', KEYS[4], ARGV[4])
+end
+-- Fase A2: novo bloco = nova epoch; transações antigas não são mais jogáveis
+if epoch_changed then
+  redis.call('del', KEYS[5])
 end
 return 1
 """
@@ -501,11 +509,12 @@ class NodeIngestor:
             )
             committed, _ = await self.redis.eval(
                 COMMIT_TRANSACTION_SCRIPT,
-                4,
+                5,
                 self.lease_key,
                 dedupe_key(self.config.realm_id, observed_epoch),
                 mempool_count_key(self.config.realm_id),
                 events_channel(self.config.realm_id),
+                pending_txs_key(self.config.realm_id),  # Fase A2: replay em game_start
                 self.lease_token,
                 txid,
                 3600,
@@ -582,11 +591,12 @@ class NodeIngestor:
                 block_event = json.dumps(event)
             committed = await self.redis.eval(
                 COMMIT_BLOCK_SCRIPT,
-                4,
+                5,
                 self.lease_key,
                 epoch_key(self.config.realm_id),
                 mempool_count_key(self.config.realm_id),
                 events_channel(self.config.realm_id),
+                pending_txs_key(self.config.realm_id),  # Fase A2: limpar pendentes na nova epoch
                 self.lease_token,
                 self.epoch,
                 current_count,
@@ -693,11 +703,13 @@ class NodeIngestor:
     ) -> None:
         """Gera um Block Card colecionável para cada bloco minerado.
 
-        A raridade é determinada por eventos especiais:
-        - Common (60%): bloco normal
-        - Rare (25%): bloco com High Fee ou Golden Hash
-        - Epic (10%): bloco com MEV ou Boss Battle
-        - Legendary (5%): bloco em evento global ativo
+        A raridade é determinada por rolagem aleatória (decisão Fase 4.5 —
+        manter aleatória; a docstring anterior alegava base em eventos, o que
+        o código nunca implementou):
+        - Common (60%): rolagem padrão
+        - Rare (25%): rolagem
+        - Epic (10%): rolagem
+        - Legendary (5%): rolagem
 
         O card é salvo em dois lugares no Redis:
         1. cards_set_key: conjunto com hashes dos blocos cardados
@@ -708,7 +720,7 @@ class NodeIngestor:
             mempool_count: Tamanho da mempool no momento do bloco.
             discarded_backlog: Transações descartadas da epoch anterior.
         """
-        # Determina raridade baseada em eventos especiais
+        # Determina raridade por rolagem aleatória
         rarity = self._determine_card_rarity()
 
         # Constrói dados do card
@@ -745,7 +757,11 @@ class NodeIngestor:
         )
 
     def _determine_card_rarity(self) -> str:
-        """Determina a raridade do card com base em eventos do bloco.
+        """Determina a raridade do card por rolagem aleatória.
+
+        Distribuição fixa: 60% common, 25% rare, 10% epic, 5% legendary.
+        (Decisão Fase 4.5: manter aleatória — a versão anterior da docstring
+        alegava base em eventos do bloco, que nunca foi implementada.)
 
         Returns:
             Uma das raridades: 'common', 'rare', 'epic', 'legendary'.
@@ -754,16 +770,16 @@ class NodeIngestor:
 
         roll = random.random() * 100
 
-        # Legendary: evento global ativo (5%)
+        # Legendary: 5%
         if roll < 5:
             return "legendary"
-        # Epic: bloco com MEV ou Boss Battle (10%)
+        # Epic: 10%
         if roll < 15:
             return "epic"
-        # Rare: bloco com High Fee ou Golden Hash (25%)
+        # Rare: 25%
         if roll < 40:
             return "rare"
-        # Common: bloco normal (60%)
+        # Common: 60%
         return "common"
 
     async def run(self) -> None:

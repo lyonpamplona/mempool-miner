@@ -61,7 +61,8 @@ NETWORK_CATALOG: tuple[NetworkDefinition, ...] = (
         BitcoinNetwork.MAINNET,
         "mainnet-pruned",
         "Mainnet podada",
-        optional=True,
+        optional=True,  # Fase 6.11: mainnet desativada por padrão (optional=True)
+        # Para habilitar: definir MAINNET_ENABLED=true no .env
     ),
 )
 NETWORKS_BY_REALM = {definition.realm_id: definition for definition in NETWORK_CATALOG}

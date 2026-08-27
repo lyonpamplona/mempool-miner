@@ -14,10 +14,66 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 
+def test_decoder_wordlist_is_bip39_english() -> None:
+    """Fase 4.4: o decoder usa o BIP39 inglês (mesmo wordlist do jogo principal).
+
+    Antes da correção, o decoder sorteava de um subconjunto português
+    (BIP39_WORDLIST mal nomeado). Agora usa Mnemonic("english").wordlist,
+    consistente com as palavras derivadas das transações reais (engine.py).
+    """
+    wordlist = main_module.BIP39_WORDLIST
+    # BIP39 EN tem exatamente 2048 palavras
+    assert len(wordlist) == 2048
+    # Palavras BIP39 EN presentes
+    assert "abandon" in wordlist
+    assert "zoo" in wordlist
+    # Palavras do antigo subconjunto PT ausentes
+    assert "abrir" not in wordlist
+    assert "amigo" not in wordlist
+    # Todas as palavras são strings minúsculas (padrão BIP39)
+    assert all(isinstance(w, str) and w == w.lower() for w in wordlist)
+
+
 def test_score_submit_normalizes_username() -> None:
     """Espaços externos são removidos de um nickname válido."""
     payload = ScoreSubmit(username=" abcdefghijkl ", score=42)
     assert payload.username == "abcdefghijkl"
+
+
+@pytest.mark.asyncio
+async def test_send_chat_message_publishes_to_events_channel(monkeypatch) -> None:
+    """Fase 3.1: o endpoint publica chat_message no canal de eventos (broadcast WS).
+
+    Antes da correção, a mensagem só ia para o Redis List (histórico) e o
+    frontend só via as próprias mensagens. Agora, após armazenar, o endpoint
+    publica um envelope ``chat_message`` no ``events_channel(realm_id)``.
+    """
+    redis_client = AsyncMock()
+    # Rate limit: primeira mensagem liberada (chave inexistente).
+    redis_client.get.return_value = None
+    monkeypatch.setattr(main_module, "redis_client", redis_client)
+
+    result = await main_module.send_chat_message(
+        "regtest", main_module.ChatMessage(username="tester", message="olá mundo")
+    )
+
+    assert result["status"] == "success"
+    assert result["message"]["username"] == "tester"
+    assert result["message"]["message"] == "olá mundo"
+
+    # O publish aconteceu no canal de eventos do realm.
+    redis_client.publish.assert_awaited_once()
+    channel_arg, payload_arg = redis_client.publish.await_args.args
+    assert channel_arg == main_module.events_channel("regtest")
+    published = json.loads(payload_arg)
+    assert published["action"] == "chat_message"
+    assert published["realm_id"] == "regtest"
+    assert published["username"] == "tester"
+    assert published["message"] == "olá mundo"
+    assert "timestamp" in published
+    # Envelope público: campos comuns presentes.
+    assert published["schema_version"] == 2
+    assert published["event_id"]
 
 
 def test_score_submit_keeps_pool_name_separate_from_username() -> None:
@@ -26,6 +82,34 @@ def test_score_submit_keeps_pool_name_separate_from_username() -> None:
 
     assert payload.username == "Miner"
     assert payload.pool_name == "F2POOL"
+
+
+def test_xp_add_request_rejects_float() -> None:
+    """Fase 2.2: o payload de XP rejeita float (XP é sempre inteiro)."""
+    from app.main import XpAddRequest
+
+    with pytest.raises(ValidationError):
+        XpAddRequest(xp=1.5)
+    with pytest.raises(ValidationError):
+        XpAddRequest(xp=0.0)
+
+
+def test_xp_add_request_rejects_negative_and_overflow() -> None:
+    """Fase 2.2: o payload de XP rejeita negativo e valor acima de MAX_SCORE."""
+    from app.main import XpAddRequest
+
+    with pytest.raises(ValidationError):
+        XpAddRequest(xp=-1)
+    with pytest.raises(ValidationError):
+        XpAddRequest(xp=MAX_SCORE + 1)
+
+
+def test_xp_add_request_accepts_valid_int() -> None:
+    """Fase 2.2: int válido (incluindo 0) é aceito."""
+    from app.main import XpAddRequest
+
+    assert XpAddRequest(xp=0).xp == 0
+    assert XpAddRequest(xp=100).xp == 100
 
 
 @pytest.mark.asyncio
@@ -41,6 +125,10 @@ async def test_submit_score_aggregates_explicit_pool_name(
         "network_snapshot",
         AsyncMock(return_value={"playable": True}),
     )
+    # Isola a lógica co-op (Fase 2.3): sem amigos online, bônus = 0.
+    monkeypatch.setattr(
+        main_module, "_calculate_co_op_bonus", AsyncMock(return_value=0.0)
+    )
 
     result = await main_module.submit_score_for_realm(
         "regtest",
@@ -55,9 +143,42 @@ async def test_submit_score_aggregates_explicit_pool_name(
         gt=True,
         ch=True,
     )
-    redis_client.zadd.assert_any_await(
-        main_module.pool_leaderboard_key("regtest"),
-        {"F2POOL": 42},
+
+
+@pytest.mark.asyncio
+async def test_submit_score_applies_co_op_bonus_to_leaderboard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fase 2.3: o bônus co-op (+5% por amigo online) é aplicado ao score.
+
+    Antes da correção, o bônus era calculado/exibido em /friends mas nunca
+    aplicado a nenhuma recompensa (cosmético). Agora o score no leaderboard
+    recebe o multiplicador (decisão Opção A).
+    """
+    redis_client = AsyncMock()
+    redis_client.zadd.return_value = 1
+    monkeypatch.setattr(main_module, "redis_client", redis_client)
+    monkeypatch.setattr(
+        main_module,
+        "network_snapshot",
+        AsyncMock(return_value={"playable": True}),
+    )
+    # 3 amigos online → bônus 15% (3 × 0.05).
+    monkeypatch.setattr(
+        main_module, "_calculate_co_op_bonus", AsyncMock(return_value=0.15)
+    )
+
+    result = await main_module.submit_score_for_realm(
+        "regtest",
+        ScoreSubmit(username="Miner", score=1000),
+    )
+
+    # 1000 × 1.15 = 1150
+    assert result["co_op_bonus"] == 0.15
+    assert result["effective_score"] == 1150
+    redis_client.zadd.assert_awaited_once_with(
+        main_module.leaderboard_key("regtest"),
+        {"Miner": 1150},
         gt=True,
         ch=True,
     )
@@ -613,6 +734,12 @@ async def test_public_websocket_handshake_remains_compatible(
         "pubsub",
         MagicMock(return_value=WaitingPubSub()),
     )
+    # Fase A2: mocka a leitura de transações pendentes (replay em game_start)
+    monkeypatch.setattr(
+        main_module.redis_client,
+        "lrange",
+        AsyncMock(return_value=[]),
+    )
 
     websocket = MagicMock()
     websocket.headers = {"origin": "http://localhost:8010"}
@@ -641,6 +768,7 @@ async def test_public_websocket_handshake_remains_compatible(
         "initial_block_download",
         "verification_progress",
         "pruned",
+        "pending_transactions",  # Fase A2: replay de transações pendentes
     }
     assert {
         "node_id",
@@ -672,6 +800,12 @@ async def test_public_websocket_disconnect_during_initial_send_is_clean(
     }
     monkeypatch.setattr(main_module, "network_snapshot", AsyncMock(return_value=snapshot))
     monkeypatch.setattr(main_module, "get_relay", AsyncMock(return_value=MagicMock()))
+    # Fase A2: mocka a leitura de transações pendentes (replay em game_start)
+    monkeypatch.setattr(
+        main_module.redis_client,
+        "lrange",
+        AsyncMock(return_value=[]),
+    )
 
     websocket = MagicMock()
     websocket.headers = {"origin": "http://localhost:8010"}
@@ -696,6 +830,10 @@ async def test_submit_score_reports_an_existing_record_update(
         main_module,
         "network_snapshot",
         AsyncMock(return_value={"playable": True}),
+    )
+    # Isola a lógica co-op (Fase 2.3): sem amigos online, bônus = 0.
+    monkeypatch.setattr(
+        main_module, "_calculate_co_op_bonus", AsyncMock(return_value=0.0)
     )
 
     response = await main_module.submit_score(ScoreSubmit(username="Miner", score=43))

@@ -221,12 +221,26 @@ class GlobalEventScheduler:
             return True
 
     async def _trigger_event(self, event_type: GlobalEventType) -> None:
-        """Dispara um evento global: pre-anúncio -> evento -> encerramento."""
+        """Dispara um evento global com timing correto.
+
+        Sequência (corrigida na Fase 3.2 — antes o pre-anúncio saía no mesmo
+        instante do trigger e started_at/ends_at não batiam com o início/fim
+        reais):
+          1. T = now + 120s (início real do evento).
+          2. Publica ``event_preannounce`` AGORA, com started_at=T e
+             ends_at=T+duration (o jogador vê o banner 2 min antes).
+          3. Aguarda 120s.
+          4. Publica ``event_started`` (efeitos passam a valer aqui).
+          5. Aguarda ``duration``.
+          6. Publica ``event_ended``.
+        """
         duration = EVENT_DURATION_SECONDS[event_type]
         meta = EVENT_META[event_type]
         now = datetime.now(UTC)
-        started_at = now.isoformat()
-        ends_at = (now + timedelta(seconds=duration)).isoformat()
+        # Início real do evento: 2 minutos (janela de pre-anúncio) a partir
+        # de agora. started_at/ends_at passam a refletir o início/fim reais.
+        started_at = (now + timedelta(seconds=EVENT_PREANNOUNCE_SECONDS)).isoformat()
+        ends_at = (now + timedelta(seconds=EVENT_PREANNOUNCE_SECONDS + duration)).isoformat()
 
         event = GlobalEvent(
             event_type=event_type,
@@ -236,8 +250,7 @@ class GlobalEventScheduler:
         )
         self._active_event = event
 
-        # 1. Pre-anúncio (2 minutos antes)
-        preannounce_at = (now + timedelta(seconds=duration - EVENT_PREANNOUNCE_SECONDS)).isoformat()
+        # 1. Pre-anúncio (publicado AGORA, 2 min antes do início real)
         await self._publish_event(
             event_type=event_type,
             action="event_preannounce",
@@ -247,18 +260,17 @@ class GlobalEventScheduler:
             meta=meta,
         )
         logger.info(
-            "Pré-anúncio de evento global %s em %s às %s",
+            "Pré-anúncio de evento global %s em %s — inicia às %s",
             meta["label"],
             self.realm_id,
-            preannounce_at,
+            started_at,
         )
 
-        # 2. Aguarda até o momento do evento
-        wait_before = duration - EVENT_PREANNOUNCE_SECONDS
-        if await self._wait_with_cancel(wait_before):
+        # 2. Aguarda a janela de pre-anúncio (120s)
+        if await self._wait_with_cancel(EVENT_PREANNOUNCE_SECONDS):
             return
 
-        # 3. Dispara o evento
+        # 3. Dispara o evento (efeitos passam a valer aqui)
         await self._publish_event(
             event_type=event_type,
             action="event_started",
@@ -343,13 +355,27 @@ class GlobalEventScheduler:
 async def get_active_event(
     redis_client: redis.Redis,
     realm_id: str,
+    include_preannounce: bool = False,
 ) -> dict[str, Any] | None:
-    """Verifica se há um evento global ativo ou próximo no realm.
+    """Verifica se há um evento global ativo (ou em pre-anúncio) no realm.
 
-    Lê o último evento publicado no canal Pub/Sub do realm.
-    Retorna None se não houver evento relevante.
+    Lê a status key escrita pelo ``GlobalEventScheduler`` a cada publish.
+
+    Args:
+        redis_client: Cliente Redis.
+        realm_id: Identificador do realm.
+        include_preannounce: Se ``True``, retorna o evento mesmo durante a
+            janela de pre-anúncio (``now < started_at``). Se ``False``
+            (padrão), retorna ``None`` até o evento começar
+            (``started_at <= now``). O ingestor usa o padrão para aplicar
+            ``apply_event_effects`` apenas no evento ativo — antes da
+            correção da Fase 3.2, os efeitos valiam 120s antes do início
+            real porque a função ignorava ``started_at``.
+
+    Returns:
+        Dict com o status do evento, ou ``None`` se não houver evento
+        relevante.
     """
-    channel = events_channel(realm_id)
     # Usa um canal de status separado para consulta rápida
     status_key = f"mempool_miner:v2:{{{realm_id}}}:global_event_status"
     raw = await redis_client.get(status_key)
@@ -361,19 +387,32 @@ async def get_active_event(
     except (json.JSONDecodeError, TypeError):
         return None
 
-    # Verifica se o evento ainda está ativo ou próximo
     from datetime import datetime as _dt
+    now = _dt.now(UTC)
+
+    # Evento expirado — limpa
     ends_at = status.get("event_ends_at")
     if ends_at:
         try:
             end_time = _dt.fromisoformat(ends_at)
-            now = _dt.now(UTC)
             if end_time <= now:
-                # Evento expirado — limpa
                 await redis_client.delete(status_key)
                 return None
         except (ValueError, TypeError):
             pass
+
+    # Evento ainda não começou (janela de pre-anúncio) — só retorna se
+    # include_preannounce=True. O ingestor usa o padrão (False) para aplicar
+    # efeitos apenas no evento ativo.
+    if not include_preannounce:
+        started_at = status.get("event_started_at")
+        if started_at:
+            try:
+                start_time = _dt.fromisoformat(started_at)
+                if start_time > now:
+                    return None
+            except (ValueError, TypeError):
+                pass
 
     return status
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import logging
 import os
 from pathlib import Path
@@ -384,10 +385,18 @@ class GameEngine:
 
         elif event_type == GlobalEventType.GOLDEN_RUSH:
             # Golden Rush: Golden Hash aparece 3× mais por 5 min (5× recompensa)
-            # Aumenta chance de ser golden hash (30% ao invés de ~0.4%)
-            if not is_golden and int(tx_metadata.get("word", "A")[:2], 16) % 100 < 30:
+            # Aumenta chance de ser golden hash (30% ao invés de ~0.4%).
+            # Usa hash determinístico da palavra (SHA-256) em vez de
+            # int(word[:2], 16), que lançava ValueError para palavras cujo
+            # prefixo não é hexadecimal (ex.: "GALAXY" -> "GA") e fazia a TX
+            # ser descartada silenciosamente pelo try/except do ingestor.
+            word = tx_metadata.get("word", "A")
+            word_hash = int(hashlib.sha256(word.encode("utf-8")).hexdigest()[:8], 16)
+            if not is_golden and word_hash % 100 < 30:
                 tx_metadata["is_golden"] = True
-                multiplier = 5.0
+                # Golden + High Fee = 15× (consistente com _calculate_multiplier
+                # e com o ramo FEE_SPIKE); senão, Golden puro = 5×.
+                multiplier = 15.0 if is_high_fee else 5.0
                 tx_metadata["multiplier"] = multiplier
 
         elif event_type == GlobalEventType.MEMPOOL_FLOOD:

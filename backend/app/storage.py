@@ -158,6 +158,16 @@ def dedupe_key(realm_id: str, epoch: str) -> str:
     return f"{PREFIX}:{{{validate_realm_id(realm_id)}}}:seen:{epoch}"
 
 
+def pending_txs_key(realm_id: str) -> str:
+    """Lista de transações pendentes da epoch atual para replay em game_start.
+
+    Fase A2: permite que um cliente que reconecta receba as transações que
+    ainda não foram consumidas (não encontradas na grade), evitando o estado
+    'aguardando transações' após queda de WebSocket ou mudança de epoch.
+    """
+    return f"{PREFIX}:{{{validate_realm_id(realm_id)}}}:pending_txs"
+
+
 def node_status_key(node_id: str) -> str:
     """Heartbeat operacional de uma origem fisica."""
     return f"{PREFIX}:node:{validate_realm_id(node_id)}:status"
@@ -377,6 +387,69 @@ def decoder_key(realm_id: str, username: str) -> str:
         wins: total de vitórias
     """
     return f"{PREFIX}:{{{validate_realm_id(realm_id)}}}:decoder:{username}"
+
+
+# ==========================================================================
+# Fase 5.1/5.3: Saldo — backend como fonte de verdade
+# ==========================================================================
+# O saldo do jogador é creditado/debitado atomicamente no backend via
+# scripts Lua idempotentes (por tx_id). O frontend espelha o saldo do
+# backend (não mais "quem tiver mais, vence").
+
+def balance_tx_key(realm_id: str, username: str, tx_id: str) -> str:
+    """Marcador idempotente de uma transação de saldo (earn/spend).
+
+    Cada transação (earn ou spend) tem um tx_id único. Se a mesma transação
+    for reenviada (retry após falha de rede), o script Lua detecta o
+    marcador e não aplica a transação duas vezes.
+    """
+    return (
+        f"{PREFIX}:{{{validate_realm_id(realm_id)}}}:"
+        f"balance_tx:{username}:{tx_id}"
+    )
+
+
+# Credita o saldo atomicamente, com idempotência por tx_id.
+# KEYS[1] = player_state_key, KEYS[2] = balance_tx_key
+# ARGV[1] = amount, ARGV[2] = tx_ttl (segundos)
+# Retorna: {code, balance}
+#   code: 1 = creditado agora, 0 = já creditado (idempotente), -1 = erro
+BALANCE_EARN_SCRIPT = """
+local tx_state = redis.call('get', KEYS[2])
+if tx_state then
+  local balance = tonumber(redis.call('hget', KEYS[1], 'balance') or '0')
+  return {0, balance}
+end
+local amount = tonumber(ARGV[1])
+local balance = tonumber(redis.call('hget', KEYS[1], 'balance') or '0')
+balance = balance + amount
+redis.call('hset', KEYS[1], 'balance', balance)
+redis.call('set', KEYS[2], 'earned', 'EX', tonumber(ARGV[2]))
+return {1, balance}
+"""
+
+# Debita o saldo atomicamente, com idempotência por tx_id e checagem de saldo.
+# KEYS[1] = player_state_key, KEYS[2] = balance_tx_key
+# ARGV[1] = amount, ARGV[2] = tx_ttl (segundos)
+# Retorna: {code, balance}
+#   code: 1 = debitado agora, 0 = já debitado (idempotente),
+#         -1 = saldo insuficiente, -2 = erro
+BALANCE_SPEND_SCRIPT = """
+local tx_state = redis.call('get', KEYS[2])
+if tx_state then
+  local balance = tonumber(redis.call('hget', KEYS[1], 'balance') or '0')
+  return {0, balance}
+end
+local amount = tonumber(ARGV[1])
+local balance = tonumber(redis.call('hget', KEYS[1], 'balance') or '0')
+if balance < amount then
+  return {-1, balance}
+end
+balance = balance - amount
+redis.call('hset', KEYS[1], 'balance', balance)
+redis.call('set', KEYS[2], 'spent', 'EX', tonumber(ARGV[2]))
+return {1, balance}
+"""
 
 
 async def migrate_legacy_default(client: redis.Redis, default_realm: str) -> None:

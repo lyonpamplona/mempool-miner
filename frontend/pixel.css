@@ -791,6 +791,14 @@
 
 .btn-decoder-launch { animation: none; }
 
+/* Fase B1: decoder em cooldown — sempre visível, desabilitado */
+.btn-decoder-launch.decoder-cooldown {
+    opacity: 0.45;
+    cursor: not-allowed;
+    border-color: var(--text-muted);
+    color: var(--text-muted);
+}
+
 .btn-energy { border-color: var(--text-main);
     color: var(--text-main); }
 
@@ -2799,6 +2807,34 @@
     cursor: pointer;
 }
 .market-listing-buy-btn:hover { background: rgba(0, 240, 255, 0.12); }
+
+/* Fase B4: botão de cancelamento de listing próprio */
+.market-listing-cancel-btn {
+    flex: 0 0 auto;
+    padding: 6px 10px;
+    background: var(--hull-dark);
+    border: 1px solid var(--error-red);
+    color: var(--error-red);
+    font-family: inherit;
+    font-size: 0.7rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+.market-listing-cancel-btn:hover { background: rgba(255, 80, 80, 0.12); }
+
+/* Fase B4/C2: destaque de listing próprio */
+.market-listing-own {
+    border-color: var(--warning-amber, #ffb020);
+    background: rgba(255, 176, 32, 0.05);
+}
+
+/* Fase B3/B5: hint de preço sugerido + taxa de 5% na seção de venda */
+.market-sell-hint {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    letter-spacing: 0.04em;
+    padding: 4px 0;
+}
 .market-history-item {
     display: flex;
     align-items: center;

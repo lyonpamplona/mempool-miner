@@ -42,11 +42,14 @@ from app.global_events import (
     publish_event_status,
 )
 from app.storage import (
+    BALANCE_EARN_SCRIPT,
+    BALANCE_SPEND_SCRIPT,
     ENERGY_BUY_SCRIPT,
     ENERGY_REFUND_SCRIPT,
     ENERGY_SPEND_SCRIPT,
     PREFIX,
     achievements_key,
+    balance_tx_key,
     cards_set_key,
     card_detail_key,
     chat_messages_key,
@@ -61,6 +64,7 @@ from app.storage import (
     migrate_legacy_default,
     missions_key,
     node_status_key,
+    pending_txs_key,  # Fase A2: replay de transações em game_start
     player_stats_key,
     pool_leaderboard_key,
     player_state_key,
@@ -102,6 +106,7 @@ PUBLIC_EVENT_FIELDS = {
             "initial_block_download",
             "verification_progress",
             "pruned",
+            "pending_transactions",  # Fase A2: replay de transações pendentes
         }
     ),
     "network_status": frozenset(
@@ -185,6 +190,12 @@ PUBLIC_EVENT_FIELDS = {
         "event_preannounced",
         "event_started_at",
         "event_ends_at",
+    }),
+    # Fase 9: Chat em Tempo Real — broadcast de mensagens via WebSocket
+    "chat_message": frozenset({
+        "username",
+        "message",
+        "timestamp",
     }),
 }
 PUBLIC_COMMON_EVENT_FIELDS = frozenset(
@@ -332,6 +343,23 @@ class ScoreSubmit(BaseModel):
     username: Username
     pool_name: PoolName | None = None
     score: int = Field(strict=True, ge=0, le=MAX_SCORE)
+
+
+class XpAddRequest(BaseModel):
+    """Payload para adicionar XP ao jogador (nível e season).
+
+    ``strict=True`` rejeita floats (ex.: 1.0) — o XP é sempre inteiro.
+    Antes da correção da Fase 2, os endpoints aceitavam ``dict[str, Any]``
+    sem validação, permitindo float/negativo/overflow.
+
+    Definido no topo do módulo (junto com os demais schemas) para que as
+    anotações de endpoints anteriores à definição original sejam resolvidas
+    corretamente pelo FastAPI (``from __future__ import annotations``).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    xp: int = Field(strict=True, ge=0, le=MAX_SCORE)
 
 
 # Fase 3: Estado do jogador — modelos Pydantic
@@ -689,7 +717,10 @@ async def get_global_events(realm_id: str) -> dict[str, Any]:
         (metadados de todos os tipos de evento).
     """
     definition = get_network_definition(realm_id)
-    active = await get_active_event(redis_client, definition.realm_id)
+    # include_preannounce=True: o endpoint precisa do pre-anúncio para o
+    # frontend exibir o banner "evento em 2 min". O ingestor usa o padrão
+    # (False) para aplicar efeitos apenas no evento ativo.
+    active = await get_active_event(redis_client, definition.realm_id, include_preannounce=True)
 
     # Constrói definições de todos os tipos de evento
     event_definitions = []
@@ -740,7 +771,26 @@ async def get_network_health(realm_id: str) -> dict[str, Any]:
     return await network_snapshot(realm_id)
 
 
-async def submit_score_for_realm(realm_id: str, data: ScoreSubmit) -> dict[str, str | bool]:
+async def _calculate_co_op_bonus(realm_id: str, username: str) -> float:
+    """Calcula o bônus co-op do jogador: +5% por amigo online, máx +20% (4 amigos).
+
+    Mesma regra de ``_get_friends_list`` (main.py:4414-4416), extraída para
+    reuso no leaderboard (Fase 2.3 — decisão Opção A: o bônus co-op é
+    aplicado ao score no leaderboard, não às recompensas de jogo).
+
+    Returns:
+        Fração (ex.: 0.15 = 15%). 0.0 se o jogador não tem amigos online.
+    """
+    key = friends_key(realm_id, username)
+    friend_names = await redis_client.smembers(key)
+    if not friend_names:
+        return 0.0
+    online_players = await _get_online_players(realm_id)
+    online_count = sum(1 for f in friend_names if f in online_players)
+    return min(online_count * 0.05, 0.20)
+
+
+async def submit_score_for_realm(realm_id: str, data: ScoreSubmit) -> dict[str, Any]:
     """Mantem atomicamente o recorde no leaderboard isolado do realm.
 
     Usa ``ZADD GT CH`` para atualizar apenas se a nova pontuacao for maior
@@ -763,9 +813,17 @@ async def submit_score_for_realm(realm_id: str, data: ScoreSubmit) -> dict[str, 
     snapshot = await network_snapshot(definition.realm_id)
     if not snapshot["playable"]:
         raise HTTPException(status_code=409, detail="Rede indisponivel para pontuacao")
+
+    # Fase 2.3: Bônus co-op — +5% por amigo online (máx +20%) aplicado ao
+    # score no leaderboard (decisão Opção A).
+    # Fase 6 (B3): usar round() em vez de int() para evitar truncamento
+    # da fração — impacto < 1 sat, mas round() é mais preciso.
+    co_op_bonus = await _calculate_co_op_bonus(definition.realm_id, data.username)
+    effective_score = min(round(data.score * (1 + co_op_bonus)), MAX_SCORE)
+
     updated = await redis_client.zadd(
         leaderboard_key(definition.realm_id),
-        {data.username: data.score},
+        {data.username: effective_score},
         gt=True,
         ch=True,
     )
@@ -775,7 +833,7 @@ async def submit_score_for_realm(realm_id: str, data: ScoreSubmit) -> dict[str, 
     if pool_name:
         await redis_client.zadd(
             pool_leaderboard_key(definition.realm_id),
-            {pool_name: data.score},
+            {pool_name: effective_score},
             gt=True,
             ch=True,
         )
@@ -784,6 +842,8 @@ async def submit_score_for_realm(realm_id: str, data: ScoreSubmit) -> dict[str, 
         "status": "success",
         "updated": bool(updated),
         "realm_id": definition.realm_id,
+        "co_op_bonus": co_op_bonus,
+        "effective_score": effective_score,
     }
 
 
@@ -824,7 +884,7 @@ async def get_pools_v1(realm_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/v1/networks/{realm_id}/leaderboard", tags=["Leaderboard"])
-async def submit_score_v1(realm_id: str, data: ScoreSubmit) -> dict[str, str | bool]:
+async def submit_score_v1(realm_id: str, data: ScoreSubmit) -> dict[str, Any]:
     """Atualiza a maior pontuação no realm indicado.
 
     Args:
@@ -832,7 +892,8 @@ async def submit_score_v1(realm_id: str, data: ScoreSubmit) -> dict[str, str | b
         data: Payload com ``username`` e ``score``.
 
     Returns:
-        Dict com ``status`` e ``updated``.
+        Dict com ``status``, ``updated``, ``realm_id``, ``co_op_bonus``
+        e ``effective_score``.
     """
     return await submit_score_for_realm(realm_id, data)
 
@@ -889,6 +950,14 @@ async def get_player_state(realm_id: str, username: str) -> dict[str, Any]:
     definition = get_network_definition(realm_id)
     key = player_state_key(definition.realm_id, username)
     raw = await redis_client.hgetall(key)
+    now = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+
+    # Bônus de recompensa temporário (season pass) — só vale se não expirou
+    reward_bonus_percent = float(raw.get("reward_bonus_percent", 0))
+    reward_bonus_expires = int(raw.get("reward_bonus_expires", 0))
+    if reward_bonus_expires and now > reward_bonus_expires:
+        reward_bonus_percent = 0.0
+
     if not raw:
         return {
             "username": username,
@@ -900,6 +969,9 @@ async def get_player_state(realm_id: str, username: str) -> dict[str, Any]:
             "hints_used": 0,
             "rbf_used": 0,
             "mev_found": 0,
+            "reward_bonus_percent": 0.0,
+            "reward_bonus_expires": 0,
+            "season_badge": "",
         }
     return {
         "username": username,
@@ -911,6 +983,9 @@ async def get_player_state(realm_id: str, username: str) -> dict[str, Any]:
         "hints_used": int(raw.get("hints_used", 0)),
         "rbf_used": int(raw.get("rbf_used", 0)),
         "mev_found": int(raw.get("mev_found", 0)),
+        "reward_bonus_percent": reward_bonus_percent,
+        "reward_bonus_expires": reward_bonus_expires,
+        "season_badge": raw.get("season_badge", ""),
     }
 
 
@@ -943,12 +1018,136 @@ async def update_player_state(realm_id: str, username: str, data: PlayerStateUpd
                 coerced[k] = "true" if v else "false"
             else:
                 coerced[k] = str(v)
+        # Fase 5.3: o backend é a fonte de verdade do saldo (earn/spend via
+        # /earn e /spend). O sync só migra o saldo local quando o armazenado
+        # é 0 (primeiro uso / backend zerou) — um saldo local inflado (earn
+        # em falha de rede) ou stale (duas abas) NÃO sobrescreve o saldo do
+        # backend. Sem isso, o "quem tiver mais vence" persiste pela via do
+        # sync (auditoria Fase 5, ponta solta MÉDIO).
+        if "balance" in coerced:
+            stored_balance = await redis_client.hget(key, "balance")
+            if stored_balance is not None and int(stored_balance) > 0:
+                coerced.pop("balance")
         await redis_client.hset(key, mapping=coerced)
         # Sem TTL: o estado do jogador (saldo, hardware, etc.) é persistente.
         # persist() limpa qualquer TTL residual de chaves criadas com o código
         # antigo (que setava expire 86400) — senão o saldo zeraria em 24h.
         await redis_client.persist(key)
     return await get_player_state(realm_id, username)
+
+
+# ==========================================================================
+# Fase 5.1/5.3: Saldo — backend como fonte de verdade
+# ==========================================================================
+# O saldo é creditado/debitado atomicamente no backend (scripts Lua
+# idempotentes por tx_id). O frontend espelha o saldo retornado; não é mais
+# "quem tiver mais, vence".
+
+BALANCE_TX_TTL = 86400 * 7  # 7 dias para retry idempotente
+
+
+class BalanceEarnRequest(BaseModel):
+    """Crédito de saldo (recompensa de rodada, loot, bônus)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    username: Username
+    amount: int = Field(ge=1, le=MAX_SCORE)
+    tx_id: str = Field(min_length=1, max_length=64)
+
+
+class BalanceSpendRequest(BaseModel):
+    """Débito de saldo (compras: hint, hardware, lightning, RBF, slashing)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    username: Username
+    amount: int = Field(ge=1, le=MAX_SCORE)
+    tx_id: str = Field(min_length=1, max_length=64)
+
+
+def _validate_balance_tx_id(tx_id: str) -> str:
+    """Normaliza o tx_id antes de compor a chave Redis."""
+    if not tx_id or len(tx_id) > 64:
+        raise HTTPException(status_code=422, detail="tx_id inválido")
+    return tx_id
+
+
+@app.post("/api/v1/networks/{realm_id}/player/{username}/earn", tags=["Player"])
+async def earn_balance(realm_id: str, username: str, data: BalanceEarnRequest) -> dict[str, Any]:
+    """Credita sats ao saldo do jogador (idempotente por tx_id).
+
+    O backend é a fonte de verdade do saldo: o frontend envia o crédito
+    (recompensa da rodada, loot do boss, bônus MEV) e espelha o saldo
+    retornado. Reenviar o mesmo tx_id não credita em dobro.
+
+    Args:
+        realm_id: Identificador do realm.
+        username: Nome do minerador.
+        data: ``amount`` (sats) e ``tx_id`` (identificador único da transação).
+
+    Returns:
+        Dict com ``balance`` (novo saldo) e ``credited`` (True se creditou agora).
+    """
+    username = matching_username(username, data.username)
+    definition = get_network_definition(realm_id)
+    tx_id = _validate_balance_tx_id(data.tx_id)
+    result = await redis_client.eval(
+        BALANCE_EARN_SCRIPT,
+        2,
+        player_state_key(definition.realm_id, username),
+        balance_tx_key(definition.realm_id, username, tx_id),
+        str(data.amount),
+        str(BALANCE_TX_TTL),
+    )
+    code, balance = int(result[0]), int(result[1])
+    if code == -1:
+        raise HTTPException(status_code=500, detail="Erro ao creditar saldo")
+    return {
+        "username": username,
+        "balance": balance,
+        "credited": code == 1,
+    }
+
+
+@app.post("/api/v1/networks/{realm_id}/player/{username}/spend", tags=["Player"])
+async def spend_balance(realm_id: str, username: str, data: BalanceSpendRequest) -> dict[str, Any]:
+    """Debita sats do saldo do jogador (idempotente por tx_id).
+
+    Valida o saldo no backend antes de aceitar o débito — sem isso, o
+    frontend poderia "comprar" com saldo local que não existe no backend
+    (compra de graça). Reenviar o mesmo tx_id não debita em dobro.
+
+    Args:
+        realm_id: Identificador do realm.
+        username: Nome do minerador.
+        data: ``amount`` (sats) e ``tx_id`` (identificador único da transação).
+
+    Returns:
+        Dict com ``balance`` (novo saldo) e ``charged`` (True se debitou agora).
+
+    Raises:
+        HTTPException: 402 se saldo insuficiente.
+    """
+    username = matching_username(username, data.username)
+    definition = get_network_definition(realm_id)
+    tx_id = _validate_balance_tx_id(data.tx_id)
+    result = await redis_client.eval(
+        BALANCE_SPEND_SCRIPT,
+        2,
+        player_state_key(definition.realm_id, username),
+        balance_tx_key(definition.realm_id, username, tx_id),
+        str(data.amount),
+        str(BALANCE_TX_TTL),
+    )
+    code, balance = int(result[0]), int(result[1])
+    if code == -1:
+        raise HTTPException(status_code=402, detail="Saldo insuficiente")
+    return {
+        "username": username,
+        "balance": balance,
+        "charged": code == 1,
+    }
 
 
 # Fase 7: Achievements — definicoes de conquistas
@@ -1024,6 +1223,9 @@ class StatsUpdate(BaseModel):
     pool_rank_1: int | None = None
     rbf_used: int | None = None
     max_round_earnings: int | None = None
+    # Fase 5.4: streak de palavras encontradas sem erro (reseta a cada erro).
+    # Diferente de words_found (cumulativo), este é o valor atual da streak.
+    words_without_error: int | None = None
 
 
 def _check_achievement(stat_value: int, requirement: dict[str, Any]) -> bool:
@@ -1307,7 +1509,7 @@ async def get_missions(realm_id: str, username: str) -> dict[str, Any]:
             "title": "Acerte 10 palavras sem erro",
             "description": "Encontre 10 palavras consecutivas sem erro.",
             "target": 10,
-            "stat": "words_found",
+            "stat": "words_without_error",
             "reward": 2500,
             "type": "daily",
         },
@@ -1455,14 +1657,6 @@ async def claim_mission_reward(realm_id: str, username: str, mission_id: str) ->
     completed_key = f"completed:{mission_id}"
     claimed_key = f"claimed:{mission_id}"
 
-    is_completed = await redis_client.hget(key, completed_key) == "1"
-    is_claimed = await redis_client.hget(key, claimed_key) == "1"
-
-    if not is_completed:
-        raise HTTPException(status_code=400, detail="Missão não completada")
-    if is_claimed:
-        raise HTTPException(status_code=400, detail="Recompensa já coletada")
-
     # Define recompensas
     rewards = {
         "find_5_high_fee": 2000,
@@ -1478,17 +1672,45 @@ async def claim_mission_reward(realm_id: str, username: str, mission_id: str) ->
     if reward_amount == 0:
         raise HTTPException(status_code=404, detail="Missão não encontrada")
 
-    # Marca como reclamada
-    await redis_client.hset(key, claimed_key, "1")
-    await redis_client.expire(key, 86400 * 8)  # 8 dias TTL
-
-    # Adiciona ao saldo do jogador
+    # Fase C7: claim ATÔMICO via Lua — antes era check-then-act (hget claimed
+    # → hset claimed → hincrby balance) em 3 chamadas separadas; dois claims
+    # concorrentes passavam no check e creditavam em dobro. O script valida
+    # completed/claimed e aplica tudo num único EVAL.
     state_key = player_state_key(definition.realm_id, username)
-    await redis_client.hincrby(state_key, "balance", reward_amount)
-    # Sem TTL no player state (Fase 2 — ponta solta): o 8º expire(86400) que
-    # a auditoria encontrou. Sem persist(), uma chave antiga com TTL residual
-    # continuaria expirando o saldo em 24h após o claim.
-    await redis_client.persist(state_key)
+    claim_script = """
+    local completed = redis.call('hget', KEYS[1], ARGV[1])
+    if completed ~= '1' then
+      return 'not_completed'
+    end
+    local claimed = redis.call('hget', KEYS[1], ARGV[2])
+    if claimed == '1' then
+      return 'already_claimed'
+    end
+    redis.call('hset', KEYS[1], ARGV[2], '1')
+    redis.call('expire', KEYS[1], tonumber(ARGV[4]))
+    local new_balance = redis.call('hincrby', KEYS[2], 'balance', tonumber(ARGV[3]))
+    -- Sem TTL no player state (Fase 2 — ponta solta): persist() evita que um
+    -- TTL residual legado expire o saldo em 24h após o claim.
+    redis.call('persist', KEYS[2])
+    return 'ok:' .. tostring(new_balance)
+    """
+    result = await redis_client.eval(
+        claim_script,
+        2,
+        key,
+        state_key,
+        completed_key,
+        claimed_key,
+        str(reward_amount),
+        str(86400 * 8),  # 8 dias TTL na chave de missões
+    )
+    status = result.decode() if isinstance(result, bytes) else str(result)
+    if status == "not_completed":
+        raise HTTPException(status_code=400, detail="Missão não completada")
+    if status == "already_claimed":
+        raise HTTPException(status_code=400, detail="Recompensa já coletada")
+    if not status.startswith("ok:"):
+        raise HTTPException(status_code=500, detail="Falha inesperada ao coletar recompensa")
 
     logger.info(
         "Recompensa coletada: %d sats para %s em %s (missão: %s)",
@@ -1543,7 +1765,9 @@ async def update_mission_progress(
         "use_rbf": "rbf_used",
         "find_3_mev": "mev_found",
         "complete_3_blocks": "blocks_completed",
-        "10_words_no_error": "words_found",
+        # Fase 5.4: streak de palavras sem erro (reseta a cada erro),
+        # não o total cumulativo de words_found.
+        "10_words_no_error": "words_without_error",
     }
 
     for mission_id, stat_name in daily_mission_stats.items():
@@ -1699,6 +1923,12 @@ async def get_skills(realm_id: str, username: str) -> dict[str, Any]:
     # Carrega estado das habilidades do Redis
     sk_key = skills_key(definition.realm_id, username)
     raw = await redis_client.hgetall(sk_key)
+    # Sem TTL: a árvore de habilidades é persistente (mesmo padrão do player
+    # state). persist() é chamado em TODA leitura para limpar qualquer TTL
+    # residual de chaves criadas com o código antigo (que setava expire
+    # 86400) — senão a árvore de um jogador que nunca mais sobe de nível
+    # zeraria em 24h. PERSIST em chave sem TTL é no-op seguro.
+    await redis_client.persist(sk_key)
 
     mining_level = int(raw.get("mining_level", 0))
     search_level = int(raw.get("search_level", 0))
@@ -1711,7 +1941,6 @@ async def get_skills(realm_id: str, username: str) -> dict[str, Any]:
     if expected_remaining > points_remaining:
         # Jogador ganhou pontos novos (subiu de nível)
         await redis_client.hset(sk_key, "points_remaining", str(expected_remaining))
-        await redis_client.expire(sk_key, 86400)
         points_remaining = expected_remaining
 
     bonuses = _get_skill_bonuses(mining_level, search_level, lightning_level)
@@ -1790,7 +2019,6 @@ async def upgrade_skill(realm_id: str, username: str, data: SkillUpgradeRequest)
     local skill_key = KEYS[1]
     local branch_key = ARGV[1]
     local max_level = tonumber(ARGV[2])
-    local ttl = tonumber(ARGV[3])
 
     local key_type = redis.call('type', skill_key)['ok']
     if key_type ~= 'none' and key_type ~= 'hash' then
@@ -1808,7 +2036,10 @@ async def upgrade_skill(realm_id: str, username: str, data: SkillUpgradeRequest)
 
     local new_level = redis.call('hincrby', skill_key, branch_key, 1)
     local new_points = redis.call('hincrby', skill_key, 'points_remaining', -1)
-    redis.call('expire', skill_key, ttl)
+    -- Sem TTL: a árvore de habilidades é persistente (mesmo padrão do
+    -- player state). persist() limpa qualquer TTL residual de chaves
+    -- criadas com o código antigo (que setava expire 86400).
+    redis.call('persist', skill_key)
     return {'ok', tostring(new_level), tostring(new_points)}
     """
     eval_result = await redis_client.eval(
@@ -1817,7 +2048,6 @@ async def upgrade_skill(realm_id: str, username: str, data: SkillUpgradeRequest)
         sk_key,
         branch_level_key,
         "5",
-        "86400",
     )
     status_raw, new_level_raw, new_points_raw = eval_result
     status = status_raw.decode() if isinstance(status_raw, bytes) else str(status_raw)
@@ -2095,6 +2325,21 @@ async def serve_websocket(websocket: WebSocket, realm_id: str) -> None:
                 "pruned": snapshot["pruned"],
             }
         )
+        # Fase A2: replay de transações pendentes — envia as transações da
+        # epoch atual que ainda não foram consumidas, para que um cliente que
+        # reconecta não fique "aguardando transações" se o WS caiu ou a epoch
+        # mudou. O frontend deduplica por `word` no handler de
+        # transaction_received, então reenviar é seguro.
+        pending_raw = await redis_client.lrange(pending_txs_key(definition.realm_id), 0, -1)
+        pending_transactions: list[dict[str, Any]] = []
+        for raw in pending_raw:
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict) and parsed.get("realm_id") == definition.realm_id:
+                    pending_transactions.append(parsed)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        event["pending_transactions"] = pending_transactions
         public_event = sanitize_public_event(event, definition.realm_id)
         if public_event is None:  # pragma: no cover - contrato construído localmente
             raise RuntimeError("Falha ao montar evento inicial")
@@ -2190,6 +2435,11 @@ POWERUP_DEFINITIONS: dict[str, dict[str, Any]] = {
 
 POWERUP_IDS = frozenset(POWERUP_DEFINITIONS.keys())
 
+# Fase 5.2: TTL do inventário de power-ups.
+# Antes era 86400 (24h) — power-ups somiam se o jogador não operasse por 1 dia.
+# Agora 30 dias, alinhado ao TTL da coleção de cards (player_cards_key, 86400*30).
+POWERUP_INVENTORY_TTL_SECONDS = 86400 * 30
+
 
 class PowerupActivate(BaseModel):
     """Solicitação de ativação de power-up."""
@@ -2228,7 +2478,7 @@ async def _decrement_powerup(realm_id: str, username: str, powerup_id: str) -> b
     if not current or int(current) <= 0:
         return False
     await redis_client.hset(key, powerup_id, str(int(current) - 1))
-    await redis_client.expire(key, 86400)
+    await redis_client.expire(key, POWERUP_INVENTORY_TTL_SECONDS)
     return True
 
 
@@ -2248,8 +2498,9 @@ async def _activate_powerup(realm_id: str, username: str, powerup_id: str) -> di
     if defn["duration"] > 0:
         timer_field = f"timer_{powerup_id}"
         await redis_client.hset(key, timer_field, str(defn["duration"]))
-        await redis_client.expire(key, defn["duration"] + 86400)
-    await redis_client.expire(key, 86400)
+    # Fase 5.2: TTL do inventário (30 dias). O expire anterior
+    # (duration + 30d) era código morto — sobrescrito por este.
+    await redis_client.expire(key, POWERUP_INVENTORY_TTL_SECONDS)
     return {
         "status": "activated",
         "powerup_id": powerup_id,
@@ -2410,6 +2661,32 @@ async def send_chat_message(realm_id: str, data: ChatMessage) -> dict[str, Any]:
 
     # Armazena e retorna
     envelope = await _store_chat_message(definition.realm_id, data.username, data.message)
+
+    # Fase 9: Chat em Tempo Real — publica no canal de eventos para broadcast
+    # WebSocket (mesmo padrão do market_sale). Antes, a mensagem só ia para o
+    # Redis List (histórico) e o frontend só via as próprias mensagens.
+    chat_event = event_envelope(
+        action="chat_message",
+        node_id=definition.node_id,
+        network=definition.network,
+        realm_id=definition.realm_id,
+    )
+    chat_event.update({
+        "username": envelope["username"],
+        "message": envelope["message"],
+        "timestamp": envelope["timestamp"],
+    })
+    try:
+        await redis_client.publish(
+            events_channel(definition.realm_id),
+            json.dumps(chat_event, separators=(",", ":")),
+        )
+    except Exception:
+        logger.exception(
+            "Mensagem armazenada, mas chat_message não pôde ser publicado: realm=%s user=%s",
+            definition.realm_id, data.username,
+        )
+
     return {
         "status": "success",
         "message": envelope,
@@ -2475,6 +2752,18 @@ class MarketBuyRequest(BaseModel):
     )
 
 
+class MarketCancelRequest(BaseModel):
+    """Solicitação de cancelamento de listing próprio (Fase B4)."""
+    model_config = ConfigDict(extra="forbid")
+
+    username: Username
+    listing_id: str = Field(
+        min_length=32,
+        max_length=64,
+        pattern=r"^[a-f0-9-]+$",
+    )
+
+
 def market_listing_id(member: str | bytes) -> str:
     """Retorna ID estável também para listings legados sem UUID persistido."""
     raw = member.decode() if isinstance(member, bytes) else member
@@ -2517,7 +2806,26 @@ async def _suggest_price(realm_id: str, powerup_id: str) -> int | None:
         # Sem histórico — usa preço base
         return POWERUP_DEFINITIONS[powerup_id]["price"]
 
-    prices = sorted(int(p) for p in recent_prices)
+    # Fase D1: tolera membros corrompidos/legados. O índice de preços deve
+    # ter member=preço (int), mas dados legados gravaram timestamps (float,
+    # ex.: "1787418766.78765") como member — int("1787418766.78765") lançava
+    # ValueError e o /market/list respondia 500. Parseia com int(float(...))
+    # e descarta valores implausíveis (>= 1e9 sats = timestamp, não preço).
+    prices = []
+    for p in recent_prices:
+        try:
+            val = int(float(p))
+        except (ValueError, TypeError):
+            continue
+        if val < 0 or val >= 1_000_000_000:
+            continue  # valor corrompido (timestamp) — não é um preço
+        prices.append(val)
+
+    if not prices:
+        # Só havia dados corrompidos — usa preço base
+        return POWERUP_DEFINITIONS[powerup_id]["price"]
+
+    prices = sorted(prices)
     # Retorna a mediana
     mid = len(prices) // 2
     if len(prices) % 2 == 0:
@@ -2558,8 +2866,17 @@ async def _list_market(realm_id: str, *, powerup_filter: str | None = None,
             continue
 
         listing.setdefault("listing_id", market_listing_id(member_str))
-        listing["price"] = int(score)
-        listing["price_formatted"] = f"{int(score):,}"
+        # O preço autoritativo está no JSON do member. O score do zset é
+        # usado apenas para ordenação e pode ser um timestamp (float) em
+        # listings legados — confiar nele com int() causava 500 no /market/list.
+        price = listing.get("price")
+        if price is None:
+            try:
+                price = int(score)
+            except (ValueError, TypeError):
+                continue  # listing inválido (sem preço parseável) — pular
+        listing["price"] = int(price)
+        listing["price_formatted"] = f"{int(price):,}"
         listings.append(listing)
 
     return listings
@@ -2666,6 +2983,7 @@ async def sell_on_market(realm_id: str, data: MarketSellRequest) -> dict[str, An
     local member = ARGV[2]
     local price = tonumber(ARGV[3])
     local listing_ttl = tonumber(ARGV[4])
+    local inventory_ttl = tonumber(ARGV[5])
 
     local inventory_type = redis.call('type', inventory_key)['ok']
     local market_type = redis.call('type', market_key)['ok']
@@ -2682,7 +3000,7 @@ async def sell_on_market(realm_id: str, data: MarketSellRequest) -> dict[str, An
     end
 
     redis.call('hincrby', inventory_key, powerup_id, -1)
-    redis.call('expire', inventory_key, 86400)
+    redis.call('expire', inventory_key, inventory_ttl)
     redis.call('zadd', market_key, price, member)
     redis.call('expire', market_key, listing_ttl)
     return 'ok'
@@ -2696,6 +3014,7 @@ async def sell_on_market(realm_id: str, data: MarketSellRequest) -> dict[str, An
         member_str,
         str(data.price),
         str(MARKET_LISTING_TTL_SECONDS),
+        str(POWERUP_INVENTORY_TTL_SECONDS),
     )
     status = eval_result.decode() if isinstance(eval_result, bytes) else str(eval_result)
     if status == "inventory_empty":
@@ -2713,6 +3032,117 @@ async def sell_on_market(realm_id: str, data: MarketSellRequest) -> dict[str, An
     return {
         "status": "listed",
         "listing": listing_data,
+    }
+
+
+@app.post("/api/v1/networks/{realm_id}/market/cancel", tags=["Mercado"])
+async def cancel_market_listing(realm_id: str, data: MarketCancelRequest) -> dict[str, Any]:
+    """Cancela um listing próprio e devolve o power-up ao inventário (Fase B4).
+
+    O jogador só pode cancelar listings que ele mesmo publicou. O power-up
+    é devolvido ao inventário do vendedor de forma atômica (Lua): se o
+    listing não existe mais (já foi comprado), a devolução não acontece.
+
+    Args:
+        realm_id: Identificador do realm.
+        data: Payload com ``username`` (vendedor) e ``listing_id``.
+
+    Returns:
+        Dict com ``status`` e o ``powerup`` devolvido.
+
+    Raises:
+        HTTPException: Se o listing não existe (404), pertence a outro
+                       jogador (403) ou houve falha interna (500).
+    """
+    definition = get_network_definition(realm_id)
+    realm = definition.realm_id
+
+    market_key = market_list_key(realm)
+    inventory_key = powerups_key(realm, data.username)
+
+    # Localiza o listing e valida a propriedade ANTES da transação.
+    selected: tuple[str | bytes, float, dict[str, Any]] | None = None
+    raw_listings = await redis_client.zrange(market_key, 0, -1, withscores=True)
+    for member_str, price in raw_listings:
+        try:
+            listing = json.loads(member_str)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        candidate_id = listing.get("listing_id") or market_listing_id(member_str)
+        if candidate_id == data.listing_id:
+            selected = (member_str, float(price), listing)
+            break
+
+    if selected is None:
+        raise HTTPException(status_code=404, detail="Listing não encontrado (já foi vendido ou expirou)")
+
+    member_str, price, listing = selected
+    if listing.get("seller") != data.username:
+        raise HTTPException(status_code=403, detail="Você só pode cancelar seus próprios listings")
+
+    powerup_id = listing["powerup_id"]
+    if powerup_id not in POWERUP_DEFINITIONS:
+        raise HTTPException(status_code=400, detail="Power-up inválido no listing")
+
+    # Transação atômica: remove o listing e devolve o power-up ao inventário.
+    lua_script = """
+    local market_key = KEYS[1]
+    local inventory_key = KEYS[2]
+    local member = ARGV[1]
+    local price = tonumber(ARGV[2])
+    local powerup_id = ARGV[3]
+    local inventory_ttl = tonumber(ARGV[4])
+
+    local market_type = redis.call('type', market_key)['ok']
+    local inventory_type = redis.call('type', inventory_key)['ok']
+    if (market_type ~= 'none' and market_type ~= 'zset')
+        or (inventory_type ~= 'none' and inventory_type ~= 'hash') then
+      return 'invalid_storage_type'
+    end
+
+    local listed_price = redis.call('zscore', market_key, member)
+    if not listed_price then
+      return 'listing_missing'
+    end
+    if tonumber(listed_price) ~= price then
+      return 'listing_changed'
+    end
+
+    if redis.call('zrem', market_key, member) ~= 1 then
+      return 'listing_missing'
+    end
+
+    redis.call('hincrby', inventory_key, powerup_id, 1)
+    redis.call('expire', inventory_key, inventory_ttl)
+    return 'ok'
+    """
+
+    eval_result = await redis_client.eval(
+        lua_script,
+        2,
+        market_key,
+        inventory_key,
+        member_str,
+        str(int(price)),
+        powerup_id,
+        str(POWERUP_INVENTORY_TTL_SECONDS),
+    )
+    status = eval_result.decode() if isinstance(eval_result, bytes) else str(eval_result)
+    if status == "listing_missing" or status == "listing_changed":
+        raise HTTPException(status_code=404, detail="Listing não encontrado (já foi vendido ou expirou)")
+    if status == "invalid_storage_type":
+        raise HTTPException(status_code=500, detail="Estrutura interna do mercado inválida")
+    if status != "ok":
+        raise HTTPException(status_code=500, detail="Falha inesperada ao cancelar listing")
+
+    logger.info(
+        "Listing cancelado: %s devolvido ao inventário de %s (realm: %s)",
+        powerup_id, data.username, realm,
+    )
+
+    return {
+        "status": "cancelled",
+        "powerup": powerup_id,
     }
 
 
@@ -2815,6 +3245,9 @@ async def buy_from_market(realm_id: str, data: MarketBuyRequest) -> dict[str, An
     redis.call('hincrby', buyer_key, 'balance', -tonumber(ARGV[3]))
     redis.call('hincrby', seller_key, 'balance', tonumber(ARGV[4]))
     redis.call('hincrby', powerups_buyer, ARGV[5], 1)
+    -- Fase 5.2: garante o TTL do inventário do comprador (chave nova não
+    -- herdaria TTL — o power-up comprado someria ou ficaria sem expiração).
+    redis.call('expire', powerups_buyer, tonumber(ARGV[9]))
     redis.call('zadd', history_key, ARGV[6], ARGV[7])
     redis.call('zadd', price_key, ARGV[8], ARGV[6])
     return 'ok'
@@ -2841,6 +3274,7 @@ async def buy_from_market(realm_id: str, data: MarketBuyRequest) -> dict[str, An
         str(timestamp),
         listing_json,
         str(price),
+        str(POWERUP_INVENTORY_TTL_SECONDS),
     )
 
     status = eval_result.decode() if isinstance(eval_result, bytes) else str(eval_result)
@@ -3825,7 +4259,7 @@ async def open_crate(realm_id: str, data: CrateOpenRequest) -> dict[str, Any]:
     if item["type"] == "powerup":
         pu_key = powerups_key(definition.realm_id, data.username)
         await redis_client.hincrby(pu_key, item["powerup_id"], 1)
-        await redis_client.expire(pu_key, 86400)
+        await redis_client.expire(pu_key, POWERUP_INVENTORY_TTL_SECONDS)
 
     # Se for legendário, acumula bônus permanente
     if item["type"] == "legendary":
@@ -4068,7 +4502,7 @@ async def stake_sats(realm_id: str, data: StakeRequest) -> dict[str, Any]:
     await redis_client.expire(stake_key, duration_seconds + 3600)  # TTL = duração + 1h de margem
 
     logger.info(
-        "Stake realizado: %s travou %d sats por %dh (+.1f%% bonus)",
+        "Stake realizado: %s travou %d sats por %dh (+%.0f%% bonus)",
         data.username, data.amount, data.duration_hours, bonus_percent * 100,
     )
 
@@ -4187,17 +4621,21 @@ async def get_staking_status(realm_id: str, username: str) -> dict[str, Any]:
     # Se expirou, libera automaticamente
     if time_remaining <= 0:
         await redis_client.delete(stake_key)
-        # Devolve ao jogador (sem penalty — expirou naturalmente)
+        # Devolve ao jogador (sem penalty — expirou naturalmente) + bônus de
+        # duração (5%/15%/30%). O bônus era gravado no hash do stake mas nunca
+        # creditado (ponta solta ALTO da auditoria 2026-08-23).
         player_key = player_state_key(definition.realm_id, username)
         player_raw = await redis_client.hgetall(player_key)
         current_balance = int(player_raw.get("balance", 0))
-        new_balance = current_balance + amount
+        bonus_amount = int(round(amount * bonus_percent))
+        new_balance = current_balance + amount + bonus_amount
         await redis_client.hset(player_key, mapping={"balance": str(new_balance)})
 
         # Registra no histórico
         history_entry = {
             "type": "expired",
             "amount": amount,
+            "bonus": bonus_amount,
             "timestamp": now,
         }
         history_key = staking_history_key(definition.realm_id, username)
@@ -4205,7 +4643,10 @@ async def get_staking_status(realm_id: str, username: str) -> dict[str, Any]:
         await redis_client.ltrim(history_key, 0, 49)
         await redis_client.expire(history_key, 86400 * 30)
 
-        logger.info("Stake expirado: %s recebeu %d sats de volta", username, amount)
+        logger.info(
+            "Stake expirado: %s recebeu %d sats de volta (+%d de bônus)",
+            username, amount, bonus_amount,
+        )
 
         return {
             "username": username,
@@ -4605,95 +5046,12 @@ async def buy_energy(realm_id: str, username: str) -> dict[str, Any]:
 # Mini-game Decoder — adivinhar palavra BIP39 a partir do TXID truncado
 # ==========================================================================
 
-# Lista de palavras BIP39 em português (subconjunto para o mini-game)
-BIP39_WORDLIST = [
-    "abismo", "abotoar", "abrir", "absoluto", "abster", "acabado", "acalmar",
-    "acampar", "acender", "acervo", "acertar", "acessar", "achar", "acima",
-    "acionar", "acordar", "acumular", "adaptar", "adega", "adepto", "adequar",
-    "aderir", "adesivo", "adeus", "adiante", "aditivo", "adjetivo", "adjunto",
-    "admirar", "admoestar", "adotar", "adquirir", "advogado", "aereo", "afastar",
-    "afeicao", "afetivo", "afim", "afinal", "aflito", "afluente", "afogar",
-    "afeto", "afoito", "afora", "afresco", "afrontar", "agachar",
-    "agarrar", "agasalho", "agente", "agilizar", "agitar", "agora", "agradar",
-    "agreste", "agrupar", "agua", "agudo", "agulha", "alavanca", "alarme",
-    "albergar", "albino", "album", "alecrim", "alegria",
-    "alerta", "alface", "algar", "algum", "alheio", "aliar", "alicate",
-    "alimento", "alinhar", "aliviar", "almofada", "aloccar",
-    "alpiste", "alterar", "altitude", "alto", "alucinar", "alugar", "aluno",
-    "alusivo", "alvo", "amador", "amarelo", "amassar", "amendoim", "amenizar",
-    "amigo", "amistoso", "amolar", "amontoar", "amor", "amparar", "ampliar",
-    "ampola", "anagrama", "analisar", "anarquia", "anatomia", "andaime",
-    "andar", "anel", "anexo", "anjo", "anomalia", "anotacao", "ansioso",
-    "anterior", "antigo", "antologia", "antraz", "anual", "anverso",
-    "anzol", "apagador", "apalpar", "apanhar", "aparecer", "apaziguar",
-    "apego", "apelar", "apelo", "apertar", "apesar", "apetite", "apito",
-    "aplauso", "aplicar", "apoderar", "apontar", "apoio", "apoiar", "apolo",
-    "aposto", "aprendiz", "aprovar", "aquecer", "aquilo", "arara",
-    "arauto", "arbitrio", "ardil", "areia", "arestar", "arguir",
-    "arma", "armario", "armazenar", "aroma", "arpendice", "arranhar",
-    "arrepender", "arriar", "arroba", "arrumar", "arsenal", "arteria",
-    "artigo", "artista", "arvore", "asfaltar", "aspirar", "assador",
-    "asilo", "aspirina", "assalto", "assegurar", "assentar", "assinar",
-    "assoalho", "assunto", "astral", "astuto", "atalho", "atadura",
-    "atarefar", "atear", "atender", "aterro", "ateu", "atestado",
-    "aterrar", "atlas", "atmosfera", "atolar", "atordoar", "atracar",
-    "atrasar", "atrevido", "atriz", "atual", "atum", "auditor",
-    "aumentar", "aura", "aurora", "autismo", "autoria", "autuar",
-    "avaliar", "avante", "avaria", "avaro", "ave", "avena",
-    "avesso", "avistar", "avivar", "avulso", "axila", "azarar",
-    "azedo", "azulejo", "babar", "bacalhau", "bacharel", "bacia",
-    "bagagem", "baiano", "bailar", "baioneta", "bairro", "baixar",
-    "bajular", "bala", "balada", "balanco", "balao", "balde", "baleia",
-    "baliza", "bambolear", "banal", "banca", "banco", "bandagem",
-    "bangue", "banir", "banquete", "barato", "barba", "barco",
-    "baronesa", "barraca", "barulho", "base", "basico", "bastao",
-    "batata", "bate", "batida", "batom", "baunilha", "beber",
-    "beijo", "beirada", "beisebol", "beldade", "beleza", "belga",
-    "beliscar", "bendito", "bengala", "benzer", "berimbau", "berlinde",
-    "berro", "bertalha", "besouro", "besta", "betim", "bexiga",
-    "bico", "bicudo", "bienal", "bifoco", "bigorna", "bilhete", "bimestre",
-    "bimotor", "bipolar", "biruta", "biscoito", "bisneto", "bispo", "bisturi",
-    "bitola", "bizarro", "blazer", "boato", "bobagem", "bocado", "bocejar",
-    "boicotar", "boiar", "boina", "bolada", "boletim", "boleto", "bolha",
-    "bolo", "bolsa", "bomba", "bonde", "boneco", "bonita", "borbulha",
-    "borda", "boreal", "borracha", "bovino", "boxear", "branco", "brasa",
-    "braveza", "brecha", "breu", "briga", "brilho", "brincar", "broa",
-    "broto", "bruxa", "bucha", "budismo", "bufar", "bule", "buraco",
-    "busca", "busto", "buzina", "cabana", "cabelo", "cabide", "cabo",
-    "cabrito", "cacau", "cacetada", "cachorro", "cacique", "cadeado",
-    "cafe", "cagao", "caiaque", "caipira", "caixas", "cajado", "caju",
-    "calafrio", "calamar", "calcinar", "calda", "calibrar", "calma",
-    "calota", "calvo", "cama", "cambista", "camisa", "camomila", "campanha",
-    "camuflar", "canavial", "cancelar", "caneta", "canguru", "canhoto",
-    "canibal", "canoa", "canudo", "capaz", "capela", "capinar", "capotar",
-    "capricho", "captar", "capuz", "caracol", "caranguejo", "carinho",
-    "carneiro", "carpete", "carreira", "cartaz", "carvalho", "casaco",
-    "casca", "casebre", "castelo", "casulo", "catarata", "cativar",
-    "caule", "causar", "cautela", "cavalo", "caverna", "cebola", "ceder",
-    "cegonha", "celebrar", "celula", "cenoura", "censo", "centeio", "ceramica",
-    "cerdeira", "cerrado", "certeiro", "cerveja", "cetim", "cevada", "chacota",
-    "chaleira", "chamado", "chapu", "charme", "chatice", "chave", "chefe",
-    "cheiro", "chicote", "chifre", "chinelo", "chocalho", "chover", "chumbo",
-    "chutar", "cicatriz", "ciclone", "cidade", "cidreira", "ciente", "cigana",
-    "cima", "cinco", "cine", "cintila", "cinto", "ciranda", "circuito",
-    "cirurgia", "citrico", "civil", "clero", "clicar", "clone", "clube",
-    "coberto", "cobrar", "coccinela", "coelho", "coentro", "coeso", "cogumelo",
-    "coibir", "coifa", "coiote", "colar", "coleira", "colher", "colina",
-    "colmo", "colocar", "coluna", "comando", "combinar", "comentar", "cometa",
-    "comodo", "concha", "condor", "conectar", "confuso", "congelar", "conhecer",
-    "conjugar", "conluio", "conquista", "conserto", "consumir", "contrato",
-    "convite", "cooperar", "copeiro", "copiador", "copo", "coquetel", "coragem",
-    "corda", "corja", "corneta", "coronha", "corporal", "correio",
-    "corte", "coruja", "corvo", "cosseno", "costela", "cotonete", "couve",
-    "covil", "cozinha", "cratera", "cravo", "creche", "crespo",
-    "crente", "crepite", "crescer", "criar", "crime", "cristal",
-    "crosta", "crucifixo", "cruel", "crua", "cruzeiro", "cubano", "cueca",
-    "cuidado", "culatra", "culminar", "culpar", "cultura", "cumprir", "cunhado",
-    "cupido", "curativo", "curral", "cursar", "curto", "cuspir",
-    "custear", "cutucar", "duelar", "duende", "dublador", "dublar", "ducha",
-    "duela", "duende", "dublador", "dublar", "duela", "duende",
-    "dublador", "dublar", "duela", "duende", "dublador", "dublar",
-]
+# Lista de palavras BIP39 em inglês — MESMO wordlist do jogo principal
+# (engine.py usa Mnemonic("english")). Fase 4.4: unificado para EN para
+# consistência com as palavras derivadas das transações reais (BIP39 EN).
+from mnemonic import Mnemonic
+
+BIP39_WORDLIST = list(Mnemonic("english").wordlist)
 
 # Cooldown entre partidas do decoder (segundos)
 DECODER_COOLDOWN_SECONDS = 180  # 3 minutos
@@ -4903,10 +5261,15 @@ async def get_season_endpoint(realm_id: str, username: str) -> dict[str, Any]:
 
 
 @app.post("/api/v1/networks/{realm_id}/season/{username}/add-xp")
-async def add_season_xp_endpoint(realm_id: str, username: str, data: dict[str, Any] = Body(default={"xp": 0})) -> dict[str, Any]:
-    """Adiciona XP à temporada do jogador."""
+async def add_season_xp_endpoint(realm_id: str, username: str, data: XpAddRequest) -> dict[str, Any]:
+    """Adiciona XP à temporada do jogador.
+
+    Usa o mesmo schema validado ``XpAddRequest`` (int strict, ge=0,
+    le=MAX_SCORE) do endpoint de nível — antes aceitava ``dict[str, Any]``
+    sem validação (mesma classe do bug 2.2).
+    """
     try:
-        xp_amount = data.get("xp", 0)
+        xp_amount = data.xp
         result = await add_season_xp(
             realm_id, username, xp_amount, season_key, player_state_key,
             powerups_key, redis_client, get_network_definition
@@ -4925,7 +5288,8 @@ async def claim_season_reward_endpoint(realm_id: str, username: str, reward_leve
     try:
         result = await claim_season_reward(
             realm_id, username, reward_level, season_key, player_state_key,
-            powerups_key, redis_client, get_network_definition
+            powerups_key, cards_set_key, card_detail_key,
+            redis_client, get_network_definition
         )
         return result
     except ValueError as e:
@@ -5115,8 +5479,10 @@ async def get_player_level(realm_id: str, username: str) -> dict[str, Any]:
         level = 1
         xp = 0
     else:
-        level = int(level_data.get("level", 1))
-        xp = int(level_data.get("xp", 0))
+        # Tolera valores legados gravados como "67.5" (float) — int("67.5")
+        # lançava ValueError e o endpoint respondia 500.
+        level = int(float(level_data.get("level", 1)))
+        xp = int(float(level_data.get("xp", 0)))
 
     xp_needed = xp_to_next_level(level)
     rank_info = get_rank_for_level(level)
@@ -5135,27 +5501,40 @@ async def get_player_level(realm_id: str, username: str) -> dict[str, Any]:
 
 
 @app.post("/api/v1/networks/{realm_id}/level/{username}/add-xp", tags=["Level & Rank"])
-async def add_xp_to_player(realm_id: str, username: str, data: dict[str, Any]) -> dict[str, Any]:
+async def add_xp_to_player(realm_id: str, username: str, data: XpAddRequest) -> dict[str, Any]:
     """Adiciona XP ao jogador e verifica level-up.
 
     Args:
         realm_id: Identificador do realm.
         username: Nome do minerador.
-        data: Dict com 'xp' (quantidade de XP a adicionar).
+        data: Payload validado com 'xp' (quantidade de XP a adicionar, int >= 0).
 
     Returns:
         Dict com level anterior, novo nível, XP total, e se houve level-up.
     """
     definition = get_network_definition(realm_id)
     level_key_name = level_key(definition.realm_id, username)
-    xp_to_add = data.get("xp", 0)
+    xp_to_add = data.xp
 
     if xp_to_add <= 0:
-        return {"level": 1, "new_level": 1, "xp": 0, "xp_total": 0, "leveled_up": False}
+        # Fase 6 (B1): retorna resposta completa com campos consistentes
+        # (antes: hardcoded level=1 sem xp_to_next/rank/bonuses).
+        return {
+            "level": 1,
+            "new_level": 1,
+            "xp": 0,
+            "xp_total": 0,
+            "xp_to_next": xp_to_next_level(1),
+            "rank": get_rank_for_level(1),
+            "bonuses": get_level_bonus(1),
+            "leveled_up": False,
+        }
 
     level_data = await redis_client.hgetall(level_key_name)
-    level = int(level_data.get("level", 1))
-    xp = int(level_data.get("xp", 0))
+    # Tolera valores legados gravados como "67.5" (float) — int("67.5")
+    # lançava ValueError e o endpoint respondia 500.
+    level = int(float(level_data.get("level", 1)))
+    xp = int(float(level_data.get("xp", 0)))
 
     old_level = level
     xp += xp_to_add

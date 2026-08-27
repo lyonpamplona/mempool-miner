@@ -1,0 +1,38 @@
+[
+  {
+    "family": "JetBrains Mono",
+    "weight": "400",
+    "file": "JetBrainsMono-400.woff2",
+    "size": 31432
+  },
+  {
+    "family": "JetBrains Mono",
+    "weight": "500",
+    "file": "JetBrainsMono-500.woff2",
+    "size": 31432
+  },
+  {
+    "family": "JetBrains Mono",
+    "weight": "700",
+    "file": "JetBrainsMono-700.woff2",
+    "size": 31432
+  },
+  {
+    "family": "JetBrains Mono",
+    "weight": "800",
+    "file": "JetBrainsMono-800.woff2",
+    "size": 31432
+  },
+  {
+    "family": "Press Start 2P",
+    "weight": "400",
+    "file": "PressStart2P-400.woff2",
+    "size": 12512
+  },
+  {
+    "family": "VT323",
+    "weight": "400",
+    "file": "VT323-400.woff2",
+    "size": 17936
+  }
+]
