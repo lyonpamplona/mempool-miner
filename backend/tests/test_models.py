@@ -1,6 +1,7 @@
 """Testes dos contratos expostos pela API."""
 
 import asyncio
+import inspect
 import json
 from types import SimpleNamespace
 from typing import Any
@@ -40,6 +41,60 @@ def test_score_submit_normalizes_username() -> None:
     assert payload.username == "abcdefghijkl"
 
 
+def test_staking_logger_uses_a_valid_percent_format() -> None:
+    """O logger de stake deve interpolar o bônus em vez de imprimir '.1f'."""
+    source = inspect.getsource(main_module.stake_sats)
+
+    assert '(+%.0f%% bonus)' in source
+    assert '(+.1f% bonus)' not in source
+
+
+@pytest.mark.asyncio
+async def test_level_up_returns_progress_from_remaining_xp(monkeypatch) -> None:
+    """Após level-up, a barra representa o XP remanescente do novo nível."""
+    redis_client = AsyncMock()
+    redis_client.hgetall.return_value = {"level": "1", "xp": "90"}
+    monkeypatch.setattr(main_module, "redis_client", redis_client)
+
+    result = await main_module.add_xp_to_player(
+        "regtest", "tester", main_module.XpAddRequest(xp=20)
+    )
+
+    assert result["level"] == 2
+    assert result["xp"] == 10
+    assert result["xp_to_next"] == 200
+    assert result["xp_progress"] == 5.0
+    assert result["xp_total"] == 110
+
+
+@pytest.mark.asyncio
+async def test_pvp_events_use_the_public_realm_channel_and_envelope(monkeypatch) -> None:
+    """Eventos PvP devem alcançar o relay WebSocket e passar pelo sanitizer."""
+    redis_client = AsyncMock()
+    monkeypatch.setattr(main_module, "redis_client", redis_client)
+
+    await main_module._publish_pvp_event(
+        "regtest",
+        {
+            "action": "pvp_score_update",
+            "challenger": "alice",
+            "challenged": "bob",
+            "username": "alice",
+            "score": 300,
+            "found": 3,
+        },
+    )
+
+    channel, raw_payload = redis_client.publish.await_args.args
+    payload = json.loads(raw_payload)
+    assert channel == main_module.events_channel("regtest")
+    assert payload["action"] == "pvp_score_update"
+    assert payload["realm_id"] == "regtest"
+    assert payload["schema_version"] == 2
+    assert payload["event_id"]
+    assert main_module.sanitize_public_event(payload, "regtest") is not None
+
+
 @pytest.mark.asyncio
 async def test_send_chat_message_publishes_to_events_channel(monkeypatch) -> None:
     """Fase 3.1: o endpoint publica chat_message no canal de eventos (broadcast WS).
@@ -74,6 +129,174 @@ async def test_send_chat_message_publishes_to_events_channel(monkeypatch) -> Non
     # Envelope público: campos comuns presentes.
     assert published["schema_version"] == 2
     assert published["event_id"]
+
+
+@pytest.mark.asyncio
+async def test_expired_stake_is_settled_atomically_once(monkeypatch) -> None:
+    """Principal e bônus de stake expirado devem ser liquidados em um único Lua."""
+    redis_client = AsyncMock()
+    redis_client.hgetall.return_value = {
+        "amount": "1000",
+        "duration_hours": "1",
+        "start_time": "0",
+        "end_time": "1",
+        "bonus_percent": "0.05",
+    }
+    redis_client.eval.return_value = [1, 1000, 50, 1550]
+    monkeypatch.setattr(main_module, "redis_client", redis_client)
+
+    result = await main_module.get_staking_status("regtest", "tester")
+
+    assert result == {"username": "tester", "active": False}
+    redis_client.eval.assert_awaited_once()
+    redis_client.delete.assert_not_awaited()
+    redis_client.hset.assert_not_awaited()
+    redis_client.rpush.assert_not_awaited()
+
+
+def test_stake_settle_script_executes_atomically_in_real_lua() -> None:
+    """O STAKE_SETTLE_SCRIPT deve ser executado de verdade (não só mockado).
+
+    Cobre: stake expirado (crédito único + bônus sobre o principal +
+    histórico + delete), stake ativo (sem crédito), chave ausente,
+    stake corrompido (amount <= 0 → chave removida) e a garantia de
+    crédito único sob dois EVALs consecutivos (o vetor de double-credit
+    via polling concorrente).
+    """
+    try:
+        import fakeredis
+    except ImportError:
+        pytest.skip("fakeredis não disponível")
+
+    from app.storage import STAKE_SETTLE_SCRIPT
+
+    client = fakeredis.FakeRedis(connected=True)
+    stake_key = "mempool_miner:v2:{regtest}:staking:lua_tester"
+    player_key = "mempool_miner:v2:{regtest}:player:lua_tester"
+    history_key = "mempool_miner:v2:{regtest}:staking_history:lua_tester"
+    now = 1000
+
+    def settle() -> list:
+        return client.eval(
+            STAKE_SETTLE_SCRIPT, 3, stake_key, player_key, history_key, now, 86400 * 30
+        )
+
+    try:
+        # Cenário 1: stake expirado → credita principal + bônus, grava
+        # histórico e remove a chave. (bonus_percent é decimal: 0.05 = 5%)
+        client.hset(stake_key, mapping={
+            "amount": "1000", "end_time": "999", "bonus_percent": "0.05",
+        })
+        client.hset(player_key, mapping={"balance": "500"})
+        result = settle()
+        assert result == [1, 1000, 50, 1550]
+        assert client.hget(player_key, "balance") == b"1550"
+        assert client.type(stake_key) == b"none"
+        assert len(client.lrange(history_key, 0, -1)) == 1
+
+        # Cenário 2: dois EVALs consecutivos → o segundo não credita de novo
+        # (o stake já foi removido pelo primeiro).
+        result2 = settle()
+        assert result2[0] == 0
+        assert client.hget(player_key, "balance") == b"1550"
+
+        # Cenário 3: stake ativo (não expirou) → sem crédito.
+        client.hset(stake_key, mapping={
+            "amount": "2000", "end_time": "2000", "bonus_percent": "0.15",
+        })
+        result3 = settle()
+        assert result3 == [-1, 2000, 0, 1550]
+        assert client.hget(player_key, "balance") == b"1550"
+        assert client.type(stake_key) == b"hash"
+
+        # Cenário 4: stake corrompido (amount <= 0) → chave removida,
+        # sem crédito.
+        client.hset(stake_key, mapping={"amount": "0", "end_time": "999"})
+        result4 = settle()
+        assert result4[0] == 0
+        assert client.type(stake_key) == b"none"
+        assert client.hget(player_key, "balance") == b"1550"
+    finally:
+        client.flushall()
+        client.close()
+
+
+def test_powerup_buy_script_is_atomic_and_idempotent() -> None:
+    """Compra real em Lua não cobra replay e respeita o limite por item."""
+    try:
+        import fakeredis
+    except ImportError:
+        pytest.skip("fakeredis não disponível")
+
+    from app.storage import POWERUP_BUY_SCRIPT
+
+    client = fakeredis.FakeRedis(connected=True)
+    player_key = "mempool_miner:v2:{regtest}:player:lua_powerup"
+    tx_key = "mempool_miner:v2:{regtest}:balance_tx:lua_powerup:buy-1"
+    inventory_key = "mempool_miner:v2:{regtest}:powerups:lua_powerup"
+    daily_key = "mempool_miner:v2:{regtest}:powerup_buy_daily:lua_powerup:20260826"
+
+    try:
+        client.hset(player_key, mapping={"balance": "100000"})
+        result = client.eval(
+            POWERUP_BUY_SCRIPT,
+            4,
+            player_key,
+            tx_key,
+            inventory_key,
+            daily_key,
+            5000,
+            604800,
+            "scanner",
+            1,
+            3,
+            10,
+            172800,
+            2592000,
+        )
+        assert result == [1, 95000, 1, 1]
+        assert client.hget(player_key, "balance") == b"95000"
+        assert client.hget(inventory_key, "scanner") == b"1"
+
+        replay = client.eval(
+            POWERUP_BUY_SCRIPT,
+            4,
+            player_key,
+            tx_key,
+            inventory_key,
+            daily_key,
+            5000,
+            604800,
+            "scanner",
+            1,
+            3,
+            10,
+            172800,
+            2592000,
+        )
+        assert replay == [0, 95000, 1, 1]
+
+        client.hset(daily_key, mapping={"scanner": "3", "total": "3"})
+        limited = client.eval(
+            POWERUP_BUY_SCRIPT,
+            4,
+            player_key,
+            "mempool_miner:v2:{regtest}:balance_tx:lua_powerup:buy-2",
+            inventory_key,
+            daily_key,
+            5000,
+            604800,
+            "scanner",
+            1,
+            3,
+            10,
+            172800,
+            2592000,
+        )
+        assert limited == [-2, 95000, 3, 3]
+    finally:
+        client.flushall()
+        client.close()
 
 
 def test_score_submit_keeps_pool_name_separate_from_username() -> None:

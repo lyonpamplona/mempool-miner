@@ -71,6 +71,21 @@ def test_sprint_and_result_flow_have_deterministic_actions() -> None:
     assert "btn.onclick = rbfHandler;" not in javascript
 
 
+def test_global_event_reward_multiplier_is_applied_only_by_backend() -> None:
+    """O frontend não pode reaplicar o multiplicador já presente na transação."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    builder = javascript.split("function buildPlayableBlock(", 1)[1].split(
+        "function configureGridSize(", 1
+    )[0]
+
+    assert "globalRewardMultiplier" not in builder
+    assert (
+        "effectiveBaseReward = Math.floor(baseReward * halvingRewardFactor);"
+        in builder
+    )
+    assert "tx.multiplier" in builder
+
+
 def test_websocket_reconnect_uses_the_post_teardown_generation() -> None:
     """Uma queda transitória deve reconectar sem acessar elementos ausentes."""
     javascript = GAME_JS.read_text(encoding="utf-8")
@@ -191,19 +206,92 @@ def test_responsive_layout_covers_all_supported_screen_classes() -> None:
     css = PIXEL_CSS.read_text(encoding="utf-8")
 
     assert "--page-max: 2560px;" in css
-    assert "grid-template-columns: minmax(0, 1fr) clamp(320px, 28vw, 520px);" in css
+    # FASE 1920 (25/08): sidebar fluida 22vw (antes 28vw — em 1920px era 27% da
+    # tela, efeito "super zoom"); o breakpoint de aumento do chrome moveu de
+    # 1920px para 2200px (1080p é resolução padrão, não "tela grande").
+    assert "--sidebar-width: clamp(320px, 22vw, 520px);" in css
+    assert "grid-template-columns: minmax(0, 1fr) var(--sidebar-width);" in css
     assert "@media (max-width: 1023px)" in css
     assert "@media (max-width: 767px)" in css
-    assert "@media (min-width: 1920px)" in css
-    assert "width: min(58dvh, calc(100vw - clamp(320px, 28vw, 520px) - 64px), 1040px);" in css
-    assert "width: min(50dvh, calc(100vw - clamp(320px, 32vw, 400px) - 48px), 720px);" in css
-    assert ".stage-center {\n            display: flex;\n            flex-direction: column;\n            align-items: center;\n            justify-content: center;\n            padding: 12px;" in css
+    assert "@media (min-width: 2200px)" in css
+    assert ".stage-center {\n            display: grid;\n            grid-template-rows: auto minmax(0, 1fr) auto auto;" in css
+    assert "grid-template-columns: minmax(0, 1fr) clamp(320px, 32vw, 400px);" not in css
+    assert "width: min(50dvh, calc(100vw - clamp(320px, 32vw, 400px) - 48px), 720px);" not in css
+    assert "width: min(58dvh, calc(100vw - clamp(320px, 22vw, 520px) - 64px), 1040px);" not in css
+    assert "width: min(calc(100dvh - 420px), calc(100vw - clamp(320px, 22vw, 520px) - 64px), 1040px);" not in css
 
     tablet_rules = css[css.index("@media (max-width: 1023px)"):]
     assert "overflow-y: auto;" in tablet_rules
     assert "grid-template-columns: repeat(5, minmax(0, 1fr));" in tablet_rules
     assert "min-height: 44px;" in tablet_rules
     assert "overflow: visible;" in tablet_rules
+
+
+def test_responsive_layout_uses_available_stage_space_without_fixed_chrome_math() -> None:
+    """A grade deve caber no palco sem depender de 50/58/64dvh ou 420px mágicos."""
+    css = PIXEL_CSS.read_text(encoding="utf-8")
+
+    assert "container-type: size;" in css
+    assert "grid-template-rows: auto minmax(0, 1fr) auto auto;" in css
+    assert "calc(100cqh - 112px)" in css
+    assert "50dvh" not in css
+    assert "58dvh" not in css
+    assert "64dvh" not in css
+    assert "100dvh - 420px" not in css
+
+
+def test_global_event_banner_is_shell_content_and_does_not_cover_header() -> None:
+    """Evento global deve reservar espaço no shell, nunca cobrir o header fixo."""
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    css = PIXEL_CSS.read_text(encoding="utf-8")
+
+    banner_position = html.index('id="global-event-banner"')
+    header_end = html.index("</header>")
+    level_bar = html.index('id="level-bar-container"')
+    assert header_end < banner_position < level_bar
+    banner_css = css[css.index(".global-event-banner {"):css.index(".global-event-banner-inner")]
+    assert "position: fixed" not in banner_css
+    assert "position: relative" in banner_css
+
+
+def test_zero_transaction_buffer_starts_watchdog_after_session_handshake() -> None:
+    """Sessão sem a primeira transação também precisa de recuperação automática."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    game_start = javascript.split("if (data.action === 'game_start')", 1)[1].split(
+        "if (data.action === 'network_status')", 1
+    )[0]
+    watchdog = javascript.split("function startTxBufferWatchdog()", 1)[1].split(
+        "function prepareNextBlock()", 1
+    )[0]
+
+    assert "prepareNextBlock();" in game_start
+    assert "startTxBufferWatchdog();" in game_start
+    assert "if (txBuffer.length === 0) return;" not in watchdog
+
+
+def test_chat_success_updates_local_rate_limit_without_undefined_variable() -> None:
+    """Enviar chat não pode lançar ReferenceError após resposta 2xx."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    chat = javascript.split("async function sendChatMessage()", 1)[1].split(
+        "/**\n * Insere um token", 1
+    )[0]
+
+    assert "let chatRateRemaining = 5;" in javascript
+    assert "chatRateRemaining = Math.max(0, chatRateRemaining - 1);" in chat
+    assert "updateRateLimitInfo(chatRateRemaining);" in chat
+    assert "updateRateLimitInfo(remaining - 1);" not in chat
+
+
+def test_zero_transaction_watchdog_exposes_recovery_state_before_reconnect() -> None:
+    """Buffer 0/N deve explicar a recuperação, não apenas manter spinner infinito."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    watchdog = javascript.split("function startTxBufferWatchdog()", 1)[1].split(
+        "function prepareNextBlock()", 1
+    )[0]
+
+    assert "Sem transações" in watchdog
+    assert "Reconectando" in watchdog
+    assert "announceGameStatus" in watchdog
 
 
 def test_interactive_targets_are_large_enough_for_pointer_and_touch() -> None:
@@ -220,7 +308,42 @@ def test_service_worker_cache_version_tracks_frontend_fixes() -> None:
     """O navegador não pode servir assets anteriores às correções publicadas."""
     service_worker = SERVICE_WORKER.read_text(encoding="utf-8")
 
-    assert "const CACHE_VERSION = 'v53';" in service_worker
+    assert "const CACHE_VERSION = 'v67';" in service_worker
+
+
+def test_pwa_update_is_checked_on_startup_and_handles_already_activated_shell() -> None:
+    """A atualização deve ser detectada mesmo sem worker waiting no reload."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+
+    assert "const APP_SHELL_VERSION = 'v67';" in javascript
+    assert "const APP_SHELL_VERSION_KEY = 'mempool-miner-shell-version';" in javascript
+    assert "await registration.update();" in javascript
+    assert "localStorage.getItem(APP_SHELL_VERSION_KEY)" in javascript
+    assert "Nova versão" in javascript
+    assert "RECARREGAR" in javascript
+
+
+def test_pwa_update_watches_an_installing_worker_even_if_updatefound_was_early() -> None:
+    """O listener deve cobrir worker já installing e o evento updatefound."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    register = javascript.split("async function registerPwa()", 1)[1].split(
+        "window.addEventListener('online'", 1
+    )[0]
+
+    assert "function watchInstallingWorker(registration, installingWorker)" in javascript
+    assert "watchInstallingWorker(registration, registration.installing);" in register
+    assert "registration.addEventListener('updatefound'" in register
+
+
+def test_pwa_update_banner_is_clickable_above_auth_modal() -> None:
+    """A notificação de versão não pode ficar atrás do modal de autenticação."""
+    css = PIXEL_CSS.read_text(encoding="utf-8")
+    assert "#pwa-update-banner {" in css
+    banner_start = css.index("#pwa-update-banner {")
+    banner_end = css.index(".global-event-banner {", banner_start)
+    banner_css = css[banner_start:banner_end]
+
+    assert "z-index: 2200;" in banner_css
 
 
 def test_ui_uses_local_svg_icons_instead_of_emoji_glyphs() -> None:
@@ -477,6 +600,51 @@ def test_powerups_toggle_is_visible_when_its_content_is_collapsed() -> None:
     assert "announceGameStatus('Inicie uma sessão para acessar os Power-ups.');" in powerups_handler
     assert "powerupsActiveEl.hidden = !isHidden;" in javascript
     assert "powerupsToggleBtn.setAttribute('aria-expanded', String(isHidden));" in javascript
+
+
+def test_powerup_shop_exposes_all_items_and_buy_flow() -> None:
+    """A loja deve permitir comprar cada power-up via contrato server-side."""
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    shop = html.split('id="section-upgrades-shop"', 1)[1].split(
+        'id="section-upgrades-inventory"', 1
+    )[0]
+    for powerup_id in ("time_freeze", "scanner", "double_combo", "magnet", "precision"):
+        assert f'data-powerup-id="{powerup_id}"' in shop
+        assert f'id="btn-buy-powerup-{powerup_id}"' in shop
+    assert "async function buyPowerup(powerupId)" in javascript
+    assert "powerups/buy" in javascript
+    assert "daily_limit" in javascript
+    assert "registerSessionInitializer('powerups'" in javascript
+
+
+def test_powerup_pending_state_preserves_quantity_and_resets_session_effects() -> None:
+    """Unidades pendentes não podem ser deduplicadas nem vazar entre sessões."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    assert "let pendingPowerups = new Map();" in javascript
+    assert "pendingPowerups.set(powerupId, (pendingPowerups.get(powerupId) || 0) + 1);" in javascript
+    assert "for (const [id, quantity] of pendingPowerups)" in javascript
+    assert "powerupEffects.time_freeze = 0;" in javascript
+    reset = javascript.split("function resetSessionModules()", 1)[1].split(
+        "function formatPvpTimer", 1
+    )[0]
+    assert "pendingPowerups.clear();" in reset
+    assert "powerupsInventoryData = null;" in reset
+
+
+def test_purchase_handlers_update_missions_without_dead_wrappers() -> None:
+    """Compras devem atualizar missões no próprio handler acionado pelo botão."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    for function_name, next_function in (
+        ("buyHint", "buyHardware"),
+        ("buyHardware", "buyLightning"),
+        ("buyLightning", "startTransaction"),
+    ):
+        body = javascript.split(f"async function {function_name}()", 1)[1].split(
+            f"async function {next_function}", 1
+        )[0]
+        assert "void updateMissionsProgress();" in body
+    assert "const originalBuyHint = buyHint;" not in javascript
 
 
 def test_native_hidden_attribute_overrides_component_display_rules() -> None:
@@ -967,6 +1135,21 @@ def test_chat_keeps_oldest_first_order_and_caps_array_and_dom() -> None:
     assert "appendNodeToChat(msgEl);" in system
 
 
+def test_chat_websocket_handler_deduplicates_and_appends_remote_messages() -> None:
+    """Broadcast de chat deve entrar no histórico sem duplicar o echo do remetente."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    handler = javascript.split("if (data.action === 'chat_message')", 1)[1].split(
+        'if (data.action === "transaction_received"', 1
+    )[0]
+
+    assert "chatMessages.some(" in handler
+    assert "m.username === data.username" in handler
+    assert "m.message === data.message" in handler
+    assert "m.timestamp === data.timestamp" in handler
+    assert "chatMessages.push({" in handler
+    assert "appendChatMessage(" in handler
+
+
 def test_energy_label_and_boss_routing_keep_single_owners() -> None:
     """JS restaura label original e Boss nunca cai no buffer normal."""
     javascript = GAME_JS.read_text(encoding="utf-8")
@@ -1115,7 +1298,10 @@ def test_mobile_social_controls_wrap_without_horizontal_overflow() -> None:
 def test_ultrawide_breakpoint_scales_fixed_pixel_controls_and_labels() -> None:
     """O layout de 42 polegadas não pode manter controles e rótulos de notebook."""
     css = PIXEL_CSS.read_text(encoding="utf-8")
-    ultrawide = css.split("@media (min-width: 1920px)", 1)[1]
+    # FASE 1920 (25/08): o bloco de "tela grande" moveu de 1920px para 2200px —
+    # 1080p é resolução padrão/média, então o aumento de controles só vale em
+    # telas realmente grandes (2200px+ / 42").
+    ultrawide = css.split("@media (min-width: 2200px)", 1)[1]
 
     assert ".sidebar-right :is(" in ultrawide
     assert "font-size: 8px;" in ultrawide
@@ -1232,6 +1418,56 @@ def test_balance_earn_spend_helpers_exist() -> None:
     assert "/spend" in spend
 
 
+def test_player_state_uses_explicit_balance_initialization_marker() -> None:
+    """Saldo zero autoritativo deve substituir o local, não disparar nova migração."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    loader = javascript.split("async function loadPlayerState(", 1)[1].split(
+        "/**\n * Atualiza preços", 1
+    )[0]
+
+    assert "if (state.balance_initialized)" in loader
+    assert "balanceSatoshis = state.balance;" in loader
+    assert "else if (balanceSatoshis > 0)" in loader
+    assert "state.balance > 0" not in loader
+
+
+def test_level_ui_uses_backend_progress_after_level_up() -> None:
+    """O frontend não pode substituir o progresso remanescente por 0% ou 100%."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    add_xp = javascript.split("async function addXP(", 1)[1].split(
+        "// Calcula XP ganho", 1
+    )[0]
+
+    assert "levelState.xp_progress = result.xp_progress;" in add_xp
+    assert "result.leveled_up ? 100" not in add_xp
+
+
+def test_pvp_live_panel_and_handlers_update_score_and_timer() -> None:
+    """Eventos PvP de score/timer precisam produzir estado visível em COMPETIR."""
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    javascript = GAME_JS.read_text(encoding="utf-8")
+
+    for element_id in (
+        "pvp-live-panel",
+        "pvp-status",
+        "pvp-challenger-name",
+        "pvp-challenger-score",
+        "pvp-challenged-name",
+        "pvp-challenged-score",
+        "pvp-timer-value",
+    ):
+        assert f'id="{element_id}"' in html
+
+    score_handler = javascript.split("if (data.action === 'pvp_score_update')", 1)[1].split(
+        "if (data.action === 'pvp_end')", 1
+    )[0]
+    timer_handler = javascript.split("if (data.action === 'pvp_timer')", 1)[1].split(
+        "// Fase 11: Online Status", 1
+    )[0]
+    assert "updatePvpScore(data);" in score_handler
+    assert "updatePvpTimer(data.timer);" in timer_handler
+
+
 def test_purchases_debit_backend_before_local_apply() -> None:
     """Fase 5.1: as compras (hint/hardware/lightning) só debitam localmente
     se o backend confirmar o débito (sem compra de graça)."""
@@ -1244,6 +1480,49 @@ def test_purchases_debit_backend_before_local_apply() -> None:
         assert "balanceSatoshis = confirmed;" in body, f"{fn} não espelha o saldo do backend"
         # Recusa do backend aborta a compra
         assert "confirmed === null" in body, f"{fn} não trata a recusa do backend"
+
+
+def test_spend_balance_retries_transient_failures_with_same_idempotency_key() -> None:
+    """Resposta perdida não pode cobrar sem permitir que a compra seja concluída."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+    spend = javascript.split("async function spendBalance(", 1)[1].split(
+        "/**\n * Fase 3: Carrega estado", 1
+    )[0]
+
+    assert "const MAX_ATTEMPTS = 3;" in spend
+    assert "for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)" in spend
+    assert "response.status !== 429" in spend
+    assert "500 * attempt" in spend
+    # A idempotency key (txId) vem do caller e é reutilizada em TODAS as
+    # tentativas — o retry não pode gerar uma 2ª chave (2ª cobrança).
+    assert "tx_id: txId" in spend
+    assert "Math.random" not in spend  # nenhuma regeneração de chave no loop
+
+
+def test_purchase_callers_guard_reentry_and_use_unique_tx_ids() -> None:
+    """Cliques concorrentes não podem aplicar uma segunda compra idempotente grátis."""
+    javascript = GAME_JS.read_text(encoding="utf-8")
+
+    expectations = {
+        "buyHardware": "hardwarePurchaseInFlight",
+        "buyLightning": "lightningPurchaseInFlight",
+    }
+    for function_name, guard in expectations.items():
+        body = javascript.split(f"async function {function_name}()", 1)[1].split(
+            "\n}", 1
+        )[0]
+        assert f"if ({guard}) return;" in body
+        assert f"{guard} = true;" in body
+        assert f"{guard} = false;" in body
+        assert "Math.random().toString(36).slice(2, 8)" in body
+
+    rbf = javascript.split("const rbfHandler = async () =>", 1)[1].split(
+        "setNextButtonAction(rbfHandler);", 1
+    )[0]
+    assert "if (rbfPurchaseInFlight) return;" in rbf
+    assert "rbfPurchaseInFlight = true;" in rbf
+    assert "rbfPurchaseInFlight = false;" in rbf
+    assert "Math.random().toString(36).slice(2, 8)" in rbf
 
 
 def test_rbf_and_slashing_debit_backend() -> None:

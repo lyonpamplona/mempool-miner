@@ -303,7 +303,22 @@ let activePointerId = null;
 let deferredInstallPrompt = null;
 let serviceWorkerRegistration = null;
 let reloadingForUpdate = false;
+const APP_SHELL_VERSION = 'v67';
+const APP_SHELL_VERSION_KEY = 'mempool-miner-shell-version';
+let appUpdateReloadReady = false;
 const modalReturnFocus = new WeakMap();
+
+// Fase H: painel compacto de telemetria PvP dentro da tab COMPETIR.
+const pvpLivePanelEl = document.getElementById('pvp-live-panel');
+const pvpStatusEl = document.getElementById('pvp-status');
+const pvpChallengerNameEl = document.getElementById('pvp-challenger-name');
+const pvpChallengerScoreEl = document.getElementById('pvp-challenger-score');
+const pvpChallengedNameEl = document.getElementById('pvp-challenged-name');
+const pvpChallengedScoreEl = document.getElementById('pvp-challenged-score');
+const pvpTimerValueEl = document.getElementById('pvp-timer-value');
+let pvpTimerInterval = null;
+let pvpRemainingSeconds = 0;
+let activePvpMatch = { challenger: '', challenged: '' };
 
 /* Fase 1: Persistência de sessão via sessionStorage */
 const SESSION_KEY = 'mempool-miner-session';
@@ -409,9 +424,10 @@ let comboMultiplier = 1;
 /* Power-ups: efeitos ativos na rodada (time_freeze em segundos restantes; demais = ativo na rodada) */
 let powerupEffects = { time_freeze: 0, scanner: false, double_combo: false, magnet: false, precision: false };
 /* Power-ups ativados entre rodadas: aplicados no início da próxima rodada */
-let pendingPowerups = new Set();
+let pendingPowerups = new Map();
 /* Inventário pessoal de power-ups (carregado de powerups/{username}) */
 let powerupsInventoryData = null;
+const powerupPurchaseInFlight = new Set();
 
 /* Variaveis de estado para modulos */
 let chatHistoryLoaded = false;
@@ -444,6 +460,7 @@ const gameStatusEl = document.getElementById('game-status');
 const connectivityStatusEl = document.getElementById('connectivity-status');
 const installAppButtonEl = document.getElementById('btn-install-app');
 const updateBannerEl = document.getElementById('pwa-update-banner');
+const updateBannerMessageEl = document.getElementById('pwa-update-message');
 const updateAppButtonEl = document.getElementById('btn-update-app');
 const dismissUpdateButtonEl = document.getElementById('btn-dismiss-update');
 const nextButtonEl = document.getElementById('next-btn');
@@ -464,8 +481,92 @@ async function loadPowerupsInventory() {
         if (!response.ok) throw new Error('Falha ao carregar inventário de power-ups');
         powerupsInventoryData = await response.json();
         renderPowerupsPanel();
+        renderPowerupShop();
     } catch (error) {
         console.error('Erro ao carregar inventário de power-ups:', error);
+    }
+}
+
+function renderPowerupShop() {
+    if (!powerupsInventoryData) return;
+    const definitions = powerupsInventoryData.definitions || [];
+    const inventory = powerupsInventoryData.inventory || {};
+    const daily = powerupsInventoryData.daily_limit || {};
+    const items = daily.items || {};
+    for (const def of definitions) {
+        const id = def.id;
+        const nameEl = document.getElementById(`powerup-shop-name-${id}`);
+        const descEl = document.getElementById(`powerup-shop-desc-${id}`);
+        const priceEl = document.getElementById(`btn-buy-powerup-${id}`);
+        const metaEl = document.getElementById(`powerup-shop-meta-${id}`);
+        const itemLimit = items[id] || { used: 0, remaining: daily.per_powerup || 0 };
+        if (nameEl) nameEl.textContent = def.name;
+        if (descEl) descEl.textContent = def.description;
+        if (priceEl) {
+            priceEl.textContent = `${Number(def.price).toLocaleString()} SATS`;
+            priceEl.disabled = !sessionReady
+                || !activeRealmId
+                || powerupPurchaseInFlight.has(id)
+                || itemLimit.remaining <= 0
+                || (daily.global_remaining ?? 0) <= 0
+                || balanceSatoshis < Number(def.price);
+            priceEl.title = itemLimit.remaining <= 0
+                ? 'Limite diário deste power-up atingido'
+                : (daily.global_remaining ?? 0) <= 0
+                    ? 'Limite diário global atingido'
+                    : '';
+        }
+        if (metaEl) {
+            metaEl.textContent = `Limite: ${itemLimit.used}/${daily.per_powerup || 3} hoje · Inventário: ${inventory[id] || 0}`;
+        }
+    }
+}
+
+async function buyPowerup(powerupId) {
+    if (!sessionReady || !activeRealmId || powerupPurchaseInFlight.has(powerupId)) return;
+    const definition = powerupsInventoryData?.definitions?.find(def => def.id === powerupId);
+    if (!definition) {
+        showNotification('Power-up indisponível para compra', 'error');
+        return;
+    }
+    powerupPurchaseInFlight.add(powerupId);
+    renderPowerupShop();
+    const button = document.getElementById(`btn-buy-powerup-${powerupId}`);
+    const originalText = button?.textContent || '';
+    if (button) button.textContent = '...';
+    const txId = `buy-pu-${activeRealmId}-${powerupId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    try {
+        const response = await fetch(activeNetworkApiUrl('powerups/buy'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                username: minerName,
+                powerup_id: powerupId,
+                quantity: 1,
+                tx_id: txId,
+            }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            showNotification(payload.detail || 'Falha ao comprar power-up', 'error');
+            return;
+        }
+        balanceSatoshis = Number(payload.balance);
+        document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString();
+        powerupsInventoryData.inventory = payload.inventory || powerupsInventoryData.inventory;
+        powerupsInventoryData.daily_limit = payload.daily_limit || powerupsInventoryData.daily_limit;
+        playSound('buy');
+        renderPowerupsPanel();
+        renderPowerupShop();
+        saveSessionState();
+        announceGameStatus(`${payload.powerup?.name || definition.name} comprado com sucesso.`);
+    } catch (error) {
+        console.error('Erro ao comprar power-up:', error);
+        showNotification('Erro de conexão ao comprar power-up', 'error');
+    } finally {
+        powerupPurchaseInFlight.delete(powerupId);
+        if (button) button.textContent = originalText;
+        renderPowerupShop();
     }
 }
 
@@ -535,7 +636,7 @@ function applyPowerupEffect(powerupId) {
             announceGameStatus(`${POWERUP_NAMES[powerupId] || powerupId} ativo nesta rodada.`);
         }
     } else {
-        pendingPowerups.add(powerupId);
+        pendingPowerups.set(powerupId, (pendingPowerups.get(powerupId) || 0) + 1);
         announceGameStatus(`${POWERUP_NAMES[powerupId] || powerupId} será aplicado na próxima rodada.`);
     }
 }
@@ -553,12 +654,12 @@ function revealWordDirection() {
 // Aplica power-ups pendentes no início da rodada
 function applyPendingPowerups() {
     if (pendingPowerups.size === 0) return;
-    for (const id of pendingPowerups) {
+    for (const [id, quantity] of pendingPowerups) {
         if (id === 'time_freeze') {
-            powerupEffects.time_freeze += 5;
+            powerupEffects.time_freeze += 5 * quantity;
         } else if (id === 'scanner') {
             powerupEffects.scanner = true;
-            revealWordDirection();
+            for (let index = 0; index < quantity; index += 1) revealWordDirection();
         } else {
             powerupEffects[id] = true;
         }
@@ -569,6 +670,7 @@ function applyPendingPowerups() {
 
 // Reseta os efeitos de rodada ao preparar a próxima rodada
 function resetRoundPowerups() {
+    powerupEffects.time_freeze = 0;
     powerupEffects.scanner = false;
     powerupEffects.double_combo = false;
     powerupEffects.magnet = false;
@@ -590,7 +692,7 @@ const sessionInitializers = new Map();
  * repopulam. Usado pelo showTab para re-chamar os loaders quando os
  * painéis foram zerados (teardownSession) e o jogador volta à tab. */
 const TAB_INITIALIZERS = {
-    upgrades: ['energy', 'crates', 'level'],
+    upgrades: ['energy', 'crates', 'level', 'powerups'],
     perfil: ['skills', 'season', 'cards'],
     /* Fase 5 (ponta solta da auditoria): o painel de missões está na tab
      * competir (section-competir-missions), não em perfil. Antes 'missions'
@@ -660,10 +762,46 @@ function updateConnectivityStatus(event) {
 /**
  * Mostra uma atualização somente quando o novo worker já está pronto.
  */
-function showServiceWorkerUpdate(registration) {
+function showServiceWorkerUpdate(registration, alreadyActive = false) {
     serviceWorkerRegistration = registration;
+    appUpdateReloadReady = alreadyActive;
+    if (updateBannerMessageEl) {
+        updateBannerMessageEl.textContent = alreadyActive
+            ? `Nova versão ${APP_SHELL_VERSION} carregada. Recarregue para confirmar a atualização.`
+            : 'Uma nova versão do jogo está pronta.';
+    }
+    updateAppButtonEl.textContent = alreadyActive ? 'RECARREGAR' : 'ATUALIZAR';
     setModalState(updateBannerEl, Boolean(registration.waiting));
-    updateAppButtonEl.disabled = !registration.waiting;
+    if (alreadyActive) setModalState(updateBannerEl, true);
+    updateAppButtonEl.disabled = !registration.waiting && !alreadyActive;
+}
+
+function notifyActivatedShellVersion(registration) {
+    let previousVersion = null;
+    try {
+        previousVersion = localStorage.getItem(APP_SHELL_VERSION_KEY);
+        localStorage.setItem(APP_SHELL_VERSION_KEY, APP_SHELL_VERSION);
+    } catch (error) {
+        console.warn('Não foi possível persistir a versão do shell.', error);
+        return;
+    }
+    if (previousVersion && previousVersion !== APP_SHELL_VERSION) {
+        showServiceWorkerUpdate(registration, true);
+    }
+}
+
+function watchInstallingWorker(registration, installingWorker) {
+    if (!installingWorker) return;
+    const handleStateChange = () => {
+        if (installingWorker.state !== 'installed') return;
+        installingWorker.removeEventListener('statechange', handleStateChange);
+        if (navigator.serviceWorker.controller) showServiceWorkerUpdate(registration);
+    };
+    if (installingWorker.state === 'installed') {
+        handleStateChange();
+    } else {
+        installingWorker.addEventListener('statechange', handleStateChange);
+    }
 }
 
 /**
@@ -677,17 +815,16 @@ async function registerPwa() {
         if (registration.waiting) showServiceWorkerUpdate(registration);
 
         registration.addEventListener('updatefound', () => {
-            const installingWorker = registration.installing;
-            if (!installingWorker) return;
-            installingWorker.addEventListener('statechange', () => {
-                if (
-                    installingWorker.state === 'installed'
-                    && navigator.serviceWorker.controller
-                ) {
-                    showServiceWorkerUpdate(registration);
-                }
-            });
+            watchInstallingWorker(registration, registration.installing);
         });
+        watchInstallingWorker(registration, registration.installing);
+
+        await registration.update();
+        if (registration.waiting) {
+            showServiceWorkerUpdate(registration);
+        } else if (!registration.installing) {
+            notifyActivatedShellVersion(registration);
+        }
 
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') {
@@ -720,7 +857,10 @@ installAppButtonEl.addEventListener('click', async () => {
 
 updateAppButtonEl.addEventListener('click', () => {
     const waitingWorker = serviceWorkerRegistration?.waiting;
-    if (!waitingWorker) return;
+    if (!waitingWorker) {
+        if (appUpdateReloadReady) window.location.reload();
+        return;
+    }
     reloadingForUpdate = true;
     updateAppButtonEl.disabled = true;
     waitingWorker.postMessage({ type: 'SKIP_WAITING' });
@@ -728,6 +868,7 @@ updateAppButtonEl.addEventListener('click', () => {
 
 dismissUpdateButtonEl.addEventListener('click', () => {
     setModalState(updateBannerEl, false);
+    appUpdateReloadReady = false;
 });
 
 if ('serviceWorker' in navigator) {
@@ -928,6 +1069,16 @@ function resetSessionPanel(element, message) {
 
 function resetSessionModules() {
     resetBossState();
+    powerupEffects = {
+        time_freeze: 0,
+        scanner: false,
+        double_combo: false,
+        magnet: false,
+        precision: false,
+    };
+    pendingPowerups.clear();
+    powerupsInventoryData = null;
+    powerupPurchaseInFlight.clear();
     const bossDefeatModal = document.getElementById('boss-defeat-modal');
     const bossDefeatButton = document.getElementById('boss-defeat-btn');
     setModalState(bossDefeatModal, false);
@@ -936,6 +1087,8 @@ function resetSessionModules() {
     decoderActive = false;
     decoderTimeRemaining = DECODER_TIME_LIMIT;
     decoderCooldownRemaining = 0;
+    clearTimeout(decoderCooldownTimer);
+    decoderCooldownTimer = null;
     setModalState(decoderModalEl, false);
     decoderLaunchBtnEl?.classList.add('hidden');
     if (decoderInputEl) {
@@ -969,6 +1122,7 @@ function resetSessionModules() {
     rbfUsedTotal = 0;
     maxRoundEarningsTotal = 0;
     poolJoinedTotal = 0;
+    wordsWithoutErrorStreak = 0;
 
     missionsData = null;
     skillTreeData = null;
@@ -1036,6 +1190,102 @@ function resetSessionModules() {
     sessionPanelsReset = true;
 }
 
+function formatPvpTimer(seconds) {
+    const safeSeconds = Math.max(0, Number(seconds) || 0);
+    const minutes = Math.floor(safeSeconds / 60);
+    const remainder = Math.floor(safeSeconds % 60);
+    return `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
+}
+
+function updatePvpTimer(timer) {
+    pvpRemainingSeconds = Math.max(0, Number(timer) || 0);
+    if (pvpTimerValueEl) pvpTimerValueEl.textContent = formatPvpTimer(pvpRemainingSeconds);
+}
+
+function updatePvpScore(data) {
+    if (!data) return;
+    if (pvpLivePanelEl) pvpLivePanelEl.hidden = false;
+    if (data.challenger) activePvpMatch.challenger = data.challenger;
+    if (data.challenged) activePvpMatch.challenged = data.challenged;
+    if (pvpChallengerNameEl) pvpChallengerNameEl.textContent = activePvpMatch.challenger || '—';
+    if (pvpChallengedNameEl) pvpChallengedNameEl.textContent = activePvpMatch.challenged || '—';
+    if (data.username === activePvpMatch.challenger && pvpChallengerScoreEl) {
+        pvpChallengerScoreEl.textContent = Number(data.score || 0).toLocaleString();
+    }
+    if (data.username === activePvpMatch.challenged && pvpChallengedScoreEl) {
+        pvpChallengedScoreEl.textContent = Number(data.score || 0).toLocaleString();
+    }
+    // Um pvp_score_update tardio (chegando após pvp_end) não pode reabrir
+    // o status terminal (WON/LOST/DRAW) para LIVE.
+    if (pvpStatusEl && !['WON', 'LOST', 'DRAW'].includes(pvpStatusEl.textContent)) {
+        pvpStatusEl.textContent = 'LIVE';
+    }
+}
+
+function showPvpChallenge(data) {
+    activePvpMatch = {
+        challenger: data.challenger || '',
+        challenged: data.challenged || '',
+    };
+    if (pvpLivePanelEl) pvpLivePanelEl.hidden = false;
+    if (pvpChallengerNameEl) pvpChallengerNameEl.textContent = activePvpMatch.challenger || '—';
+    if (pvpChallengedNameEl) pvpChallengedNameEl.textContent = activePvpMatch.challenged || '—';
+    if (pvpChallengerScoreEl) pvpChallengerScoreEl.textContent = '0';
+    if (pvpChallengedScoreEl) pvpChallengedScoreEl.textContent = '0';
+    if (pvpStatusEl) pvpStatusEl.textContent = 'CHALLENGE';
+    updatePvpTimer(data.duration || 60);
+}
+
+function startPvpLiveMatch(data) {
+    showPvpChallenge(data);
+    if (pvpStatusEl) pvpStatusEl.textContent = 'LIVE';
+    clearInterval(pvpTimerInterval);
+    // Countdown por timestamp (não por decremento de setInterval): evita
+    // drift acumulado e mantém o tempo exato mesmo com frames lentos.
+    const durationSeconds = Math.max(0, Number(data.duration) || 60);
+    const deadline = Date.now() + durationSeconds * 1000;
+    updatePvpTimer(durationSeconds);
+    pvpTimerInterval = setInterval(() => {
+        const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+        updatePvpTimer(remaining);
+        if (remaining <= 0) {
+            clearInterval(pvpTimerInterval);
+            pvpTimerInterval = null;
+        }
+    }, 250);
+}
+
+function finishPvpLiveMatch(data) {
+    clearInterval(pvpTimerInterval);
+    pvpTimerInterval = null;
+    if (Number.isFinite(Number(data.challenger_score)) && pvpChallengerScoreEl) {
+        pvpChallengerScoreEl.textContent = Number(data.challenger_score).toLocaleString();
+    }
+    if (Number.isFinite(Number(data.challenged_score)) && pvpChallengedScoreEl) {
+        pvpChallengedScoreEl.textContent = Number(data.challenged_score).toLocaleString();
+    }
+    updatePvpTimer(0);
+    if (pvpStatusEl) {
+        pvpStatusEl.textContent = data.result === 'draw'
+            ? 'DRAW'
+            : data.winner === minerName ? 'WON' : 'LOST';
+    }
+}
+
+function resetPvpLivePanel() {
+    clearInterval(pvpTimerInterval);
+    pvpTimerInterval = null;
+    pvpRemainingSeconds = 0;
+    activePvpMatch = { challenger: '', challenged: '' };
+    if (pvpLivePanelEl) pvpLivePanelEl.hidden = true;
+    if (pvpStatusEl) pvpStatusEl.textContent = 'STANDBY';
+    if (pvpChallengerNameEl) pvpChallengerNameEl.textContent = '—';
+    if (pvpChallengedNameEl) pvpChallengedNameEl.textContent = '—';
+    if (pvpChallengerScoreEl) pvpChallengerScoreEl.textContent = '0';
+    if (pvpChallengedScoreEl) pvpChallengedScoreEl.textContent = '0';
+    if (pvpTimerValueEl) pvpTimerValueEl.textContent = '00:00';
+}
+
 function teardownSession(reason = 'realm-switch') {
     sessionGeneration += 1;
     sessionReady = false;
@@ -1058,6 +1308,10 @@ function teardownSession(reason = 'realm-switch') {
     clearInterval(seasonTimerInterval);
     clearInterval(sprintTimerInterval);
     clearInterval(decoderTimerInterval);
+    clearTimeout(decoderCooldownTimer);
+    decoderCooldownTimer = null;
+    clearTimeout(chatRateResetTimer);
+    chatRateResetTimer = null;
     clearInterval(eventCountdownInterval);
     clearInterval(stakeCountdownInterval);
     clearInterval(stakePollInterval);
@@ -1079,6 +1333,7 @@ function teardownSession(reason = 'realm-switch') {
     networkCatalogRequestController = undefined;
     poolsRequestController = undefined; /* Fase 5 */
     resetSessionModules();
+    resetPvpLivePanel();
     setModalState(document.getElementById('lightning-modal'), false);
     setModalState(document.getElementById('result-modal'), false);
     setNextButtonAction(null);
@@ -1174,22 +1429,50 @@ document.addEventListener('keydown', event => {
 function configureGridSize(size) {
     const compactLayout = window.matchMedia('(max-width: 559px)').matches;
     const gap = compactLayout ? 2 : 4;
-    const wrapperWidth = gridWrapperEl.clientWidth || window.innerWidth;
+    const wrapperWidth = gridWrapperEl.clientWidth;
+    /* B5: se o hull ainda não tem largura (display:none, aba oculta ou antes do
+     * primeiro layout), não dimensionar pelo viewport inteiro — a grade ficaria
+     * gigante. O ResizeObserver recalcula quando o elemento ganhar tamanho. */
+    if (wrapperWidth === 0) return;
     // clientWidth do .grid-hull inclui o padding (6px*2); o grid ocupa a caixa de
     // conteúdo, então subtraímos só o padding para a grade preencher o hull.
     const hullOverhead = 12;
-    const availableWidth = Math.max(220, wrapperWidth - hullOverhead);
+    const availableWidth = wrapperWidth - hullOverhead;
     const responsiveSize = Math.floor((availableWidth - ((size - 1) * gap)) / size);
-    // Teto de 72px evita células gigantes em telas 4K; piso de 13px em telas pequenas.
-    // (antes: teto fixo de 38/28px + largura limitada a 620px, que deixava a grade
-    //  "incompleta" — não preenchendo o hull em telas grandes)
-    const cellSize = Math.max(13, Math.min(72, responsiveSize));
+    // Teto de 72px evita células gigantes em telas 4K.
+    // Piso de 10px para legibilidade — mas só quando a grade ainda cabe no hull.
+    // Em landscape de celular o hull é limitado por 64dvh (altura pequena); um piso
+    // fixo de 13px fazia a grade 15x15 estourar a moldura (~18px). Se o piso legível
+    // não couber, usamos um piso de segurança de 4px para a grade NUNCA estourar.
+    const LEGIBLE_FLOOR = 10;
+    const SAFE_FLOOR = 4;
+    const legibleFits = (size * LEGIBLE_FLOOR + (size - 1) * gap) <= availableWidth;
+    const floor = legibleFits ? LEGIBLE_FLOOR : SAFE_FLOOR;
+    const cellSize = Math.min(72, Math.max(floor, responsiveSize));
     gridEl.style.setProperty('--grid-gap', `${gap}px`);
     gridEl.style.setProperty('--cell-size', `${cellSize}px`);
     gridEl.style.gridTemplateColumns = `repeat(${size}, var(--cell-size))`;
     gridEl.style.gridTemplateRows = `repeat(${size}, var(--cell-size))`;
     gridEl.setAttribute('aria-rowcount', String(size));
     gridEl.setAttribute('aria-colcount', String(size));
+}
+
+/**
+ * Redesenha as linhas das palavras já encontradas após um resize/rotação.
+ * As linhas SVG usam coordenadas absolutas (px); sem este redesenho, elas
+ * ficariam desalinhadas das células após a grade mudar de tamanho.
+ */
+function redrawFoundLines() {
+    if (!svgEl || !grid.length || !blockWords.length) return;
+    svgEl.replaceChildren();
+    for (const w of blockWords) {
+        if (!w.found || !w.coords || w.coords.length < 2) continue;
+        const first = w.coords[0];
+        const last = w.coords[w.coords.length - 1];
+        const startEl = grid[first.y]?.[first.x]?.element;
+        const endEl = grid[last.y]?.[last.x]?.element;
+        if (startEl && endEl) drawAnimatedLine(startEl, endEl, false);
+    }
 }
 
 /**
@@ -1362,9 +1645,22 @@ gridEl.addEventListener('keydown', handleGridKeydown);
 window.addEventListener('pointerup', handlePointerEnd);
 window.addEventListener('pointercancel', handlePointerCancel);
 window.addEventListener('blur', () => cancelSelection());
-window.addEventListener('resize', () => configureGridSize(currentGridSize));
+/* B4: um único ponto de relayout da grade, com debounce de 100ms. Antes, o
+ * handler de `resize` e o ResizeObserver disparam `configureGridSize` +
+ * `redrawFoundLines` cada um por evento (duplicação no mesmo frame). O debounce
+ * agrupa os disparos e só recalcula quando o tamanho estabiliza. */
+let gridRelayoutTimer = null;
+function scheduleGridRelayout() {
+    if (gridRelayoutTimer !== null) return;
+    gridRelayoutTimer = setTimeout(() => {
+        gridRelayoutTimer = null;
+        configureGridSize(currentGridSize);
+        redrawFoundLines();
+    }, 100);
+}
+window.addEventListener('resize', scheduleGridRelayout);
 if ('ResizeObserver' in window) {
-    const gridResizeObserver = new ResizeObserver(() => configureGridSize(currentGridSize));
+    const gridResizeObserver = new ResizeObserver(scheduleGridRelayout);
     gridResizeObserver.observe(gridWrapperEl);
 }
 window.addEventListener('pagehide', () => {
@@ -1510,10 +1806,8 @@ async function startSession(realmIdOverride = null) {
     announceGameStatus(`Conectando à rede ${selectedNetwork.display_name}.`);
     setModalState(document.getElementById('auth-modal'), false);
 
-    // Fase 3: Carrega estado do jogador do backend
-    if (!previousRealm || previousRealm === activeRealmId) {
-        void loadPlayerState(activeRealmId, minerName);
-    }
+    // Fase 3: carrega o estado persistido também após troca de realm.
+    void loadPlayerState(activeRealmId, minerName);
     /* Fase 7: Carrega stats de achievements */
     void loadAchievementStats(activeRealmId, minerName);
 
@@ -1618,6 +1912,9 @@ async function startSession(realmIdOverride = null) {
             }
             announceGameStatus(`${selectedNetwork.display_name} conectada. Aguardando transações.`);
             prepareNextBlock();
+            /* O watchdog precisa existir mesmo antes da primeira transação;
+             * sem isso o estado 0/N não possui caminho de recuperação. */
+            startTxBufferWatchdog();
             /* Fase A2: replay de transações pendentes — o backend reenvia as
              * transações da epoch atual que ainda não foram consumidas. Isso
              * evita o estado "aguardando transações" após queda de WS ou
@@ -1796,25 +2093,26 @@ async function startSession(realmIdOverride = null) {
 
         // Fase 3: PvP — handlers para eventos PvP
         if (data.action === 'pvp_challenge') {
+            showPvpChallenge(data);
             showNotification(`${data.challenger} te desafiou para PvP!`, 'info');
             return;
         }
         if (data.action === 'pvp_start') {
+            startPvpLiveMatch(data);
             showNotification('PvP iniciado!', 'success');
             return;
         }
         if (data.action === 'pvp_score_update') {
-            /* Fase 6.12: handler vazio — PvP ainda não implementado.
-             * O evento é reconhecido para evitar warnings no console,
-             * mas não há lógica de jogo PvP ativa. */
+            updatePvpScore(data);
             return;
         }
         if (data.action === 'pvp_end') {
+            finishPvpLiveMatch(data);
             showNotification(`PvP finalizado! ${data.winner === minerName ? 'Você venceu!' : 'Você perdeu.'}`, data.winner === minerName ? 'success' : 'error');
             return;
         }
         if (data.action === 'pvp_timer') {
-            /* Fase 6.12: handler vazio — PvP ainda não implementado. */
+            updatePvpTimer(data.timer);
             return;
         }
 
@@ -2149,29 +2447,44 @@ async function earnBalance(amount, txId) {
  */
 async function spendBalance(amount, txId) {
     if (!activeRealmId || !minerName || amount <= 0) return null;
-    const controller = new AbortController();
-    requestControllers.add(controller);
-    try {
-        const response = await fetch(
-            playerStateUrl(activeRealmId, minerName) + '/spend',
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username: minerName, amount, tx_id: txId }),
-                signal: controller.signal,
+    const MAX_ATTEMPTS = 3;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        const controller = new AbortController();
+        requestControllers.add(controller);
+        try {
+            const response = await fetch(
+                playerStateUrl(activeRealmId, minerName) + '/spend',
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: minerName, amount, tx_id: txId }),
+                    signal: controller.signal,
+                }
+            );
+            if (!response.ok) {
+                if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+                    return null;
+                }
+                if (attempt === MAX_ATTEMPTS) return null;
+            } else {
+                const data = await response.json();
+                return data.balance ?? null;
             }
-        );
-        if (!response.ok) return null;
-        const data = await response.json();
-        return data.balance ?? null;
-    } catch (error) {
-        if (error.name !== 'AbortError') {
-            console.warn('Erro ao debitar saldo no backend.', error);
+        } catch (error) {
+            if (error.name === 'AbortError') return null;
+            if (attempt === MAX_ATTEMPTS) {
+                console.warn('Erro ao debitar saldo no backend (tentativas esgotadas).', error);
+            }
+        } finally {
+            requestControllers.delete(controller);
         }
-        return null;
-    } finally {
-        requestControllers.delete(controller);
+        // Só atrasa entre tentativas — não após a última (evita ~1,5s de
+        // latência inútil na falha final).
+        if (attempt < MAX_ATTEMPTS) {
+            await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+        }
     }
+    return null;
 }
 
 /**
@@ -2191,16 +2504,12 @@ async function loadPlayerState(realmId, username) {
         if (!response.ok) return;
         const state = await response.json();
         if (!isSessionContextCurrent(sessionContext)) return;
-        // Fase 5.3: espelha o saldo do backend (fonte de verdade).
-        // O local só é empurrado para o backend quando o backend está 0
-        // (primeiro uso / migração) — nunca quando o backend tem saldo,
-        // para não sobrescrever o valor da fonte de verdade.
-        // Fase A1: espelha SEMPRE quando o backend tem saldo > 0 (antes:
-        // só quando backend > local, o que impedia o débito de energia
-        // de atualizar o HUD — "cold wallet não desconta").
-        if (state.balance > 0) {
+        // Fase G: a existência do campo balance define a fonte de verdade.
+        // Quando inicializado, espelha inclusive zero (uma compra legítima
+        // pode zerar a conta). Só migra o local se o campo ainda não existe.
+        if (state.balance_initialized) {
             balanceSatoshis = state.balance;
-        } else if (balanceSatoshis > 0 && state.balance === 0) {
+        } else if (balanceSatoshis > 0) {
             void syncPlayerState();
         }
         if (state.hardware_level > 1) {
@@ -2284,6 +2593,7 @@ async function buyHint() {
         grid[unfound.startY][unfound.startX].element.classList.add('hint-glow');
         updateStoreUI(); submitScore();
         saveSessionState(); /* Fase 1: salva após compra de dica */
+        void updateMissionsProgress();
     } finally {
         hintPurchaseInFlight = false;
     }
@@ -2295,30 +2605,38 @@ async function buyHint() {
  * Fase 5.1: o débito é validado no backend (fonte de verdade do saldo).
  * O upgrade só é aplicado localmente se o backend confirmar o débito.
  */
+let hardwarePurchaseInFlight = false;
 async function buyHardware() {
-    if (hardwareLevel >= hardwareNames.length) return;
-    const nextPrice = hardwarePrices[hardwareLevel - 1];
-    if (balanceSatoshis < nextPrice) return;
-    const txId = `spend-hw-${activeRealmId}-${hardwareLevel}-${Date.now()}`;
-    const confirmed = await spendBalance(nextPrice, txId);
-    if (confirmed === null) return; /* backend recusou */
-    /* Backend confirmou o débito — aplica o upgrade e espelha o saldo */
-    balanceSatoshis = confirmed;
-    document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString();
-    playSound('buy');
-    networkTimeBonus += 10;
-    if (isPlaying && !isLightningMode) {
-        networkTimeLimit += 10;
-        /* Fase 7: estende o endTime do timer por timestamp — sem isso,
-         * o +10s do hardware não valeria na rodada em andamento. */
-        raceEndTime += 10 * 1000;
-        updateRaceLimitLabel();
+    if (hardwarePurchaseInFlight) return;
+    hardwarePurchaseInFlight = true;
+    try {
+        if (hardwareLevel >= hardwareNames.length) return;
+        const nextPrice = hardwarePrices[hardwareLevel - 1];
+        if (balanceSatoshis < nextPrice) return;
+        const txId = `spend-hw-${activeRealmId}-${hardwareLevel}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const confirmed = await spendBalance(nextPrice, txId);
+        if (confirmed === null) return; /* backend recusou */
+        /* Backend confirmou o débito — aplica o upgrade e espelha o saldo */
+        balanceSatoshis = confirmed;
+        document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString();
+        playSound('buy');
+        networkTimeBonus += 10;
+        if (isPlaying && !isLightningMode) {
+            networkTimeLimit += 10;
+            /* Fase 7: estende o endTime do timer por timestamp — sem isso,
+             * o +10s do hardware não valeria na rodada em andamento. */
+            raceEndTime += 10 * 1000;
+            updateRaceLimitLabel();
+        }
+        document.getElementById('ui-hw').innerText = hardwareNames[hardwareLevel];
+        hardwareLevel++; updateStoreUI(); submitScore();
+        saveSessionState(); /* Fase 1: salva após compra de hardware */
+        void updateMissionsProgress();
+        // Sincroniza hardware_level no backend (o saldo já foi debitado via /spend)
+        void syncPlayerState();
+    } finally {
+        hardwarePurchaseInFlight = false;
     }
-    document.getElementById('ui-hw').innerText = hardwareNames[hardwareLevel];
-    hardwareLevel++; updateStoreUI(); submitScore();
-    saveSessionState(); /* Fase 1: salva após compra de hardware */
-    // Sincroniza hardware_level no backend (o saldo já foi debitado via /spend)
-    void syncPlayerState();
 }
 
 /**
@@ -2328,45 +2646,53 @@ async function buyHardware() {
  * O estado do Lightning só é ativado localmente se o backend confirmar o
  * débito — sem isso, o jogador poderia ativar o Lightning de graça.
  */
+let lightningPurchaseInFlight = false;
 async function buyLightning() {
-    if (balanceSatoshis < LIGHTNING_PRICE || isLightningMode || isPlaying || isTransitioning) return;
-    const txId = `spend-ln-${activeRealmId}-${Date.now()}`;
-    const confirmed = await spendBalance(LIGHTNING_PRICE, txId);
-    if (confirmed === null) return; /* backend recusou */
-    /* Backend confirmou o débito — ativa o Lightning e espelha o saldo */
-    isTransitioning = true;
-    isLightningMode = true;
-    /* Fase 3: Lightning Channel Liquidity — canal dura LIGHTNING_CHANNEL_DURATION blocos */
-    lightningBlocksRemaining = LIGHTNING_CHANNEL_DURATION;
-    balanceSatoshis = confirmed;
-    document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString();
-    playSound('buy');
-    document.body.classList.add('lightning-theme');
-    document.getElementById('result-title').style.color = "var(--lightning-blue)";
-    updateStoreUI(); submitScore();
-    saveSessionState(); /* Fase 1: salva após compra de Lightning */
-    // Sincroniza lightning_active no backend (o saldo já foi debitado via /spend)
-    void syncPlayerState();
+    if (lightningPurchaseInFlight) return;
+    lightningPurchaseInFlight = true;
+    try {
+        if (balanceSatoshis < LIGHTNING_PRICE || isLightningMode || isPlaying || isTransitioning) return;
+        const txId = `spend-ln-${activeRealmId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const confirmed = await spendBalance(LIGHTNING_PRICE, txId);
+        if (confirmed === null) return; /* backend recusou */
+        /* Backend confirmou o débito — ativa o Lightning e espelha o saldo */
+        isTransitioning = true;
+        isLightningMode = true;
+        /* Fase 3: Lightning Channel Liquidity — canal dura LIGHTNING_CHANNEL_DURATION blocos */
+        lightningBlocksRemaining = LIGHTNING_CHANNEL_DURATION;
+        balanceSatoshis = confirmed;
+        document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString();
+        playSound('buy');
+        document.body.classList.add('lightning-theme');
+        document.getElementById('result-title').style.color = "var(--lightning-blue)";
+        updateStoreUI(); submitScore();
+        saveSessionState(); /* Fase 1: salva após compra de Lightning */
+        void updateMissionsProgress();
+        // Sincroniza lightning_active no backend (o saldo já foi debitado via /spend)
+        void syncPlayerState();
 
-    const term = document.getElementById('lightning-modal');
-    const termText = document.getElementById('lightning-text');
-    setModalState(term, true);
-    termText.textContent = "> INIT LIGHTNING_DAEMON\n";
+        const term = document.getElementById('lightning-modal');
+        const termText = document.getElementById('lightning-text');
+        setModalState(term, true);
+        termText.textContent = "> INIT LIGHTNING_DAEMON\n";
 
-    const generation = sessionGeneration;
-    scheduleForSession(() => { termText.textContent += "> FINDING PEERS... [OK]\n"; }, 800, generation);
-    scheduleForSession(() => { termText.textContent += "> OPENING CHANNEL (SIMULADO)... [OK]\n"; }, 1600, generation);
-    scheduleForSession(() => {
-        termText.textContent += `> ZERO-CONF SIMULADO. LIGHTNING MODE ACTIVE.\n`;
-        termText.textContent += `> CHANNEL CAPACITY: ${LIGHTNING_CHANNEL_DURATION} BLOCKS\n`;
+        const generation = sessionGeneration;
+        scheduleForSession(() => { termText.textContent += "> FINDING PEERS... [OK]\n"; }, 800, generation);
+        scheduleForSession(() => { termText.textContent += "> OPENING CHANNEL (SIMULADO)... [OK]\n"; }, 1600, generation);
         scheduleForSession(() => {
-            setModalState(term, false);
-            isTransitioning = false;
-            if (!isPlaying && txBuffer.length === WORDS_PER_BLOCK) {
-                void requestPlayableBlockBuild();
-            }
-        }, 1500, generation);
-    }, 2500, generation);
+            termText.textContent += `> ZERO-CONF SIMULADO. LIGHTNING MODE ACTIVE.\n`;
+            termText.textContent += `> CHANNEL CAPACITY: ${LIGHTNING_CHANNEL_DURATION} BLOCKS\n`;
+            scheduleForSession(() => {
+                setModalState(term, false);
+                isTransitioning = false;
+                if (!isPlaying && txBuffer.length === WORDS_PER_BLOCK) {
+                    void requestPlayableBlockBuild();
+                }
+            }, 1500, generation);
+        }, 2500, generation);
+    } finally {
+        lightningPurchaseInFlight = false;
+    }
 }
 
 /**
@@ -2381,6 +2707,10 @@ function handleTransactionEvent(data) {
         console.warn("Evento de transação fora do contrato foi ignorado.");
         return;
     }
+    /* Captura a geração da sessão no momento do evento: o build agendado
+     * (500ms) só deve disparar se a sessão não tiver sido derrubada no
+     * intervalo (teardown incrementa sessionGeneration). */
+    const generation = sessionGeneration;
     if (activeEpoch && data.epoch && data.epoch !== activeEpoch) {
         txBuffer = [];
         activeEpoch = data.epoch;
@@ -2419,12 +2749,11 @@ function startTxBufferWatchdog() {
     if (txBufferWatchdog) return; // já ativo
     txBufferWatchdog = setInterval(() => {
         // Só age se a sessão está pronta, não está jogando, não está em boss
-        // block e o buffer está incompleto MAS já tem algumas palavras
-        // (parou no meio, não é buffer recém-limpo com 0 palavras).
+        // block e o buffer está incompleto. Isso inclui o estado 0/N: a sessão
+        // também precisa ser recuperada quando nenhuma transação chegou.
         if (!sessionReady || isPlaying || isBossActive || txBuffer.length >= WORDS_PER_BLOCK) {
             return;
         }
-        if (txBuffer.length === 0) return; // buffer vazio — ainda não começou
         const stalled = Date.now() - lastTxActivityTime > TX_BUFFER_STALL_MS;
         if (stalled) {
             console.warn(`Watchdog: buffer parado há ${Math.round((Date.now() - lastTxActivityTime) / 1000)}s com ${txBuffer.length}/${WORDS_PER_BLOCK} palavras. Forçando reconexão.`);
@@ -2433,6 +2762,12 @@ function startTxBufferWatchdog() {
             // Força reconexão: teardown + startSession
             const realmToReconnect = activeRealmId;
             teardownSession('tx-buffer-stall');
+            overlayEl.classList.remove('hidden');
+            const loaderText = overlayEl.querySelector('#tx-loading');
+            if (loaderText) {
+                loaderText.innerText = 'Sem transações por 45s. Reconectando...';
+            }
+            announceGameStatus('Sem transações por 45s. Reconectando à rede ativa...');
             void startSession(realmToReconnect);
         }
     }, 5000); // verifica a cada 5s
@@ -3260,15 +3595,26 @@ function showFloatingText(cell, points, isHighFee, isGolden) {
         floatText.style.color = 'var(--success-green)';
     }
 
-    const rect = cell.getBoundingClientRect(); floatText.style.left = `${rect.left}px`; floatText.style.top = `${rect.top}px`;
-    document.body.appendChild(floatText);
+    const rect = cell.getBoundingClientRect();
+    // B6: ancora ao hull (position: absolute) em vez de fixed no body — assim o
+    // rótulo não "deriva" da célula se a página rolar durante a animação.
+    // M2: clamp a posição para o rótulo não estourar a borda direita do
+    // viewport em telas pequenas (320px).
+    const EST_WIDTH = 150;
+    const hullRect = gridWrapperEl.getBoundingClientRect();
+    let left = rect.left - hullRect.left;
+    left = Math.max(4, Math.min(left, hullRect.width - EST_WIDTH));
+    const top = rect.top - hullRect.top;
+    floatText.style.left = `${left}px`;
+    floatText.style.top = `${top}px`;
+    gridWrapperEl.appendChild(floatText);
     scheduleForSession(() => floatText.remove(), 1200);
 }
 
 /**
  * Desenha no SVG a linha que marca uma palavra encontrada.
  */
-function drawAnimatedLine(startCell, endCell) {
+function drawAnimatedLine(startCell, endCell, animate = true) {
     const sRect = startCell.getBoundingClientRect(); const eRect = endCell.getBoundingClientRect(); const wrapRect = svgEl.getBoundingClientRect();
     const x1 = (sRect.left - wrapRect.left) + sRect.width/2; const y1 = (sRect.top - wrapRect.top) + sRect.height/2;
     const x2 = (eRect.left - wrapRect.left) + eRect.width/2; const y2 = (eRect.top - wrapRect.top) + eRect.height/2;
@@ -3279,8 +3625,13 @@ function drawAnimatedLine(startCell, endCell) {
     if (isLightningMode) line.style.stroke = 'var(--lightning-blue)';
 
     const length = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
-    line.style.strokeDasharray = length; line.style.strokeDashoffset = length;
-    svgEl.appendChild(line); requestAnimationFrame(() => { line.style.strokeDashoffset = 0; });
+    if (animate) {
+        line.style.strokeDasharray = length; line.style.strokeDashoffset = length;
+        svgEl.appendChild(line); requestAnimationFrame(() => { line.style.strokeDashoffset = 0; });
+    } else {
+        // Redesenho após resize: desenha a linha completa, sem animação.
+        svgEl.appendChild(line);
+    }
 }
 
 /**
@@ -3385,6 +3736,7 @@ function showResult(success, message) {
 /* Fase 2: Orphan Block Salvage (RBF) — oferece resgate com 100K sats */
 const RBF_PRICE = 100000;
 let rbfTimeout = null;
+let rbfPurchaseInFlight = false;
 /* Fase 6.1: tempo original da rodada (salvo ao mostrar o RBF) — o resgate
  * reinicia a rodada com o tempo que o jogador tinha, não com 15s fixos. */
 let rbfOriginalTimeLimit = 0;
@@ -3413,39 +3765,45 @@ function showOrphanBlockSalvage() {
     }, 3000, generation);
 
     const rbfHandler = async () => {
-        if (rbfTimeout) {
-            cancelSessionTimeout(rbfTimeout);
-            rbfTimeout = null;
-        }
-        if (balanceSatoshis < RBF_PRICE) {
-            announceGameStatus("Saldo insuficiente para RBF.");
-            scheduleForSession(() => showResult(false, "Saldo insuficiente para RBF."), 500, generation);
-            return;
-        }
-        /* Fase 5.1: débito validado no backend — só resgata se confirmado */
-        const txId = `spend-rbf-${activeRealmId}-${roundNumber}-${Date.now()}`;
-        const confirmed = await spendBalance(RBF_PRICE, txId);
-        if (confirmed === null) {
-            announceGameStatus("Falha ao confirmar o RBF. Tente novamente.");
-            return;
-        }
-        balanceSatoshis = confirmed;
-        rbfUsedTotal++;
-        void pushStats({ rbf_used: rbfUsedTotal });
-        document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString();
-        announceGameStatus(`RBF ativado: rodada reinicia com ${rbfOriginalTimeLimit}s.`);
-        playSound('buy');
-        updateStoreUI();
+        if (rbfPurchaseInFlight) return;
+        rbfPurchaseInFlight = true;
+        try {
+            if (rbfTimeout) {
+                cancelSessionTimeout(rbfTimeout);
+                rbfTimeout = null;
+            }
+            if (balanceSatoshis < RBF_PRICE) {
+                announceGameStatus("Saldo insuficiente para RBF.");
+                scheduleForSession(() => showResult(false, "Saldo insuficiente para RBF."), 500, generation);
+                return;
+            }
+            /* Fase 5.1: débito validado no backend — só resgata se confirmado */
+            const txId = `spend-rbf-${activeRealmId}-${roundNumber}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            const confirmed = await spendBalance(RBF_PRICE, txId);
+            if (confirmed === null) {
+                announceGameStatus("Falha ao confirmar o RBF. Tente novamente.");
+                return;
+            }
+            balanceSatoshis = confirmed;
+            rbfUsedTotal++;
+            void pushStats({ rbf_used: rbfUsedTotal });
+            document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString();
+            announceGameStatus(`RBF ativado: rodada reinicia com ${rbfOriginalTimeLimit}s.`);
+            playSound('buy');
+            updateStoreUI();
 
-        /* Fase 6.1: reinicia a rodada com o tempo original (hardware + nível) */
-        isPlaying = true;
-        networkTimePassed = 0;
-        networkTimeLimit = rbfOriginalTimeLimit;
-        netProgressEl.style.width = '0%';
-        netProgressEl.setAttribute('aria-valuenow', '0');
-        netProgressEl.setAttribute('aria-valuetext', `${rbfOriginalTimeLimit} segundos restantes`);
-        setModalState(modal, false);
-        startNetworkRace();
+            /* Fase 6.1: reinicia a rodada com o tempo original (hardware + nível) */
+            isPlaying = true;
+            networkTimePassed = 0;
+            networkTimeLimit = rbfOriginalTimeLimit;
+            netProgressEl.style.width = '0%';
+            netProgressEl.setAttribute('aria-valuenow', '0');
+            netProgressEl.setAttribute('aria-valuetext', `${rbfOriginalTimeLimit} segundos restantes`);
+            setModalState(modal, false);
+            startNetworkRace();
+        } finally {
+            rbfPurchaseInFlight = false;
+        }
     };
     setNextButtonAction(rbfHandler);
 }
@@ -4606,45 +4964,6 @@ showOrphanBlockSalvage = function() {
     return result;
 };
 
-// Atualiza progresso ao comprar hint
-const originalBuyHint = buyHint;
-buyHint = function() {
-    const result = originalBuyHint();
-
-    // Atualiza progresso das missões após comprar hint
-    if (minerName && activeRealmId) {
-        void updateMissionsProgress();
-    }
-
-    return result;
-};
-
-// Atualiza progresso ao comprar hardware
-const originalBuyHardware = buyHardware;
-buyHardware = function() {
-    const result = originalBuyHardware();
-
-    // Atualiza progresso das missões após comprar hardware
-    if (minerName && activeRealmId) {
-        void updateMissionsProgress();
-    }
-
-    return result;
-};
-
-// Atualiza progresso ao comprar lightning
-const originalBuyLightning = buyLightning;
-buyLightning = function() {
-    const result = originalBuyLightning();
-
-    // Atualiza progresso das missões após comprar lightning
-    if (minerName && activeRealmId) {
-        void updateMissionsProgress();
-    }
-
-    return result;
-};
-
 // ==========================================================================
 // Fase 9: Chat em Tempo Real — lógica do painel de chat
 // ==========================================================================
@@ -4654,6 +4973,8 @@ let chatPanelVisible = false;
 let chatMessages = [];
 const CHAT_MAX_MESSAGES = 50;
 const CHAT_MAX_CHARS = 100;
+let chatRateRemaining = 5;
+let chatRateResetTimer = null;
 const CHAT_REACTIONS = [
     { token: '[btc]', iconName: 'coin', label: 'Bitcoin' },
     { token: '[mine]', iconName: 'pickaxe', label: 'Mineração' },
@@ -4828,6 +5149,11 @@ function updateRateLimitInfo(remaining) {
         chatRateInfoEl.textContent = 'Limite atingido. Aguarde 1 min.';
         chatRateInfoEl.className = 'chat-rate-info error';
         chatSendBtnEl.disabled = true;
+        clearTimeout(chatRateResetTimer);
+        chatRateResetTimer = setTimeout(() => {
+            chatRateRemaining = 5;
+            updateRateLimitInfo(chatRateRemaining);
+        }, 60000);
     } else if (remaining <= 2) {
         chatRateInfoEl.textContent = `${remaining} mensagens restantes neste minuto.`;
         chatRateInfoEl.className = 'chat-rate-info warning';
@@ -4867,6 +5193,7 @@ async function sendChatMessage() {
         if (response.status === 429) {
             const data = await response.json().catch(() => ({}));
             appendSystemMessage(data.detail || 'Limite de mensagens excedido.');
+            chatRateRemaining = 0;
             updateRateLimitInfo(0);
         } else if (response.status === 400) {
             const data = await response.json().catch(() => ({}));
@@ -4879,7 +5206,8 @@ async function sendChatMessage() {
                 appendChatMessage(data.message, true);
             }
             chatInputEl.value = '';
-            updateRateLimitInfo(remaining - 1);
+            chatRateRemaining = Math.max(0, chatRateRemaining - 1);
+            updateRateLimitInfo(chatRateRemaining);
         } else {
             appendSystemMessage('Erro ao enviar mensagem.');
         }
@@ -4942,6 +5270,7 @@ teardownSession = function(reason) {
         chatRateInfoEl.textContent = '';
         chatRateInfoEl.className = 'chat-rate-info';
     }
+    chatRateRemaining = 5;
     if (chatSendBtnEl) chatSendBtnEl.disabled = false;
     return result;
 };
@@ -5235,9 +5564,9 @@ async function performStake() {
             time_remaining_seconds: data.end_time - data.start_time,
         };
 
-        // Atualiza saldo local
-        balanceSatoshis -= amount;
-        document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString();
+        // O backend é a fonte de verdade; a API legada não retorna saldo,
+        // então recarregamos o estado persistido após o stake.
+        void loadPlayerState(activeRealmId, minerName);
 
         updateStakingUI();
         playSound('buy');
@@ -5359,6 +5688,7 @@ let decoderTimerInterval = null;
 let decoderTimeRemaining = 30;
 let decoderActive = false;
 let decoderCooldownRemaining = 0;
+let decoderCooldownTimer = null;
 const DECODER_TIME_LIMIT = 30; // segundos
 const DECODER_ROUNDS_INTERVAL = 3; // aparece a cada 3 rodadas
 
@@ -5380,7 +5710,9 @@ const decoderLaunchBtnEl = document.getElementById('btn-decoder-launch');
 // Fase B1: sempre visível — quando indisponível, mostra cooldown (desabilitado)
 function checkDecoderAvailability() {
     if (!sessionReady || !activeRealmId || !decoderLaunchBtnEl) return;
-    const available = roundNumber % DECODER_ROUNDS_INTERVAL === 0 && !decoderActive;
+    const available = roundNumber % DECODER_ROUNDS_INTERVAL === 0
+        && !decoderActive
+        && decoderCooldownRemaining <= 0;
     // Sempre visível (remove hidden)
     decoderLaunchBtnEl.classList.remove('hidden');
     if (available) {
@@ -5415,6 +5747,12 @@ async function startDecoderGame() {
                 announceGameStatus(`Decoder: aguarde ${decoderCooldownRemaining}s para jogar novamente.`);
                 decoderActive = false;
                 decoderLaunchBtnEl.classList.remove('hidden');
+                clearTimeout(decoderCooldownTimer);
+                decoderCooldownTimer = setTimeout(() => {
+                    decoderCooldownRemaining = 0;
+                    checkDecoderAvailability();
+                }, decoderCooldownRemaining * 1000);
+                checkDecoderAvailability();
                 return;
             }
             throw new Error(`HTTP ${response.status}`);
@@ -5512,15 +5850,13 @@ async function submitDecoderAnswer() {
             if (decoderContent) decoderContent.classList.add('reward');
             playSound('success');
 
-            // Atualiza saldo local
-            balanceSatoshis += 5000;
-            document.getElementById('ui-balance').innerText = balanceSatoshis.toLocaleString();
-
             decoderStreakEl.textContent = data.streak;
             decoderWinsEl.textContent = data.wins;
 
-            // Sincroniza estado do jogador
-            void syncPlayerState();
+            // O backend já creditou o bônus; recarrega saldo e inventário
+            // autoritativos em vez de somar apenas no estado local.
+            void loadPlayerState(activeRealmId, minerName);
+            void loadPowerupsInventory();
 
         } else {
             // Erro
@@ -7830,6 +8166,14 @@ if (powerupsToggleBtn && powerupsActiveEl) {
     });
 }
 
+document.querySelectorAll('.powerup-buy-btn').forEach(button => {
+    button.addEventListener('click', () => buyPowerup(button.dataset.powerupId));
+});
+
+registerSessionInitializer('powerups', async () => {
+    await loadPowerupsInventory();
+});
+
 // Carrega crates ao iniciar sessão
 registerSessionInitializer('crates', async () => {
     await loadCrateInventory();
@@ -7926,9 +8270,7 @@ async function addXP(xpAmount) {
         levelState.level = result.level;
         levelState.xp = result.xp;
         levelState.xp_to_next = result.xp_to_next;
-        /* Fase 6.8: ao fazer level-up, xp_progress deve ser 100% (não 0) —
-         * o jogador completou o nível anterior e agora está no novo nível. */
-        levelState.xp_progress = result.leveled_up ? 100 : (result.xp / result.xp_to_next) * 100;
+        levelState.xp_progress = result.xp_progress;
         levelState.rank = result.rank;
         levelState.bonuses = result.bonuses;
 

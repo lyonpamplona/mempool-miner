@@ -26,13 +26,12 @@ flowchart TB
       Redis --> API
     end
     subgraph Edge["Rede de borda"]
-      GameNginx["Nginx do jogo/PWA<br>:8010 local"]
+      GameNginx["Nginx do jogo/PWA<br>:8010 local · /docs/"]
       Browser["Jogador"]
       API <--> GameNginx
       GameNginx <--> Browser
-      DocsNginx["Portal sanitizado<br>:8020 · profile docs"]
       Reader["Leitor"]
-      DocsNginx <--> Reader
+      GameNginx <--> Reader
     end
 ~~~
 
@@ -104,11 +103,10 @@ recebia apenas uma fração dos eventos.
 
 ### Apresentação e publicação
 
-O Nginx do jogo publica somente o shell PWA e encaminha `/api/` e `/ws/` ao
-FastAPI. O portal de documentação usa outra imagem, outro document root, a porta
-local 8020 e o profile opcional `docs`; ele recebe apenas uma allowlist de HTML,
-CSS e SVG sanitizados e não encaminha a API. O fallback do jogo não responde por
-rotas de documentação.
+O Nginx do jogo publica o shell PWA em `/`, encaminha `/api/` e `/ws/` ao
+FastAPI e serve a documentação sanitizada em `/docs/` (mesma imagem, allowlist
+de HTML, CSS, JS e SVG). A documentação não encaminha a API. O fallback do jogo
+não responde por rotas de documentação.
 
 O browser controla as regras atuais da partida. Essa decisão simplifica a
 demonstração, mas impede um ranking confiável.
@@ -187,12 +185,12 @@ cria. Pruning reduz retenção de blocos, não o custo de download/validação d
 Frontend não conhece portas internas. Nginx centraliza HTTP/WebSocket e prepara
 o caminho para TLS.
 
-### ADR-007 — Jogo e portal em imagens separadas
+### ADR-007 — Jogo e documentação na mesma origem, superfícies separadas
 
-O PWA da porta 8010 não contém documentação, protótipos, Markdown, Swagger ou
-OpenAPI. O portal da porta 8020 é opt-in e publica uma allowlist estática. Essa
-separação evita que o fallback do jogo masque links quebrados ou exponha
-artefatos internos.
+O PWA da porta 8010 não contém protótipos, Markdown, Swagger ou OpenAPI. A
+documentação é servida em `/docs/` pelo mesmo nginx, com allowlist estática de
+HTML, CSS, JS e SVG sanitizados. A separação por prefixo evita que o fallback
+do jogo masque links quebrados ou exponha artefatos internos.
 
 ### ADR-003 — Sem sobreposição de palavras
 

@@ -38,7 +38,7 @@ flowchart LR
 
 Pré-requisitos: Docker Engine ou Docker Desktop com Compose 2.33.1 ou superior,
 cerca de 4 GB de RAM livres para Regtest + Signet e a porta local 8010
-disponível. O portal opcional usa a porta 8020. A versão mínima é necessária
+disponível. A versão mínima é necessária
 para selecionar deterministicamente o gateway P2P dos nós públicos.
 
 No PowerShell:
@@ -63,14 +63,11 @@ O jogo mobile-first/PWA fica disponível em:
 
 - jogo: http://localhost:8010
 
-Documentação e apresentação não são copiadas para a imagem do jogo. Para subir
-o portal público sanitizado em um serviço separado:
+Documentação e apresentação são servidas pelo mesmo nginx do jogo, em `/docs/`:
 
-    docker compose --profile docs up -d --build docs
-
-- documentação: http://localhost:8020/
-- página pública da API: http://localhost:8020/api/
-- apresentação: http://localhost:8020/apresentacao/
+- documentação: http://localhost:8010/docs/
+- página pública da API: http://localhost:8010/docs/api/
+- apresentação: http://localhost:8010/docs/apresentacao/
 
 Swagger e OpenAPI bruto ficam desabilitados por padrão e não são publicados por
 nenhum dos proxies.
@@ -103,7 +100,7 @@ armazenados no cache offline.
 | [Auditoria](docs/AUDITORIA.md) | Revisão completa, achados e correções aplicadas |
 | [Roadmap](docs/ROADMAP.md) | Plano priorizado para riscos remanescentes |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Diagnóstico dos erros mais comuns |
-| [Apresentação](guia-apresentacao.html) | Página visual completa do projeto |
+| [Apresentação](docs/guia-apresentacao.html) | Página visual completa do projeto |
 
 ## Mudanças recentes (20/08/2026)
 

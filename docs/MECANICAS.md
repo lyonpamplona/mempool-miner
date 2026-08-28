@@ -148,21 +148,24 @@ browser).
 
 ### LOJA
 
-Mesmos itens da loja da aba JOGO (hint, hardware, Lightning), com estado de
-compra e níveis.
+Hint, hardware, Lightning, energia e compra direta de power-ups, com estado de
+compra e limites server-side. A compra direta usa preço definido no backend,
+limite de 3 unidades por power-up/dia e limite global de 10 power-ups/dia,
+ambos reiniciados às 00:00 UTC.
 
 ### INVENTÁRIO — Power-ups
 
-Power-ups obtidos por crates/season e ativáveis na partida
+Power-ups compráveis na loja e também obtidos por crates/season/Decoder,
+ativáveis na partida
 (`POWERUP_DEFINITIONS` no backend; efeitos aplicados em `game.js`):
 
 | ID | Nome | Efeito | Preço |
 |---|---|---|---|
-| `time_freeze` | Time Freeze | Congela o timer por 10s | 500 sats |
-| `scanner` | Scanner | Revela 3 palavras por 15s | 800 sats |
-| `double_combo` | Double Combo | Dobra o multiplicador de combo por 20s | 1200 sats |
-| `magnet` | Magnet | Atrai palavras para o centro por 12s | 1000 sats |
-| `precision` | Precision | +10% de XP em palavras por 30s | 600 sats |
+| `time_freeze` | Time Freeze | Congela o timer por 5s | 10.000 sats |
+| `scanner` | Scanner | Revela a direção de uma palavra por 1 rodada | 5.000 sats |
+| `double_combo` | Double Combo | Eleva o teto do combo para 6× por 1 rodada | 15.000 sats |
+| `magnet` | Magnet | Concede +50% de sats por 1 rodada | 8.000 sats |
+| `precision` | Precision | Isenta o slashing por 1 rodada | 12.000 sats |
 
 O inventário é **pessoal** (Redis `powerups:{username}`): cada crate aberta
 credita o item ao jogador e o consumo decrementa o estoque.

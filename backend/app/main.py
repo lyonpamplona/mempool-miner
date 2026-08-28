@@ -43,10 +43,13 @@ from app.global_events import (
 )
 from app.storage import (
     BALANCE_EARN_SCRIPT,
+    POWERUP_ACTIVATE_SCRIPT,
+    POWERUP_BUY_SCRIPT,
     BALANCE_SPEND_SCRIPT,
     ENERGY_BUY_SCRIPT,
     ENERGY_REFUND_SCRIPT,
     ENERGY_SPEND_SCRIPT,
+    STAKE_SETTLE_SCRIPT,
     PREFIX,
     achievements_key,
     balance_tx_key,
@@ -70,12 +73,12 @@ from app.storage import (
     player_state_key,
     realm_state_key,
     powerups_key,
+    powerup_buy_daily_key,
     weekly_missions_key,
     market_list_key,
     market_history_key,
     market_price_index_key,
     pvp_match_key,
-    pvp_active_channel,
     skills_key,
     staking_key,
     staking_history_key,
@@ -962,6 +965,7 @@ async def get_player_state(realm_id: str, username: str) -> dict[str, Any]:
         return {
             "username": username,
             "balance": 0,
+            "balance_initialized": False,
             "hardware_level": 1,
             "lightning_active": False,
             "lightning_blocks_remaining": 0,
@@ -976,6 +980,7 @@ async def get_player_state(realm_id: str, username: str) -> dict[str, Any]:
     return {
         "username": username,
         "balance": int(raw.get("balance", 0)),
+        "balance_initialized": "balance" in raw,
         "hardware_level": int(raw.get("hardware_level", 1)),
         "lightning_active": raw.get("lightning_active", "false") == "true",
         "lightning_blocks_remaining": int(raw.get("lightning_blocks_remaining", 0)),
@@ -1018,17 +1023,16 @@ async def update_player_state(realm_id: str, username: str, data: PlayerStateUpd
                 coerced[k] = "true" if v else "false"
             else:
                 coerced[k] = str(v)
-        # Fase 5.3: o backend é a fonte de verdade do saldo (earn/spend via
-        # /earn e /spend). O sync só migra o saldo local quando o armazenado
-        # é 0 (primeiro uso / backend zerou) — um saldo local inflado (earn
-        # em falha de rede) ou stale (duas abas) NÃO sobrescreve o saldo do
-        # backend. Sem isso, o "quem tiver mais vence" persiste pela via do
-        # sync (auditoria Fase 5, ponta solta MÉDIO).
+        # Fase G: o backend é a fonte de verdade do saldo. O sync só migra o
+        # saldo local quando o campo ainda NÃO existe. Depois da primeira
+        # escrita, inclusive zero é autoritativo — permitir migração sobre
+        # "0" ressuscitaria saldo stale após uma compra que zerou a conta.
         if "balance" in coerced:
             stored_balance = await redis_client.hget(key, "balance")
-            if stored_balance is not None and int(stored_balance) > 0:
+            if stored_balance is not None:
                 coerced.pop("balance")
-        await redis_client.hset(key, mapping=coerced)
+        if coerced:
+            await redis_client.hset(key, mapping=coerced)
         # Sem TTL: o estado do jogador (saldo, hardware, etc.) é persistente.
         # persist() limpa qualquer TTL residual de chaves criadas com o código
         # antigo (que setava expire 86400) — senão o saldo zeraria em 24h.
@@ -2449,6 +2453,22 @@ class PowerupActivate(BaseModel):
     powerup_id: str
 
 
+POWERUP_DAILY_PER_ITEM_LIMIT = 3
+POWERUP_DAILY_GLOBAL_LIMIT = 10
+POWERUP_PURCHASE_TX_TTL_SECONDS = 86400 * 7
+
+
+class PowerupBuyRequest(BaseModel):
+    """Solicitação de compra direta de power-up na loja."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    username: Username
+    powerup_id: str = Field(min_length=1)
+    quantity: int = Field(default=1, strict=True, ge=1, le=3)
+    tx_id: str = Field(min_length=1, max_length=64)
+
+
 async def _get_powerups(realm_id: str, username: str) -> dict[str, Any]:
     """Carrega o inventário de power-ups do jogador."""
     key = powerups_key(realm_id, username)
@@ -2487,20 +2507,20 @@ async def _activate_powerup(realm_id: str, username: str, powerup_id: str) -> di
     if powerup_id not in POWERUP_DEFINITIONS:
         raise HTTPException(status_code=400, detail="Power-up inválido")
     defn = POWERUP_DEFINITIONS[powerup_id]
-    # Verifica se tem no inventário
     key = powerups_key(realm_id, username)
-    current = await redis_client.hget(key, powerup_id)
-    if not current or int(current) <= 0:
+    result = await redis_client.eval(
+        POWERUP_ACTIVATE_SCRIPT,
+        1,
+        key,
+        powerup_id,
+        str(defn["duration"]),
+        str(POWERUP_INVENTORY_TTL_SECONDS),
+    )
+    code, _remaining = (int(value) for value in result)
+    if code == 0:
         raise HTTPException(status_code=400, detail="Power-up não disponível no inventário")
-    # Decrementa
-    await redis_client.hset(key, powerup_id, str(int(current) - 1))
-    # Se tem duração, inicia timer
-    if defn["duration"] > 0:
-        timer_field = f"timer_{powerup_id}"
-        await redis_client.hset(key, timer_field, str(defn["duration"]))
-    # Fase 5.2: TTL do inventário (30 dias). O expire anterior
-    # (duration + 30d) era código morto — sobrescrito por este.
-    await redis_client.expire(key, POWERUP_INVENTORY_TTL_SECONDS)
+    if code < 0:
+        raise HTTPException(status_code=500, detail="Estrutura interna do inventário inválida")
     return {
         "status": "activated",
         "powerup_id": powerup_id,
@@ -2515,6 +2535,31 @@ async def get_powerups(realm_id: str, username: str) -> dict[str, Any]:
     """Retorna o inventário de power-ups do jogador."""
     definition = get_network_definition(realm_id)
     data = await _get_powerups(definition.realm_id, username)
+    date_key, _, reset_at = _powerup_daily_reset()
+    daily_raw = await redis_client.hgetall(
+        powerup_buy_daily_key(definition.realm_id, username, date_key)
+    )
+
+    def daily_int(field: str) -> int:
+        value = daily_raw.get(field, 0)
+        return int(value)
+
+    total_bought = daily_int("total")
+    data["daily_limit"] = {
+        "per_powerup": POWERUP_DAILY_PER_ITEM_LIMIT,
+        "global": POWERUP_DAILY_GLOBAL_LIMIT,
+        "global_used": total_bought,
+        "global_remaining": max(0, POWERUP_DAILY_GLOBAL_LIMIT - total_bought),
+        "reset_at": reset_at,
+        "date": date_key,
+        "items": {
+            pid: {
+                "used": daily_int(pid),
+                "remaining": max(0, POWERUP_DAILY_PER_ITEM_LIMIT - daily_int(pid)),
+            }
+            for pid in POWERUP_IDS
+        },
+    }
     # Adiciona definições completas
     data["definitions"] = [
         {
@@ -2529,6 +2574,96 @@ async def get_powerups(realm_id: str, username: str) -> dict[str, Any]:
         for pid, defn in POWERUP_DEFINITIONS.items()
     ]
     return data
+
+
+def _powerup_daily_reset() -> tuple[str, int, str]:
+    """Retorna data UTC atual, TTL da janela e próximo reset ISO."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    tomorrow = (now + datetime.timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    ttl = max(1, int((tomorrow - now).total_seconds()) + 86400)
+    return now.strftime("%Y%m%d"), ttl, tomorrow.isoformat()
+
+
+@app.post("/api/v1/networks/{realm_id}/powerups/buy", tags=["Power-ups"])
+async def buy_powerup(realm_id: str, data: PowerupBuyRequest) -> dict[str, Any]:
+    """Compra power-ups com preço server-side e limite diário atômico."""
+    definition = get_network_definition(realm_id)
+    if data.powerup_id not in POWERUP_DEFINITIONS:
+        raise HTTPException(status_code=400, detail="Power-up inválido")
+
+    powerup = POWERUP_DEFINITIONS[data.powerup_id]
+    total_cost = int(powerup["price"]) * data.quantity
+    date_key, daily_ttl, reset_at = _powerup_daily_reset()
+    player_key = player_state_key(definition.realm_id, data.username)
+    tx_key = balance_tx_key(definition.realm_id, data.username, data.tx_id)
+    inventory_key = powerups_key(definition.realm_id, data.username)
+    daily_key = powerup_buy_daily_key(definition.realm_id, data.username, date_key)
+
+    result = await redis_client.eval(
+        POWERUP_BUY_SCRIPT,
+        4,
+        player_key,
+        tx_key,
+        inventory_key,
+        daily_key,
+        str(total_cost),
+        str(POWERUP_PURCHASE_TX_TTL_SECONDS),
+        data.powerup_id,
+        str(data.quantity),
+        str(POWERUP_DAILY_PER_ITEM_LIMIT),
+        str(POWERUP_DAILY_GLOBAL_LIMIT),
+        str(daily_ttl),
+        str(POWERUP_INVENTORY_TTL_SECONDS),
+    )
+    code, balance, item_bought, total_bought = (int(value) for value in result)
+    if code == -1:
+        raise HTTPException(
+            status_code=402,
+            detail=f"Saldo insuficiente. Precisa de {total_cost:,} sats",
+        )
+    if code == -2:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Limite diário atingido. Limite: {POWERUP_DAILY_PER_ITEM_LIMIT} por item "
+                f"e {POWERUP_DAILY_GLOBAL_LIMIT} no total. Reset: {reset_at}"
+            ),
+        )
+    if code == -3:
+        raise HTTPException(status_code=500, detail="Estrutura interna da loja inválida")
+    if code not in {0, 1}:
+        raise HTTPException(status_code=500, detail="Falha inesperada ao comprar power-up")
+
+    inventory = await _get_powerups(definition.realm_id, data.username)
+    return {
+        "status": "purchased",
+        "replay": code == 0,
+        "username": data.username,
+        "powerup": {
+            "id": data.powerup_id,
+            "name": powerup["name"],
+            "icon": powerup["icon"],
+            "description": powerup["description"],
+        },
+        "price": int(powerup["price"]),
+        "quantity": data.quantity,
+        "total_cost": total_cost,
+        "balance": balance,
+        "inventory": inventory["inventory"],
+        "daily_limit": {
+            "per_powerup": POWERUP_DAILY_PER_ITEM_LIMIT,
+            "used": item_bought,
+            "remaining": max(0, POWERUP_DAILY_PER_ITEM_LIMIT - item_bought),
+            "global": POWERUP_DAILY_GLOBAL_LIMIT,
+            "global_used": total_bought,
+            "global_remaining": max(0, POWERUP_DAILY_GLOBAL_LIMIT - total_bought),
+            "reset_at": reset_at,
+        },
+        "charged": code == 1,
+        "tx_id": data.tx_id,
+    }
 
 
 @app.post("/api/v1/networks/{realm_id}/powerups/activate", tags=["Power-ups"])
@@ -3451,8 +3586,19 @@ async def _get_pvp_match(realm_id: str, challenger: str, challenged: str) -> dic
 
 async def _publish_pvp_event(realm_id: str, event: dict[str, Any]) -> None:
     """Publica um evento PvP no canal PubSub para broadcast WebSocket."""
-    channel = pvp_active_channel(realm_id)
-    await redis_client.publish(channel, json.dumps(event, separators=(",", ":")))
+    action = str(event.get("action", ""))
+    definition = get_network_definition(realm_id)
+    envelope = event_envelope(
+        action=action,
+        node_id=definition.node_id,
+        network=definition.network,
+        realm_id=definition.realm_id,
+    )
+    envelope.update({key: value for key, value in event.items() if key != "realm_id"})
+    await redis_client.publish(
+        events_channel(definition.realm_id),
+        json.dumps(envelope, separators=(",", ":")),
+    )
 
 
 async def _create_pvp_match(
@@ -4620,33 +4766,29 @@ async def get_staking_status(realm_id: str, username: str) -> dict[str, Any]:
 
     # Se expirou, libera automaticamente
     if time_remaining <= 0:
-        await redis_client.delete(stake_key)
-        # Devolve ao jogador (sem penalty — expirou naturalmente) + bônus de
-        # duração (5%/15%/30%). O bônus era gravado no hash do stake mas nunca
-        # creditado (ponta solta ALTO da auditoria 2026-08-23).
         player_key = player_state_key(definition.realm_id, username)
-        player_raw = await redis_client.hgetall(player_key)
-        current_balance = int(player_raw.get("balance", 0))
-        bonus_amount = int(round(amount * bonus_percent))
-        new_balance = current_balance + amount + bonus_amount
-        await redis_client.hset(player_key, mapping={"balance": str(new_balance)})
-
-        # Registra no histórico
-        history_entry = {
-            "type": "expired",
-            "amount": amount,
-            "bonus": bonus_amount,
-            "timestamp": now,
-        }
         history_key = staking_history_key(definition.realm_id, username)
-        await redis_client.rpush(history_key, json.dumps(history_entry))
-        await redis_client.ltrim(history_key, 0, 49)
-        await redis_client.expire(history_key, 86400 * 30)
-
-        logger.info(
-            "Stake expirado: %s recebeu %d sats de volta (+%d de bônus)",
-            username, amount, bonus_amount,
+        result = await redis_client.eval(
+            STAKE_SETTLE_SCRIPT,
+            3,
+            stake_key,
+            player_key,
+            history_key,
+            now,
+            86400 * 30,
         )
+        status = int(result[0])
+        if status == -3:
+            raise HTTPException(status_code=500, detail="Estado de staking inválido")
+        if status == 1:
+            settled_amount = int(result[1])
+            bonus_amount = int(result[2])
+            logger.info(
+                "Stake expirado: %s recebeu %d sats de volta (+%d de bônus)",
+                username,
+                settled_amount,
+                bonus_amount,
+            )
 
         return {
             "username": username,
@@ -5525,6 +5667,7 @@ async def add_xp_to_player(realm_id: str, username: str, data: XpAddRequest) -> 
             "xp": 0,
             "xp_total": 0,
             "xp_to_next": xp_to_next_level(1),
+            "xp_progress": 0.0,
             "rank": get_rank_for_level(1),
             "bonuses": get_level_bonus(1),
             "leveled_up": False,
@@ -5557,8 +5700,9 @@ async def add_xp_to_player(realm_id: str, username: str, data: XpAddRequest) -> 
         "old_level": old_level,
         "level": level,
         "xp": xp,
-        "xp_total": (old_level * (old_level - 1) * 100 // 2) + xp,
+        "xp_total": (level * (level - 1) * 100 // 2) + xp,
         "xp_to_next": xp_to_next_level(level),
+        "xp_progress": round((xp / xp_to_next_level(level)) * 100, 1),
         "leveled_up": leveled_up,
         "rank": rank_info,
         "bonuses": bonuses,

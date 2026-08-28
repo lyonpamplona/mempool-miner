@@ -1,71 +1,80 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="description" content="Contrato público sanitizado da API do Mempool Miner.">
-  <meta name="theme-color" content="#050505">
-  <title>Mempool Miner — API pública</title>
-  <link rel="stylesheet" href="/site.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Contrato público sanitizado da API do Mempool Miner.">
+    <title>MEMPOOL MINER // API PÚBLICA</title>
+    <link rel="stylesheet" href="/docs/wiki.css">
 </head>
 <body>
-  <a class="skip-link" href="#conteudo">Pular para os contratos</a>
-  <header class="site-header">
-    <nav class="nav" aria-label="Navegação principal">
-      <a class="brand" href="/"><span class="brand-mark">₿</span> MEMPOOL.MINER API</a>
-      <div class="nav-links">
-        <a href="/">Visão geral</a>
-        <a href="/api/" aria-current="page">API pública</a>
-        <a href="/apresentacao/">Apresentação</a>
-        <a href="http://localhost:8010/">Jogo local</a>
-      </div>
+    <nav>
+        <a href="/docs/" class="nav-brand"><span class="sys-box">MM</span> MEMPOOL MINER <span class="nav-suffix">// API</span></a>
+        <div class="nav-links">
+            <a href="/docs/">Visão geral</a>
+            <a href="/docs/api/" class="active">API pública</a>
+            <a href="/docs/apresentacao/">Guia do jogo</a>
+            <a href="../land_page.html">Apresentação</a>
+            <a href="http://localhost:8010/" class="ext">Jogo local</a>
+        </div>
+        <div class="nav-tools">
+            <button class="btn-menu" id="btn-menu" aria-expanded="false" aria-controls="side-menu">☰ <span class="menu-label-text">ÍNDICE</span></button>
+        </div>
     </nav>
-  </header>
 
-  <main id="conteudo">
-    <section class="container hero">
-      <div>
-        <p class="eyebrow">API 2.0 · rotas v1 · envelope v2</p>
-        <h1>Somente o contrato consumido pelo jogo.</h1>
-        <p class="lead">Esta página descreve a superfície pública estável.
-          Credenciais, endereços RPC/ZMQ, chaves Redis, tokens de lease,
-          identificadores físicos e endpoints administrativos são omitidos.</p>
-        <div class="actions">
-          <a class="button primary" href="#rest">REST</a>
-          <a class="button" href="#websocket">WebSocket</a>
-          <a class="button" href="/">Voltar à visão geral</a>
-        </div>
-      </div>
-      <div class="hero-visual">
-        <img src="/assets/websocket.svg" alt="Setas bidirecionais representando uma conexão WebSocket">
-      </div>
-    </section>
+    <aside class="side-menu" id="side-menu" aria-label="Índice da API">
+        <div class="menu-head">ÍNDICE <button class="menu-close" id="menu-close" aria-label="Fechar índice">✕</button></div>
+        <ul>
+            <li class="menu-label">Contrato</li>
+            <li><a href="#rest">01 · REST</a></li>
+            <li><a href="#websocket">02 · WebSocket</a></li>
+            <li><a href="#powerups">03 · Power-ups</a></li>
+            <li><a href="#limites">04 · Limites</a></li>
+            <li class="menu-sep"></li>
+            <li class="menu-label">Navegação</li>
+            <li><a href="/docs/">Visão geral</a></li>
+            <li><a href="/docs/apresentacao/">Guia do jogo</a></li>
+        </ul>
+    </aside>
 
-    <section class="section" id="rest">
-      <div class="container">
-        <div class="section-intro">
-          <p class="eyebrow">REST same-origin</p>
-          <h2>Descoberta e leaderboard.</h2>
-          <p class="muted">Em desenvolvimento local, a origem do jogo é
-            <code>http://localhost:8010</code>. O cliente não recebe hosts da
-            infraestrutura e só pode escolher realms presentes no catálogo.</p>
-        </div>
-        <div class="grid two">
-          <article class="card endpoint">
-            <header class="endpoint-head"><span class="method">GET</span><span class="path">/api/v1/health/live</span></header>
-            <div class="endpoint-body">
-              <p>Verificação mínima da API usada pelo proxy e pelo contêiner.</p>
-              <pre>{
-  "status": "ok"
-}</pre>
+    <main class="wiki" id="topo">
+        <div class="wiki-hero">
+            <h1>MEMPOOL MINER<br>// API PÚBLICA</h1>
+            <p>API 2.0 · rotas v1 · envelope v2. Esta página descreve a superfície pública estável. Credenciais, endereços RPC/ZMQ, chaves Redis, tokens de lease, identificadores físicos e endpoints administrativos são omitidos.</p>
+            <div class="hero-meta">
+                <span>ORIGEM LOCAL: <b>http://localhost:8010</b></span>
+                <span>ENVELOPE: <b>schema_version: 2</b></span>
+                <span>CONTRATO: <b>sanitizado</b></span>
             </div>
-          </article>
+            <div class="hero-actions">
+                <a href="#rest">REST</a>
+                <a href="#websocket" class="amber">WEBSOCKET</a>
+                <a href="/docs/" class="green">VISÃO GERAL</a>
+            </div>
+        </div>
 
-          <article class="card endpoint">
-            <header class="endpoint-head"><span class="method">GET</span><span class="path">/api/v1/networks</span></header>
-            <div class="endpoint-body">
-              <p>Catálogo público sanitizado. Campos podem ser adicionados sem aviso.</p>
-              <pre>{
+        <div class="no-results" id="no-results">Nenhuma seção corresponde à busca. Tente outro termo.</div>
+
+        <!-- ============ 01 · REST ============ -->
+        <section class="section-block" id="rest">
+            <h2 class="section-title"><span class="num">01.</span><span class="hl">REST same-origin</span></h2>
+            <p class="dim">Em desenvolvimento local, a origem do jogo é <code>http://localhost:8010</code>. O cliente não recebe hosts da infraestrutura e só pode escolher realms presentes no catálogo.</p>
+
+            <article class="endpoint">
+                <header class="endpoint-head"><span class="method">GET</span><span class="path">/api/v1/health/live</span></header>
+                <div class="endpoint-body">
+                    <p>Verificação mínima da API usada pelo proxy e pelo contêiner.</p>
+                    <pre><code>{
+  "status": "ok"
+}</code></pre>
+                </div>
+            </article>
+
+            <article class="endpoint">
+                <header class="endpoint-head"><span class="method">GET</span><span class="path">/api/v1/networks</span></header>
+                <div class="endpoint-body">
+                    <p>Catálogo público sanitizado. Campos podem ser adicionados sem aviso.</p>
+                    <pre><code>{
   "schema_version": 2,
   "default_realm_id": "regtest",
   "networks": [{
@@ -78,62 +87,55 @@
     "verification_progress": 1.0,
     "pruned": false
   }]
-}</pre>
-            </div>
-          </article>
+}</code></pre>
+                </div>
+            </article>
 
-          <article class="card endpoint">
-            <header class="endpoint-head"><span class="method">GET</span><span class="path">/api/v1/networks/{realm_id}/leaderboard</span></header>
-            <div class="endpoint-body">
-              <p>Retorna até dez recordes do realm selecionado.</p>
-              <pre>{
+            <article class="endpoint">
+                <header class="endpoint-head"><span class="method">GET</span><span class="path">/api/v1/networks/{realm_id}/leaderboard</span></header>
+                <div class="endpoint-body">
+                    <p>Retorna até dez recordes do realm selecionado.</p>
+                    <pre><code>{
   "realm_id": "regtest",
   "leaderboard": [
     {"username": "Miner_42", "score": 12500}
   ]
-}</pre>
-            </div>
-          </article>
+}</code></pre>
+                </div>
+            </article>
 
-          <article class="card endpoint">
-            <header class="endpoint-head"><span class="method post">POST</span><span class="path">/api/v1/networks/{realm_id}/leaderboard</span></header>
-            <div class="endpoint-body">
-              <p>Atualiza o recorde se o score for maior que o valor persistido.</p>
-              <pre>{
+            <article class="endpoint">
+                <header class="endpoint-head"><span class="method post">POST</span><span class="path">/api/v1/networks/{realm_id}/leaderboard</span></header>
+                <div class="endpoint-body">
+                    <p>Atualiza o recorde se o score for maior que o valor persistido.</p>
+                    <pre><code>{
   "username": "Miner_42",
   "score": 12500
-}</pre>
-            </div>
-          </article>
-        </div>
-      </div>
-    </section>
+}</code></pre>
+                </div>
+            </article>
+        </section>
 
-    <section class="section alt" id="websocket">
-      <div class="container">
-        <div class="section-intro">
-          <p class="eyebrow">Tempo real</p>
-          <h2>WS /ws/v1/game/{realm_id}</h2>
-          <p class="muted">O realm deve vir do catálogo REST. Cada frame usa
-            <code>schema_version: 2</code> e repete o realm para impedir mistura
-            entre sessões.</p>
-        </div>
-        <div class="grid two">
-          <article class="card endpoint">
-            <header class="endpoint-head"><span class="method ws">WS</span><span class="path">game_start</span></header>
-            <div class="endpoint-body"><pre>{
+        <!-- ============ 02 · WEBSOCKET ============ -->
+        <section class="section-block" id="websocket">
+            <h2 class="section-title"><span class="num">02.</span><span class="hl">WS /ws/v1/game/{realm_id}</span></h2>
+            <p class="dim">O realm deve vir do catálogo REST. Cada frame usa <code>schema_version: 2</code> e repete o realm para impedir mistura entre sessões.</p>
+
+            <article class="endpoint">
+                <header class="endpoint-head"><span class="method ws">WS</span><span class="path">game_start</span></header>
+                <div class="endpoint-body"><pre><code>{
   "schema_version": 2,
   "action": "game_start",
   "realm_id": "regtest",
   "network": "regtest",
   "status": "ready",
   "playable": true
-}</pre></div>
-          </article>
+}</code></pre></div>
+            </article>
 
-          <article class="card endpoint">
-            <header class="endpoint-head"><span class="method ws">WS</span><span class="path">transaction_received</span></header>
-            <div class="endpoint-body"><pre>{
+            <article class="endpoint">
+                <header class="endpoint-head"><span class="method ws">WS</span><span class="path">transaction_received</span></header>
+                <div class="endpoint-body"><pre><code>{
   "schema_version": 2,
   "action": "transaction_received",
   "realm_id": "regtest",
@@ -144,22 +146,22 @@
   "is_high_fee": true,
   "vsize": 250,
   "fee_rate_sat_vb": 24.5
-}</pre></div>
-          </article>
+}</code></pre></div>
+            </article>
 
-          <article class="card endpoint">
-            <header class="endpoint-head"><span class="method ws">WS</span><span class="path">block_mined</span></header>
-            <div class="endpoint-body"><pre>{
+            <article class="endpoint">
+                <header class="endpoint-head"><span class="method ws">WS</span><span class="path">block_mined</span></header>
+                <div class="endpoint-body"><pre><code>{
   "schema_version": 2,
   "action": "block_mined",
   "realm_id": "regtest",
   "epoch": "new-opaque-stream-id"
-}</pre></div>
-          </article>
+}</code></pre></div>
+            </article>
 
-          <article class="card endpoint">
-            <header class="endpoint-head"><span class="method ws">WS</span><span class="path">network_status</span></header>
-            <div class="endpoint-body"><pre>{
+            <article class="endpoint">
+                <header class="endpoint-head"><span class="method ws">WS</span><span class="path">network_status</span></header>
+                <div class="endpoint-body"><pre><code>{
   "schema_version": 2,
   "action": "network_status",
   "realm_id": "signet",
@@ -167,35 +169,53 @@
   "playable": false,
   "initial_block_download": true,
   "verification_progress": 0.82
-}</pre></div>
-          </article>
-        </div>
-      </div>
-    </section>
+}</code></pre></div>
+            </article>
+        </section>
 
-    <section class="section">
-      <div class="container grid two">
-        <article class="card">
-          <span class="tag open">Limite conhecido</span>
-          <h2>Score ainda não é autoritativo</h2>
-          <p>O navegador calcula a pontuação. O leaderboard é demonstrativo e
-            não deve representar competição, prêmio ou ativo financeiro.</p>
-        </article>
-        <article class="card">
-          <span class="tag ok">Privacidade operacional</span>
-          <h2>Detalhes internos fora do contrato</h2>
-          <p>O portal público não divulga credenciais, topologia, nomes físicos
-            de nós, namespaces Redis, Swagger ou o documento OpenAPI bruto.</p>
-        </article>
-      </div>
-    </section>
-  </main>
+        <!-- ============ 03 · POWER-UPS ============ -->
+        <section class="section-block" id="powerups">
+            <h2 class="section-title"><span class="num">03.</span><span class="hl">Power-ups e Economia</span></h2>
+            <p class="dim">O preço é resolvido no backend. Saldo, inventário, contadores e idempotência são atualizados na mesma operação Redis.</p>
+            <article class="endpoint">
+                <header class="endpoint-head"><span class="method">GET</span><span class="path">/api/v1/networks/{realm_id}/powerups/{username}</span></header>
+                <div class="endpoint-body"><p>Retorna inventário, definições, preços e limites diários do jogador.</p><pre><code>{
+  "inventory": {"scanner": 2},
+  "daily_limit": {"per_powerup": 3, "global": 10, "global_remaining": 9}
+}</code></pre></div>
+            </article>
+            <article class="endpoint">
+                <header class="endpoint-head"><span class="method post">POST</span><span class="path">/api/v1/networks/{realm_id}/powerups/buy</span></header>
+                <div class="endpoint-body"><p>Compra uma unidade ou lote de 1–3 unidades. O cliente não envia preço.</p><pre><code>{
+  "username": "Miner_42",
+  "powerup_id": "scanner",
+  "quantity": 1,
+  "tx_id": "buy-pu-scanner-001"
+}</code></pre><p><code>402</code> = saldo insuficiente · <code>409</code> = limite diário atingido · retry com o mesmo <code>tx_id</code> não cobra novamente.</p></div>
+            </article>
+            <article class="endpoint">
+                <header class="endpoint-head"><span class="method post">POST</span><span class="path">/api/v1/networks/{realm_id}/powerups/activate</span></header>
+                <div class="endpoint-body"><p>Consome uma unidade disponível e aplica o efeito na rodada.</p><pre><code>{
+  "username": "Miner_42",
+  "powerup_id": "scanner"
+}</code></pre></div>
+            </article>
+        </section>
 
-  <footer class="site-footer">
-    <div class="container footer-row">
-      <span>Mempool Miner API · referência pública sanitizada</span>
-      <span>Sem console remoto · sem endpoints administrativos</span>
-    </div>
-  </footer>
+        <!-- ============ 04 · LIMITES ============ -->
+        <section class="section-block" id="limites">
+            <h2 class="section-title"><span class="num">04.</span><span class="hl">Limites e Privacidade</span></h2>
+            <div class="callout amber"><div class="callout-title">LIMITE CONHECIDO</div>O navegador calcula a pontuação. O leaderboard é demonstrativo e não deve representar competição, prêmio ou ativo financeiro.</div>
+            <div class="callout green"><div class="callout-title">PRIVACIDADE OPERACIONAL</div>O portal público não divulga credenciais, topologia, nomes físicos de nós, namespaces Redis, Swagger ou o documento OpenAPI bruto.</div>
+        </section>
+
+        <footer>
+            <div class="foot-brand">MEMPOOL MINER // API</div>
+            <p>Referência pública sanitizada · sem console remoto · sem endpoints administrativos</p>
+        </footer>
+    </main>
+
+    <button class="back-to-top" id="back-to-top" aria-label="Voltar ao início">↑</button>
+    <script src="/docs/wiki.js"></script>
 </body>
 </html>

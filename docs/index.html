@@ -1,152 +1,124 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="description" content="Visão pública e sanitizada da arquitetura do Mempool Miner.">
-  <meta name="theme-color" content="#050505">
-  <title>Mempool Miner — Documentação pública</title>
-  <link rel="stylesheet" href="/site.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Visão pública e sanitizada da arquitetura do Mempool Miner.">
+    <title>MEMPOOL MINER // DOCS</title>
+    <link rel="stylesheet" href="/docs/wiki.css">
 </head>
 <body>
-  <a class="skip-link" href="#conteudo">Pular para o conteúdo</a>
-  <header class="site-header">
-    <nav class="nav" aria-label="Navegação principal">
-      <a class="brand" href="/"><span class="brand-mark">₿</span> MEMPOOL.MINER</a>
-      <div class="nav-links">
-        <a href="/" aria-current="page">Visão geral</a>
-        <a href="/api/">API pública</a>
-        <a href="/apresentacao/">Apresentação</a>
-        <a href="http://localhost:8010/">Jogo local</a>
-      </div>
+    <nav>
+        <a href="/docs/" class="nav-brand"><span class="sys-box">MM</span> MEMPOOL MINER <span class="nav-suffix">// DOCS</span></a>
+        <div class="nav-links">
+            <a href="/docs/" class="active">Visão geral</a>
+            <a href="/docs/api/">API pública</a>
+            <a href="/docs/apresentacao/">Guia do jogo</a>
+            <a href="../land_page.html">Apresentação</a>
+            <a href="http://localhost:8010/" class="ext">Jogo local</a>
+        </div>
+        <div class="nav-tools">
+            <button class="btn-menu" id="btn-menu" aria-expanded="false" aria-controls="side-menu">☰ <span class="menu-label-text">ÍNDICE</span></button>
+        </div>
     </nav>
-  </header>
 
-  <main id="conteudo">
-    <section class="container hero">
-      <div>
-        <p class="eyebrow">Portal público · superfície reduzida</p>
-        <h1>Do evento Bitcoin ao desafio.</h1>
-        <p class="lead">Uma visão essencial do Mempool Miner: redes suportadas,
-          fluxo de dados, limites do produto e contrato público consumido pelo
-          jogo — sem credenciais, hosts internos ou detalhes operacionais.</p>
-        <div class="actions">
-          <a class="button primary" href="/apresentacao/">Conhecer o projeto</a>
-          <a class="button" href="/api/">Consultar a API pública</a>
-          <a class="button" href="http://localhost:8010/">Abrir o jogo local</a>
-        </div>
-      </div>
-      <div class="hero-visual">
-        <img src="/assets/mempool-miner-banner.svg" alt="Fluxo visual entre Bitcoin e o jogo Mempool Miner">
-      </div>
-    </section>
+    <aside class="side-menu" id="side-menu" aria-label="Índice da documentação">
+        <div class="menu-head">ÍNDICE <button class="menu-close" id="menu-close" aria-label="Fechar índice">✕</button></div>
+        <ul>
+            <li class="menu-label">Portal</li>
+            <li><a href="#visao-geral">01 · Visão Geral</a></li>
+            <li><a href="#arquitetura">02 · Arquitetura Pública</a></li>
+            <li><a href="#componentes">03 · Componentes</a></li>
+            <li><a href="#acesso">04 · Separação de Acesso</a></li>
+            <li><a href="#limites">05 · Limites do Produto</a></li>
+            <li class="menu-sep"></li>
+            <li class="menu-label">Navegação</li>
+            <li><a href="/docs/api/">API pública</a></li>
+            <li><a href="/docs/apresentacao/">Guia do jogo</a></li>
+            <li><a href="http://localhost:8010/">Jogo local</a></li>
+        </ul>
+    </aside>
 
-    <section class="container" aria-label="Resumo do projeto">
-      <div class="metrics">
-        <div class="metric"><strong>3</strong><span>redes isoladas</span></div>
-        <div class="metric"><strong>2</strong><span>redes no perfil padrão</span></div>
-        <div class="metric"><strong>1</strong><span>Mainnet opcional e podada</span></div>
-        <div class="metric"><strong>PWA</strong><span>interface mobile-first</span></div>
-      </div>
-    </section>
+    <main class="wiki" id="topo">
+        <div class="wiki-hero">
+            <h1>MEMPOOL MINER<br>// PORTAL DE DOCUMENTAÇÃO</h1>
+            <p>Uma visão essencial do Mempool Miner: redes suportadas, fluxo de dados, limites do produto e contrato público consumido pelo jogo — sem credenciais, hosts internos ou detalhes operacionais.</p>
+            <div class="hero-meta">
+                <span>REDES: <b>regtest · signet · mainnet</b></span>
+                <span>MOEDA: <b>sats (simulados)</b></span>
+                <span>INTERFACE: <b>PWA mobile-first</b></span>
+            </div>
+            <div class="hero-actions">
+                <a href="/docs/apresentacao/">GUIA DO JOGO</a>
+                <a href="/docs/api/" class="amber">API PÚBLICA</a>
+                <a href="http://localhost:8010/" class="green">ABRIR O JOGO</a>
+            </div>
+        </div>
 
-    <section class="section">
-      <div class="container">
-        <div class="section-intro">
-          <p class="eyebrow">Arquitetura pública</p>
-          <h2>Uma pipeline por rede.</h2>
-          <p class="muted">Regtest, Signet e Mainnet não compartilham contador,
-            epoch, eventos ou leaderboard. Mainnet só existe quando seu profile
-            é habilitado explicitamente.</p>
-        </div>
-        <div class="flow" aria-label="Fluxo de um realm Bitcoin até o navegador">
-          <div class="flow-node">Bitcoin Core</div><div class="flow-arrow">→</div>
-          <div class="flow-node">Ingestor do realm</div><div class="flow-arrow">→</div>
-          <div class="flow-node">Redis isolado</div><div class="flow-arrow">→</div>
-          <div class="flow-node">API + WebSocket</div><div class="flow-arrow">→</div>
-          <div class="flow-node">PWA do jogo</div>
-        </div>
-      </div>
-    </section>
+        <div class="no-results" id="no-results">Nenhuma seção corresponde à busca. Tente outro termo.</div>
 
-    <section class="section alt">
-      <div class="container">
-        <div class="section-intro">
-          <p class="eyebrow">Responsabilidades</p>
-          <h2>Componentes com fronteiras claras.</h2>
-        </div>
-        <div class="grid four">
-          <article class="card">
-            <img class="icon" src="/assets/bitcoin.svg" alt="">
-            <h3>Bitcoin Core</h3>
-            <p>Origem de transações e blocos; RPC e ZMQ permanecem na rede privada.</p>
-          </article>
-          <article class="card">
-            <img class="icon" src="/assets/backend.svg" alt="">
-            <h3>Ingestores + API</h3>
-            <p>Transformam eventos, aplicam isolamento por realm e entregam contratos sanitizados.</p>
-          </article>
-          <article class="card">
-            <img class="icon" src="/assets/redis.svg" alt="">
-            <h3>Redis</h3>
-            <p>Estado efêmero, fan-out e ranking; não possui porta publicada no host.</p>
-          </article>
-          <article class="card">
-            <img class="icon" src="/assets/frontend.svg" alt="">
-            <h3>PWA do jogo</h3>
-            <p>Shell instalável, mobile-first e same-origin, sem armazenar respostas da API no cache offline.</p>
-          </article>
-        </div>
-      </div>
-    </section>
+        <!-- ============ 01 · VISÃO GERAL ============ -->
+        <section class="section-block" id="visao-geral">
+            <h2 class="section-title"><span class="num">01.</span><span class="hl">Visão Geral</span></h2>
+            <p>O <b>Mempool Miner</b> é um jogo de caça-palavras onde as palavras não são inventadas: elas nascem de <b>transações reais da mempool Bitcoin</b>. Cada transação que entra na rede vira uma palavra BIP39 (derivada do TXID), e o jogador tem um cronômetro para encontrá-las numa grade de letras.</p>
+            <div class="metric-row">
+                <div class="metric"><strong>3</strong><span>redes isoladas</span></div>
+                <div class="metric"><strong>2</strong><span>redes no perfil padrão</span></div>
+                <div class="metric"><strong>1</strong><span>Mainnet opcional e podada</span></div>
+                <div class="metric"><strong>PWA</strong><span>interface mobile-first</span></div>
+            </div>
+        </section>
 
-    <section class="section">
-      <div class="container">
-        <div class="section-intro">
-          <p class="eyebrow">Separação de acesso</p>
-          <h2>Jogo e documentação não compartilham publicação.</h2>
-        </div>
-        <div class="grid three">
-          <article class="card">
-            <span class="tag ok">Porta 8010</span>
-            <h3>Jogo</h3>
-            <p>Publica somente o PWA e encaminha os contratos REST/WebSocket necessários à partida.</p>
-          </article>
-          <article class="card">
-            <span class="tag">Porta 8020</span>
-            <h3>Portal opcional</h3>
-            <p>Profile separado, imagem estática própria e allowlist de apresentação, API e assets públicos.</p>
-          </article>
-          <article class="card">
-            <span class="tag warn">Privado</span>
-            <h3>Operação</h3>
-            <p>Swagger, OpenAPI bruto, configurações, auditorias detalhadas e topologia não são publicados pelo jogo.</p>
-          </article>
-        </div>
-      </div>
-    </section>
+        <!-- ============ 02 · ARQUITETURA PÚBLICA ============ -->
+        <section class="section-block" id="arquitetura">
+            <h2 class="section-title"><span class="num">02.</span><span class="hl">Arquitetura Pública</span></h2>
+            <p class="dim">Regtest, Signet e Mainnet não compartilham contador, epoch, eventos ou leaderboard. Mainnet só existe quando seu profile é habilitado explicitamente.</p>
+            <div class="flow" aria-label="Fluxo de um realm Bitcoin até o navegador">
+                <div class="flow-node">Bitcoin Core</div><div class="flow-arrow">→</div>
+                <div class="flow-node">Ingestor do realm</div><div class="flow-arrow">→</div>
+                <div class="flow-node">Redis isolado</div><div class="flow-arrow">→</div>
+                <div class="flow-node">API + WebSocket</div><div class="flow-arrow">→</div>
+                <div class="flow-node">PWA do jogo</div>
+            </div>
+        </section>
 
-    <section class="section alt">
-      <div class="container grid two">
-        <article class="card">
-          <span class="tag ok">Integração real</span>
-          <h2>Eventos Bitcoin</h2>
-          <p>Transações, blocos, TXID, vsize e taxas vêm da infraestrutura configurada para cada realm.</p>
-        </article>
-        <article class="card">
-          <span class="tag warn">Economia simulada</span>
-          <h2>Sem fundos reais</h2>
-          <p>Saldo, recompensa, hardware, mineração e Lightning são apenas mecânicas educacionais do jogo.</p>
-        </article>
-      </div>
-    </section>
-  </main>
+        <!-- ============ 03 · COMPONENTES ============ -->
+        <section class="section-block" id="componentes">
+            <h2 class="section-title"><span class="num">03.</span><span class="hl">Componentes com Fronteiras Claras</span></h2>
+            <div class="card-grid">
+                <div class="info-card"><div class="ic-title">₿ BITCOIN CORE</div><p>Origem de transações e blocos; RPC e ZMQ permanecem na rede privada.</p></div>
+                <div class="info-card"><div class="ic-title">⚙ INGESTORES + API</div><p>Transformam eventos, aplicam isolamento por realm e entregam contratos sanitizados.</p></div>
+                <div class="info-card"><div class="ic-title">▦ REDIS</div><p>Estado efêmero, fan-out e ranking; não possui porta publicada no host.</p></div>
+                <div class="info-card"><div class="ic-title">◈ PWA DO JOGO</div><p>Shell instalável, mobile-first e same-origin, sem armazenar respostas da API no cache offline.</p></div>
+            </div>
+        </section>
 
-  <footer class="site-footer">
-    <div class="container footer-row">
-      <span>Mempool Miner · documentação pública sanitizada</span>
-      <span>Sem credenciais · sem endpoints operacionais</span>
-    </div>
-  </footer>
+        <!-- ============ 04 · SEPARAÇÃO DE ACESSO ============ -->
+        <section class="section-block" id="acesso">
+            <h2 class="section-title"><span class="num">04.</span><span class="hl">Separação de Acesso</span></h2>
+            <p>Jogo e documentação compartilham a mesma origem (8010), mas superfícies distintas.</p>
+            <div class="table-wrap"><table>
+                <tr><th>Superfície</th><th>Endereço</th><th>Conteúdo</th></tr>
+                <tr><td><b>Jogo</b></td><td>8010</td><td>Publica o PWA em <code>/</code> e encaminha os contratos REST/WebSocket necessários à partida.</td></tr>
+                <tr><td><b>Documentação</b></td><td>8010/docs/</td><td>Servida pelo mesmo nginx do jogo: visão geral, API pública e apresentação, com allowlist de assets.</td></tr>
+                <tr><td><b>Operação</b></td><td>privado</td><td>Swagger, OpenAPI bruto, configurações, auditorias detalhadas e topologia não são publicados.</td></tr>
+            </table></div>
+        </section>
+
+        <!-- ============ 05 · LIMITES DO PRODUTO ============ -->
+        <section class="section-block" id="limites">
+            <h2 class="section-title"><span class="num">05.</span><span class="hl">Limites do Produto</span></h2>
+            <div class="callout green"><div class="callout-title">INTEGRAÇÃO REAL</div>Transações, blocos, TXID, vsize e taxas vêm da infraestrutura configurada para cada realm.</div>
+            <div class="callout amber"><div class="callout-title">ECONOMIA SIMULADA</div>Saldo, recompensa, hardware, mineração e Lightning são apenas mecânicas educacionais do jogo. Sem fundos reais, sem carteiras, sem hashrate real.</div>
+        </section>
+
+        <footer>
+            <div class="foot-brand">MEMPOOL MINER // DOCS</div>
+            <p>Documentação pública sanitizada · sem credenciais · sem endpoints operacionais</p>
+        </footer>
+    </main>
+
+    <button class="back-to-top" id="back-to-top" aria-label="Voltar ao início">↑</button>
+    <script src="/docs/wiki.js"></script>
 </body>
 </html>

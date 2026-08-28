@@ -3,321 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MEMPOOL MINER // WIKI_DO_JOGO</title>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --bg-void: #0a0d12;
-            --hull-dark: #12161f;
-            --hull-panel: #1a202c;
-            --hull-surface: #242c3d;
-            --hull-accent: #2e384d;
-            --border-dim: #2b3545;
-            --border-hi: #41506b;
-            --border-glow: rgba(0, 240, 255, 0.4);
-            --border-glow-amber: rgba(247, 147, 26, 0.4);
-            --border-glow-green: rgba(0, 255, 136, 0.4);
-            --text-main: #f0f6fc;
-            --text-dim: #9aa5b5;
-            --text-dark: #5c687a;
-            --neon-cyan: #00f0ff;
-            --neon-green: #00ff88;
-            --neon-amber: #f7931a;
-            --neon-red: #ff3355;
-            --neon-magenta: #f000ff;
-            --neon-gold: #ffcc00;
-            --neon-blue: #3b82f6;
-            --f-tech: 'JetBrains Mono', monospace;
-            --f-pixel: 'Press Start 2P', monospace;
-            --f-data: 'VT323', monospace;
-            --menu-w: 300px;
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; scroll-behavior: smooth; }
-        html { scroll-padding-top: 80px; }
-        body {
-            background-color: var(--bg-void);
-            color: var(--text-main);
-            font-family: var(--f-tech);
-            line-height: 1.7;
-            overflow-x: hidden;
-            font-size: 14px;
-            background-image:
-                linear-gradient(135deg, rgba(255,255,255,0.015) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.015) 50%, rgba(255,255,255,0.015) 75%, transparent 75%, transparent),
-                radial-gradient(circle at 50% 10%, rgba(0, 240, 255, 0.05) 0%, transparent 60%),
-                radial-gradient(circle at 80% 80%, rgba(247, 147, 26, 0.03) 0%, transparent 50%);
-            background-size: 32px 32px, 100% 100%, 100% 100%;
-        }
-        body::after {
-            content: '';
-            position: fixed; inset: 0;
-            background: repeating-linear-gradient(0deg, transparent 0, transparent 2px, rgba(0,0,0,0.12) 2px, rgba(0,0,0,0.12) 4px);
-            pointer-events: none; z-index: 9999;
-        }
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: var(--bg-void); }
-        ::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
-        ::-webkit-scrollbar-thumb:hover { background: var(--neon-cyan); }
-
-        /* ===== NAV (topo) ===== */
-        nav {
-            position: fixed; top: 0; left: 0; width: 100%;
-            background: rgba(18, 22, 31, 0.96);
-            backdrop-filter: blur(10px);
-            border-bottom: 2px solid var(--border-dim);
-            padding: 10px clamp(12px, 2.5vw, 32px);
-            display: flex; justify-content: space-between; align-items: center; gap: 12px;
-            z-index: 1000;
-        }
-        .nav-brand {
-            font-family: var(--f-pixel); font-size: 9px; color: var(--neon-cyan);
-            display: flex; align-items: center; gap: 8px; text-decoration: none;
-            letter-spacing: 0.5px; text-shadow: 0 0 8px var(--border-glow);
-            white-space: nowrap;
-        }
-        .nav-brand span.sys-box {
-            border: 1px solid var(--neon-cyan); padding: 2px 6px;
-            background: rgba(0, 240, 255, 0.1); color: var(--neon-cyan);
-        }
-        .nav-tools { display: flex; gap: 10px; align-items: center; flex: 1; justify-content: flex-end; }
-        .search-wrap { position: relative; flex: 1; max-width: 340px; }
-        .search-wrap input {
-            width: 100%; background: var(--hull-dark); border: 1px solid var(--border-dim);
-            color: var(--text-main); font-family: var(--f-tech); font-size: 12px;
-            padding: 7px 10px 7px 30px; border-radius: 2px; outline: none; transition: 0.2s;
-        }
-        .search-wrap input:focus { border-color: var(--neon-cyan); box-shadow: 0 0 8px var(--border-glow); }
-        .search-wrap .search-ico {
-            position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
-            color: var(--text-dark); font-size: 13px; pointer-events: none;
-        }
-        .btn-menu {
-            background: rgba(0, 240, 255, 0.12); color: var(--neon-cyan);
-            border: 1px solid var(--neon-cyan); padding: 7px 12px;
-            font-family: var(--f-pixel); font-size: 7px; cursor: pointer;
-            display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s;
-            white-space: nowrap;
-        }
-        .btn-menu:hover { background: var(--neon-cyan); color: #000; box-shadow: 0 0 14px var(--border-glow); }
-        .btn-menu.active { background: var(--neon-cyan); color: #000; }
-
-        /* ===== MENU LATERAL (direita) ===== */
-        .side-menu {
-            position: fixed; top: 56px; right: 0; bottom: 0;
-            width: var(--menu-w);
-            background: rgba(18, 22, 31, 0.98);
-            backdrop-filter: blur(10px);
-            border-left: 2px solid var(--border-dim);
-            transform: translateX(100%);
-            transition: transform 0.28s ease;
-            z-index: 900;
-            overflow-y: auto;
-            padding: 18px 0 40px 0;
-        }
-        .side-menu.open { transform: translateX(0); box-shadow: -8px 0 30px rgba(0,0,0,0.5); }
-        .side-menu .menu-head {
-            font-family: var(--f-pixel); font-size: 8px; color: var(--neon-amber);
-            padding: 0 18px 12px 18px; border-bottom: 1px solid var(--border-dim);
-            letter-spacing: 1px; text-shadow: 0 0 8px var(--border-glow-amber);
-            display: flex; justify-content: space-between; align-items: center;
-        }
-        .side-menu .menu-close {
-            background: none; border: 1px solid var(--border-dim); color: var(--text-dim);
-            font-family: var(--f-tech); font-size: 12px; cursor: pointer; padding: 2px 8px;
-            transition: 0.2s;
-        }
-        .side-menu .menu-close:hover { border-color: var(--neon-red); color: var(--neon-red); }
-        .side-menu ul { list-style: none; padding: 8px 0; }
-        .side-menu li { margin: 0; }
-        .side-menu a {
-            display: block; padding: 7px 18px; color: var(--text-dim); text-decoration: none;
-            font-size: 12px; border-left: 2px solid transparent; transition: 0.15s;
-            line-height: 1.4;
-        }
-        .side-menu a:hover { color: var(--neon-cyan); background: rgba(0,240,255,0.05); }
-        .side-menu a.active { color: var(--neon-cyan); border-left-color: var(--neon-cyan); background: rgba(0,240,255,0.08); }
-        .side-menu a.sub { padding-left: 34px; font-size: 11px; color: var(--text-dark); }
-        .side-menu a.sub:hover { color: var(--neon-green); }
-        .side-menu .menu-sep {
-            height: 1px; background: var(--border-dim); margin: 10px 18px;
-        }
-        .side-menu .menu-label {
-            font-family: var(--f-pixel); font-size: 6px; color: var(--text-dark);
-            padding: 6px 18px 4px 18px; letter-spacing: 1px; text-transform: uppercase;
-        }
-
-        /* ===== CONTEÚDO (wiki) ===== */
-        .wiki {
-            max-width: 1080px;
-            margin: 0; /* alinhado à esquerda, aproveita o espaço */
-            padding: 84px clamp(16px, 4vw, 56px) 80px 18px;
-            transition: margin-right 0.28s ease;
-        }
-        body.menu-open .wiki { margin-right: var(--menu-w); }
-
-        .wiki-hero {
-            border: 1px solid var(--border-hi);
-            background: linear-gradient(135deg, rgba(0,240,255,0.06), rgba(247,147,26,0.04));
-            padding: 28px 26px; margin-bottom: 34px;
-            position: relative;
-        }
-        .wiki-hero::before {
-            content: 'WIKI // v1.0'; position: absolute; top: -9px; left: 18px;
-            background: var(--bg-void); padding: 0 8px;
-            font-family: var(--f-pixel); font-size: 7px; color: var(--neon-amber);
-            letter-spacing: 1px;
-        }
-        .wiki-hero h1 {
-            font-family: var(--f-pixel); font-size: clamp(15px, 2.6vw, 24px);
-            color: var(--neon-cyan); line-height: 1.5; margin-bottom: 12px;
-            text-shadow: 0 0 12px var(--border-glow);
-        }
-        .wiki-hero p { color: var(--text-dim); font-size: 13px; max-width: 70ch; }
-        .wiki-hero .hero-meta {
-            display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px;
-        }
-        .wiki-hero .hero-meta span {
-            font-size: 10px; color: var(--text-dim); border: 1px solid var(--border-dim);
-            padding: 3px 8px; background: var(--hull-dark);
-        }
-        .wiki-hero .hero-meta span b { color: var(--neon-green); font-weight: 700; }
-
-        .section-block { margin-bottom: 40px; scroll-margin-top: 76px; }
-        .section-title {
-            font-family: var(--f-pixel); font-size: clamp(11px, 1.6vw, 15px);
-            color: var(--text-main); line-height: 1.6; margin-bottom: 18px;
-            padding-bottom: 12px; border-bottom: 2px solid var(--border-dim);
-            display: flex; gap: 12px; align-items: baseline;
-        }
-        .section-title .num { color: var(--neon-amber); font-size: 0.8em; text-shadow: 0 0 8px var(--border-glow-amber); }
-        .section-title .hl { color: var(--neon-cyan); text-shadow: 0 0 8px var(--border-glow); }
-
-        h3 {
-            font-family: var(--f-tech); font-size: 15px; font-weight: 800;
-            color: var(--neon-green); margin: 26px 0 12px 0;
-            padding-left: 10px; border-left: 3px solid var(--neon-green);
-            letter-spacing: 0.3px;
-        }
-        h4 {
-            font-family: var(--f-tech); font-size: 13px; font-weight: 700;
-            color: var(--neon-amber); margin: 18px 0 8px 0;
-        }
-        p { margin-bottom: 12px; color: var(--text-main); font-size: 13.5px; }
-        p.dim, .dim { color: var(--text-dim); }
-        ul, ol { margin: 0 0 14px 22px; color: var(--text-main); font-size: 13.5px; }
-        li { margin-bottom: 6px; }
-        li::marker { color: var(--neon-cyan); }
-        code {
-            font-family: var(--f-tech); font-size: 12px; color: var(--neon-gold);
-            background: var(--hull-dark); padding: 1px 5px; border: 1px solid var(--border-dim);
-            border-radius: 2px;
-        }
-        pre {
-            background: var(--hull-dark); border: 1px solid var(--border-dim);
-            border-left: 3px solid var(--neon-cyan);
-            padding: 14px 16px; margin: 14px 0; overflow-x: auto;
-            font-size: 12px; line-height: 1.6; color: var(--text-main);
-        }
-        pre code { background: none; border: none; padding: 0; color: inherit; }
-
-        /* Tabelas wiki */
-        .table-wrap { overflow-x: auto; margin: 14px 0; border: 1px solid var(--border-dim); }
-        table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-        th {
-            background: var(--hull-surface); color: var(--neon-cyan);
-            font-family: var(--f-pixel); font-size: 7px; letter-spacing: 0.5px;
-            text-align: left; padding: 10px 12px; border-bottom: 2px solid var(--border-hi);
-            text-transform: uppercase; white-space: nowrap;
-        }
-        td { padding: 9px 12px; border-bottom: 1px solid var(--border-dim); color: var(--text-main); vertical-align: top; }
-        tr:last-child td { border-bottom: none; }
-        tr:hover td { background: rgba(0,240,255,0.03); }
-        td code { white-space: nowrap; }
-
-        /* Caixas de destaque */
-        .callout {
-            border: 1px solid var(--border-hi); border-left: 4px solid var(--neon-cyan);
-            background: rgba(0,240,255,0.04); padding: 14px 16px; margin: 16px 0;
-            font-size: 13px;
-        }
-        .callout.amber { border-left-color: var(--neon-amber); background: rgba(247,147,26,0.05); }
-        .callout.green { border-left-color: var(--neon-green); background: rgba(0,255,136,0.05); }
-        .callout.red { border-left-color: var(--neon-red); background: rgba(255,51,85,0.05); }
-        .callout .callout-title {
-            font-family: var(--f-pixel); font-size: 8px; margin-bottom: 8px; letter-spacing: 1px;
-        }
-        .callout .callout-title.cyan { color: var(--neon-cyan); }
-        .callout.amber .callout-title { color: var(--neon-amber); }
-        .callout.green .callout-title { color: var(--neon-green); }
-        .callout.red .callout-title { color: var(--neon-red); }
-
-        /* Passos (guia passo a passo) */
-        .steps { counter-reset: step; list-style: none; margin-left: 0; }
-        .steps > li {
-            counter-increment: step; position: relative;
-            padding: 0 0 18px 52px; margin-bottom: 0;
-        }
-        .steps > li::before {
-            content: counter(step, decimal-leading-zero);
-            position: absolute; left: 0; top: 0;
-            font-family: var(--f-pixel); font-size: 10px; color: var(--neon-cyan);
-            border: 1px solid var(--neon-cyan); padding: 6px 8px;
-            background: rgba(0,240,255,0.08); text-shadow: 0 0 6px var(--border-glow);
-        }
-        .steps > li::after {
-            content: ''; position: absolute; left: 21px; top: 34px; bottom: 0;
-            width: 1px; background: var(--border-dim);
-        }
-        .steps > li:last-child::after { display: none; }
-        .steps > li b.step-title { color: var(--neon-green); display: block; margin-bottom: 4px; font-size: 14px; }
-
-        /* Severidade */
-        .sev { font-family: var(--f-pixel); font-size: 7px; padding: 2px 7px; white-space: nowrap; }
-        .sev-alto { color: var(--neon-red); border: 1px solid var(--neon-red); background: rgba(255,51,85,0.1); }
-        .sev-medio { color: var(--neon-amber); border: 1px solid var(--neon-amber); background: rgba(247,147,26,0.1); }
-        .sev-baixo { color: var(--text-dim); border: 1px solid var(--border-hi); background: var(--hull-dark); }
-
-        /* Grid de cards (visão geral) */
-        .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; margin: 16px 0; }
-        .info-card {
-            border: 1px solid var(--border-dim); background: var(--hull-panel);
-            padding: 16px; transition: 0.2s;
-        }
-        .info-card:hover { border-color: var(--neon-cyan); box-shadow: 0 0 12px rgba(0,240,255,0.1); }
-        .info-card .ic-title { font-family: var(--f-pixel); font-size: 8px; color: var(--neon-cyan); margin-bottom: 8px; letter-spacing: 0.5px; }
-        .info-card p { font-size: 12px; color: var(--text-dim); margin: 0; }
-
-        .no-results {
-            display: none; text-align: left; padding: 30px; color: var(--text-dim);
-            border: 1px dashed var(--border-hi); margin: 20px 0; font-size: 13px;
-        }
-        .no-results.show { display: block; }
-
-        footer {
-            border-top: 2px solid var(--border-dim); margin-top: 40px; padding-top: 20px;
-            color: var(--text-dark); font-size: 11px;
-        }
-        footer .foot-brand { font-family: var(--f-pixel); font-size: 8px; color: var(--neon-cyan); margin-bottom: 8px; }
-
-        /* ===== RESPONSIVO ===== */
-        @media (max-width: 900px) {
-            .side-menu { width: 86vw; max-width: 340px; top: 0; height: 100%; padding-top: 60px; }
-            body.menu-open .wiki { margin-right: 0; }
-            .wiki { padding: 76px 14px 60px 14px; }
-            .nav-brand span.sys-box { display: none; }
-        }
-        @media (max-width: 560px) {
-            body { font-size: 13px; }
-            .search-wrap { max-width: 150px; }
-            .btn-menu { padding: 7px 8px; }
-            .btn-menu .menu-label-text { display: none; }
-            .card-grid { grid-template-columns: 1fr; }
-            .section-title { flex-direction: column; gap: 4px; }
-        }
-    </style>
+    <title>MEMPOOL MINER // WIKI DO JOGO</title>
+    <link rel="stylesheet" href="/docs/wiki.css">
 </head>
 <body>
     <nav>
-        <a href="#topo" class="nav-brand"><span class="sys-box">MM</span> MEMPOOL MINER <span style="color:var(--text-dark);font-size:7px;">// WIKI</span></a>
+        <a href="/docs/apresentacao/" class="nav-brand"><span class="sys-box">MM</span> MEMPOOL MINER <span class="nav-suffix">// WIKI</span></a>
+        <div class="nav-links">
+            <a href="/docs/">Visão geral</a>
+            <a href="/docs/api/">API pública</a>
+            <a href="/docs/apresentacao/" class="active">Guia do jogo</a>
+            <a href="../land_page.html">Apresentação</a>
+            <a href="http://localhost:8010/" class="ext">Jogo local</a>
+        </div>
         <div class="nav-tools">
             <div class="search-wrap">
                 <span class="search-ico">⌕</span>
@@ -356,6 +54,12 @@
             <li><a href="#arquitetura">07 · Arquitetura</a></li>
             <li><a href="#pontas-soltas">08 · Pontas Soltas</a></li>
             <li><a href="#api">09 · Referência de API</a></li>
+            <li class="menu-sep"></li>
+            <li class="menu-label">Operação</li>
+            <li><a href="#instalacao">10 · Instalação</a></li>
+            <li><a href="#configuracao">11 · Configuração</a></li>
+            <li><a href="#comandos">12 · Comandos</a></li>
+            <li><a href="#faq">13 · FAQ</a></li>
         </ul>
     </aside>
 
@@ -566,7 +270,7 @@ currentRoundEarnings += floor(points)                # game.js:2867</code></pre>
             <div class="table-wrap"><table>
                 <tr><th>Parâmetro</th><th>Valor</th></tr>
                 <tr><td>Grid</td><td><b>10×10</b></td></tr>
-                <tr><td>Palavras</td><td><b>4</b> (aleatórias do wordlist BIP39 PT)</td></tr>
+                <tr><td>Palavras</td><td><b>4</b> (aleatórias da wordlist BIP39 EN)</td></tr>
                 <tr><td>Tempo</td><td><b>30s</b> + skillTimeBonus</td></tr>
                 <tr><td>Recompensa</td><td><b>500 sats/palavra</b> (<code>words_found × 1000 × 0.5</code>)</td></tr>
                 <tr><td>Leaderboard</td><td><b>Separado</b>, top 10, ordenado por <b>menor tempo</b></td></tr>
@@ -612,7 +316,7 @@ currentRoundEarnings += floor(points)                # game.js:2867</code></pre>
                 <tr><td>Frequência</td><td><b>A cada 3 rodadas</b> (<code>DECODER_ROUNDS_INTERVAL = 3</code>)</td></tr>
                 <tr><td>Tempo</td><td><b>30s</b> (<code>DECODER_TIME_LIMIT = 30</code>)</td></tr>
                 <tr><td>Cooldown backend</td><td><b>180s</b> entre partidas</td></tr>
-                <tr><td>Wordlist</td><td>Subconjunto BIP39 <b>português</b> (diferente do inglês do jogo principal)</td></tr>
+                <tr><td>Wordlist</td><td>Lista BIP39 <b>inglês</b>, igual à usada no jogo principal</td></tr>
                 <tr><td>TXID truncado</td><td><code>0x{sha256(word)[:4]}...{sha256(word)[-4:]}</code></td></tr>
                 <tr><td>Dica</td><td>Primeira letra da palavra (maiúscula)</td></tr>
                 <tr><td>Recompensa (acerto)</td><td><b>+5.000 sats</b> + <b>1 power-up aleatório</b></td></tr>
@@ -625,7 +329,7 @@ currentRoundEarnings += floor(points)                # game.js:2867</code></pre>
             <h2 class="section-title"><span class="num">04.</span><span class="hl">Economia</span></h2>
 
             <h3>4.1 Moeda: sats</h3>
-            <p>O saldo (<code>balanceSatoshis</code>) começa em <b>0</b>. A fonte de verdade é o campo <code>balance</code> do hash Redis do player state — <b>sem TTL</b> (correção da Fase 2: <code>persist()</code> limpa o TTL residual de 24h que zerava o saldo). O frontend espelha o backend: se o backend tiver mais, adota; se o local tiver mais, mantém o local e faz <code>syncPlayerState()</code>.</p>
+            <p>O saldo (<code>balanceSatoshis</code>) começa em <b>0</b>. A fonte de verdade é o campo <code>balance</code> do hash Redis do player state — <b>sem TTL</b> (correção da Fase 2: <code>persist()</code> limpa o TTL residual de 24h que zerava o saldo). O frontend espelha o saldo retornado pelo backend; o navegador não deve criar nem preservar créditos divergentes.</p>
             <h4>Fontes de entrada</h4>
             <div class="table-wrap"><table>
                 <tr><th>Fonte</th><th>Valor</th></tr>
@@ -637,7 +341,7 @@ currentRoundEarnings += floor(points)                # game.js:2867</code></pre>
                 <tr><td>Decoder (acerto)</td><td>+5.000</td></tr>
                 <tr><td>Venda no mercado P2P</td><td>preço − 5% de taxa</td></tr>
                 <tr><td>PvP (vencedor)</td><td>10% do saldo do perdedor</td></tr>
-                <tr><td>Staking (expiração)</td><td>devolução do <code>amount</code> (bônus <b>não</b> pago — ver §8)</td></tr>
+                <tr><td>Staking (expiração)</td><td>devolução do <code>amount</code> + bônus conforme a duração</td></tr>
                 <tr><td>Season pass (recompensas)</td><td>variável (500–250.000)</td></tr>
             </table></div>
             <h4>Saídas (gastos)</h4>
@@ -665,7 +369,7 @@ currentRoundEarnings += floor(points)                # game.js:2867</code></pre>
                 <tr><td>L2 Lightning</td><td>1.000.000</td><td>Grid 8×8, recompensas ×10, canal de 5 blocos</td><td>1 (recompra após expirar)</td></tr>
                 <tr><td>ENERGY_RECHARGE</td><td>2.000</td><td>+3 energia</td><td>ilimitado</td></tr>
                 <tr><td>CRATE</td><td>5.000</td><td>abre crate (drops §4.5)</td><td>ilimitado</td></tr>
-                <tr><td>TX_DECODER</td><td>grátis (mini-game)</td><td>+5.000 sats + power-up aleatório por acerto</td><td>ilimitado</td></tr>
+                <tr><td>TX_DECODER</td><td>grátis (mini-game)</td><td>+5.000 sats + power-up aleatório por acerto</td><td>cooldown de 180s</td></tr>
                 <tr><td>Dica (hint, in-game)</td><td>5.000 (desconto por skill/conquistas)</td><td>revela direção de 1 palavra</td><td>ilimitado</td></tr>
                 <tr><td>RBF (in-game)</td><td>100.000</td><td>+15s na rodada (resgate de bloco órfão)</td><td>ilimitado</td></tr>
                 <tr><td>Skill tree (tab PERFIL)</td><td>1 ponto/nó (pontos vêm do nível)</td><td>ramos mining/search/lightning</td><td>5 por ramo</td></tr>
@@ -927,19 +631,49 @@ currentRoundEarnings += floor(points)                # game.js:2867</code></pre>
         <section class="section-block" id="pontas-soltas">
             <h2 class="section-title"><span class="num">08.</span><span class="hl">Pontas Soltas (auditoria)</span></h2>
             <p>Lista consolidada de bugs, inconsistências e mecânicas incompletas encontrados na auditoria de 2026-08-23. Severidade: <span class="sev sev-alto">ALTO</span> = quebra funcional/econômica; <span class="sev sev-medio">MÉDIO</span> = comportamento inesperado; <span class="sev sev-baixo">BAIXO</span> = cosmético/edge case.</p>
+            <p class="dim"><b>Atualização 2026-08-24 (Fases A–D):</b> os itens marcados com <span class="sev sev-corrigido">CORRIGIDO</span> foram resolvidos nas Fases A–D. Os demais seguem abertos.</p>
+            <p class="dim"><b>Atualização 2026-08-25 (Fases E–H):</b> ALTO #1, #2, #4, #5, #6; MÉDIO #16, #18; BAIXO #26, #28, #32 foram corrigidos e validados (TDD + validação funcional ao vivo + health checks). Suíte completa: 214 testes passando. Auditoria independente final (backend + frontend) deu <b>APROVADO COM RESSALVAS</b> sem achados CRÍTICO/ALTO; todas as ressalvas (3 MÉDIO + 6 BAIXO) foram fechadas: teste do Lua real em fakeredis, asserção de idempotency key no retry, delete no ramo <code>amount&lt;=0</code>, backoff sem latência final, status terminal não reabre, countdown por timestamp, cor derivada do tema e limpeza sem redundância.</p>
+
+            <h3>Corrigidos nas Fases A–D (2026-08-24)</h3>
+            <div class="table-wrap"><table>
+                <tr><th>#</th><th>Correção</th><th>Local</th><th>Status</th></tr>
+                <tr><td>D1</td><td><b>Bug 500 em <code>/market/list</code></b> — <code>int()</code> em float (timestamp) no score do zset e no índice de preços; agora lê o preço do JSON do member e tolera dados legados.</td><td><code>main.py:2809, 2830</code></td><td><span class="sev sev-corrigido">CORRIGIDO</span></td></tr>
+                <tr><td>D2</td><td><b>Bug 500 em <code>/level/add-xp</code></b> — <code>int("67.5")</code> em XP legado; agora <code>int(float(...))</code> (item ALTO #9 abaixo).</td><td><code>main.py:5484, 5536</code></td><td><span class="sev sev-corrigido">CORRIGIDO</span></td></tr>
+                <tr><td>D3</td><td><b>Recompensa não creditada após rodada falha</b> — tx_id colidia com a rodada anterior; introduzido <code>roundAttempt</code> (único por tentativa, persistido) nos tx_ids de earn.</td><td><code>game.js:349, 2412</code></td><td><span class="sev sev-corrigido">CORRIGIDO</span></td></tr>
+                <tr><td>D4</td><td><b>earnBalance fire-and-forget</b> — retry com backoff (3 tentativas); tx_id idempotente torna seguro.</td><td><code>game.js:2097</code></td><td><span class="sev sev-corrigido">CORRIGIDO</span></td></tr>
+                <tr><td>D5</td><td><b>Card não creditado em 404</b> — retry em 404 (card global ainda não existe no Redis).</td><td><code>game.js:6520</code></td><td><span class="sev sev-corrigido">CORRIGIDO</span></td></tr>
+                <tr><td>D6</td><td><b>Claim de missão não atômico</b> — check-then-act → Lua atômico (double-credit em race).</td><td><code>main.py:1675</code></td><td><span class="sev sev-corrigido">CORRIGIDO</span></td></tr>
+                <tr><td>D7</td><td><b>Watchdog não considerava boss</b> — <code>handleBossTransaction</code> atualiza o timestamp + guarda <code>isBossActive</code>.</td><td><code>game.js:1259, 2405</code></td><td><span class="sev sev-corrigido">CORRIGIDO</span></td></tr>
+                <tr><td>D8</td><td><b>Sem teste do <code>/market/cancel</code></b> — 3 testes adicionados (atômico, 403, 404).</td><td><code>test_phase2_contracts.py</code></td><td><span class="sev sev-corrigido">CORRIGIDO</span></td></tr>
+            </table></div>
+
+            <h3>Corrigidos nas Fases E–H (2026-08-25)</h3>
+            <div class="table-wrap"><table>
+                <tr><th>#</th><th>Correção</th><th>Local</th><th>Status</th></tr>
+                <tr><td>E1</td><td><b>Double-counting de multiplicadores globais</b> (ALTO #1) — backend é a única fonte do multiplicador; contrato de teste impede que o frontend aplique <code>globalRewardMultiplier</code> em cima do valor já multiplicado.</td><td><code>engine.py</code> + <code>game.js</code></td><td><span class="sev sev-corrigido">CORRIGIDO</span></td></tr>
+                <tr><td>E2</td><td><b>Golden Rush quebra palavras G–Z</b> (ALTO #2) — seleção determinística por SHA-256 do bloco; 8 casos parametrizados de teste.</td><td><code>engine.py</code></td><td><span class="sev sev-corrigido">CORRIGIDO</span></td></tr>
+                <tr><td>F1</td><td><b>Chat não entregue em tempo real</b> (ALTO #4) — <code>chat_message</code> publicado no canal de eventos; validado ao vivo via WebSocket (Playwright).</td><td><code>main.py</code></td><td><span class="sev sev-corrigido">CORRIGIDO</span></td></tr>
+                <tr><td>F2</td><td><b>Bônus co-op nunca aplicado</b> (ALTO #5) — bônus consumido no cálculo de recompensa/leaderboard.</td><td><code>main.py</code></td><td><span class="sev sev-corrigido">CORRIGIDO</span></td></tr>
+                <tr><td>F3</td><td><b>Bônus de staking nunca creditado</b> (ALTO #6) — <code>STAKE_SETTLE_SCRIPT</code> (Lua atômico): verifica expiração, calcula bônus, credita principal+bônus e grava histórico em 1 <code>EVAL</code>; sem double-credit. Validado ao vivo (10.000 → 9.000 → 10.050, idempotente).</td><td><code>storage.py</code> + <code>main.py</code></td><td><span class="sev sev-corrigido">CORRIGIDO</span></td></tr>
+                <tr><td>G1</td><td><b>Compras sem autoridade de servidor</b> (MÉDIO #16) — <code>spendBalance()</code> com retry idempotente (3×, mesma <code>tx_id</code>, só para 5xx/429/rede) + guards anti-reentrada em hardware/Lightning/RBF + <code>tx_id</code> com entropia.</td><td><code>game.js</code></td><td><span class="sev sev-corrigido">CORRIGIDO</span></td></tr>
+                <tr><td>G2</td><td><b>Sincronização de saldo "quem tiver mais vence"</b> (MÉDIO #18) — backend devolve <code>balance_initialized</code>; saldo local só migra se o campo <code>balance</code> não existir; saldo 0 do backend é autoritativo. Validado ao vivo (migrado 100 → gasto → retry idempotente → sync stale não ressuscita).</td><td><code>main.py</code> + <code>game.js</code></td><td><span class="sev sev-corrigido">CORRIGIDO</span></td></tr>
+                <tr><td>H1</td><td><b>Logger de staking com format specifier inválido</b> (BAIXO #26) — <code>(+%.1f%% bonus)</code> correto; teste estático impede regressão.</td><td><code>main.py</code></td><td><span class="sev sev-corrigido">CORRIGIDO</span></td></tr>
+                <tr><td>H2</td><td><b><code>xp_progress</code> semântica errada</b> (BAIXO #28) — backend devolve <code>xp_progress</code> (XP remanescente / novo nível) e <code>xp_total</code> correto; frontend usa o valor do backend. Validado ao vivo: 90 XP → +20 → nível 2 com 10/200 = 5%.</td><td><code>main.py</code> + <code>game.js</code></td><td><span class="sev sev-corrigido">CORRIGIDO</span></td></tr>
+                <tr><td>H3</td><td><b>PvP handlers vazios</b> (BAIXO #32) — painel de telemetria PvP em COMPETIR (placar, timer, status); handlers <code>pvp_challenge/start/score_update/end/timer</code> funcionais; eventos PvP agora usam <code>event_envelope</code> + canal público (antes publicavam em canal que o relay não escutava). Validado ao vivo: DOM + handlers (Playwright) e E2E Redis PubSub → relay → WebSocket.</td><td><code>game.js</code> + <code>index.html</code> + <code>pixel.css</code> + <code>main.py</code></td><td><span class="sev sev-corrigido">CORRIGIDO</span></td></tr>
+            </table></div>
 
             <h3>ALTO</h3>
             <div class="table-wrap"><table>
                 <tr><th>#</th><th>Ponta solta</th><th>Local</th></tr>
-                <tr><td>1</td><td><b>Double-counting de multiplicadores em eventos globais</b> — backend aplica no <code>multiplier</code> da TX e frontend aplica no <code>effectiveBaseReward</code>. Fee Spike → 9× (deveria 3×); Golden Rush → 25×; Flood → 4×; Lightning → 100×.</td><td><code>engine.py:374-401</code> + <code>game.js:2313-2348</code></td></tr>
-                <tr><td>2</td><td><b>Golden Rush quebra palavras G-Z</b> — <code>int(word[:2], 16)</code> lança <code>ValueError</code> para palavras iniciadas com G-Z (não hex); a TX é descartada silenciosamente.</td><td><code>engine.py:388</code></td></tr>
+                <tr><td>1</td><td><b>Double-counting de multiplicadores em eventos globais</b> — backend aplica no <code>multiplier</code> da TX e frontend aplica no <code>effectiveBaseReward</code>. Fee Spike → 9× (deveria 3×); Golden Rush → 25×; Flood → 4×; Lightning → 100%. <b>✅ CORRIGIDO em E1</b> (backend é a única fonte do multiplicador; contrato de teste impede double-counting).</td><td><code>engine.py:374-401</code> + <code>game.js:2313-2348</code></td></tr>
+                <tr><td>2</td><td><b>Golden Rush quebra palavras G-Z</b> — <code>int(word[:2], 16)</code> lança <code>ValueError</code> para palavras iniciadas com G-Z (não hex); a TX é descartada silenciosamente. <b>✅ CORRIGIDO em E2</b> (seleção determinística por SHA-256 do bloco).</td><td><code>engine.py:388</code></td></tr>
                 <tr><td>3</td><td><b>Timing do pre-anúncio de eventos globais quebrado</b> — publicado no mesmo instante do trigger, não 2 min antes; <code>started_at</code>/<code>ends_at</code> não batem com o início/fim reais; countdown zera antes do evento acabar.</td><td><code>global_events.py:223-295</code></td></tr>
-                <tr><td>4</td><td><b>Chat não é entregue em tempo real</b> — <code>chat_message</code> não está em <code>PUBLIC_EVENT_FIELDS</code>; backend nunca publica no canal <code>events</code>.</td><td><code>main.py:97-189, 2357-2381</code></td></tr>
-                <tr><td>5</td><td><b>Bônus co-op de amigos nunca aplicado</b> — calculado e exibido, mas nenhum cálculo de recompensa consome o valor.</td><td><code>main.py:4388-4390</code></td></tr>
-                <tr><td>6</td><td><b>Bônus de staking nunca creditado</b> — 5/15/30% armazenado e exibido, mas a expiração devolve apenas o <code>amount</code>.</td><td><code>main.py:4188-4195</code></td></tr>
+                <tr><td>4</td><td><b>Chat não é entregue em tempo real</b> — <code>chat_message</code> não está em <code>PUBLIC_EVENT_FIELDS</code>; backend nunca publica no canal <code>events</code>. <b>✅ CORRIGIDO em F1</b> (publicado no canal de eventos; validado ao vivo via WebSocket).</td><td><code>main.py:97-189, 2357-2381</code></td></tr>
+                <tr><td>5</td><td><b>Bônus co-op de amigos nunca aplicado</b> — calculado e exibido, mas nenhum cálculo de recompensa consome o valor. <b>✅ CORRIGIDO em F2</b> (bônus consumido no cálculo de recompensa/leaderboard).</td><td><code>main.py:4388-4390</code></td></tr>
+                <tr><td>6</td><td><b>Bônus de staking nunca creditado</b> — 5/15/30% armazenado e exibido, mas a expiração devolve apenas o <code>amount</code>. <b>✅ CORRIGIDO em F3</b> (<code>STAKE_SETTLE_SCRIPT</code> Lua atômico credita principal+bônus; validado ao vivo).</td><td><code>main.py:4188-4195</code></td></tr>
                 <tr><td>7</td><td><b>Skill tree com TTL 24h</b> — reseta após 1 dia sem abrir PERFIL (níveis perdidos).</td><td><code>main.py:1714, 1820</code></td></tr>
                 <tr><td>8</td><td><b>Recompensas season <code>card</code>/<code>bonus</code>/<code>season_badge</code> marcadas como reclamadas sem creditar</b>.</td><td><code>season_pass.py:274-280</code></td></tr>
-                <tr><td>9</td><td><b>Endpoint de nível sem <code>int(float)</code></b> — bug float só corrigido no season; se chegar float, grava "67.5" e a próxima leitura quebra com 500.</td><td><code>main.py:5137-5186</code></td></tr>
+                <tr><td>9</td><td><b>Endpoint de nível sem <code>int(float)</code></b> — bug float só corrigido no season; se chegar float, grava "67.5" e a próxima leitura quebra com 500. <b>✅ CORRIGIDO em D2</b> (<code>int(float(...))</code> nas 4 leituras).</td><td><code>main.py:5484, 5536</code></td></tr>
             </table></div>
 
             <h3>MÉDIO</h3>
@@ -951,9 +685,9 @@ currentRoundEarnings += floor(points)                # game.js:2867</code></pre>
                 <tr><td>13</td><td><b>Decoder usa wordlist PT; jogo principal usa BIP39 EN</b> — inconsistência de vocabulário.</td><td><code>main.py:4609+</code> vs <code>engine.py:44</code></td></tr>
                 <tr><td>14</td><td><b>Raridade de card: docstring alega base em eventos, código é aleatório puro</b>.</td><td><code>ingestor.py:696-700</code> vs <code>747-767</code></td></tr>
                 <tr><td>15</td><td><b>Bônus de coleção de cards calculado mas aplicação não verificada</b>.</td><td><code>main.py:3508-3513</code></td></tr>
-                <tr><td>16</td><td><b>Compras in-game (hint, hardware, lightning, RBF) e slashing são apenas frontend</b> — sem endpoint backend que debite; se <code>syncPlayerState</code> falhar, saldo diverge.</td><td><code>game.js:2110-2188, 3129-3130, 2939-2942</code></td></tr>
-                <tr><td>17</td><td><b>Inventário de power-ups com TTL 24h</b> — power-ups podem sumir se o jogador não operar por 24h.</td><td><code>main.py:2231, 2252, 2685</code></td></tr>
-                <tr><td>18</td><td><b>Sincronização de saldo "quem tiver mais, vence"</b> — sessões concorrentes podem duplicar créditos.</td><td><code>game.js:2056-2058</code></td></tr>
+                <tr><td>16</td><td><b>Compras in-game (hint, hardware, lightning, RBF) e slashing são apenas frontend</b> — sem endpoint backend que debite; se <code>syncPlayerState</code> falhar, saldo diverge. <b>✅ CORRIGIDO em G1</b> (<code>spendBalance()</code> com retry idempotente + guards anti-reentrada + <code>tx_id</code> com entropia).</td><td><code>game.js:2110-2188, 3129-3130, 2939-2942</code></td></tr>
+                <tr><td>17</td><td><b>Inventário de power-ups com TTL ajustado para 30 dias</b> — o estoque não expira após apenas 24h de inatividade.</td><td><code>main.py:2442</code></td></tr>
+                <tr><td>18</td><td><b>Sincronização de saldo "quem tiver mais, vence"</b> — sessões concorrentes podem duplicar créditos. <b>✅ CORRIGIDO em G2</b> (backend devolve <code>balance_initialized</code>; saldo local só migra se <code>balance</code> não existir; saldo 0 do backend é autoritativo).</td><td><code>game.js:2056-2058</code></td></tr>
                 <tr><td>19</td><td><b>Missão "sem erro" não rastreia erro</b> — usa <code>words_found</code> cumulativo.</td><td><code>main.py:1546</code></td></tr>
                 <tr><td>20</td><td><b>Sem lógica de fim de temporada</b> (rollover, carryover, prazo de claim).</td><td><code>season_pass.py</code></td></tr>
             </table></div>
@@ -966,13 +700,13 @@ currentRoundEarnings += floor(points)                # game.js:2867</code></pre>
                 <tr><td>23</td><td><b>Boss: <code>handleBossBlock</code> ignorado se <code>isPlaying</code></b> — boss só dispara entre rodadas.</td><td><code>game.js:3506-3508</code></td></tr>
                 <tr><td>24</td><td><b><code>injectWordInGrid</code> trunca palavras &gt; grid</b> (nunca dispara em grids ≥8×8).</td><td><code>game.js:2401</code></td></tr>
                 <tr><td>25</td><td><b><code>fillGridWithoutIncidentalWords</code> pode falhar</b> — após 50 tentativas + 4 retries, "Falha ao montar a grade".</td><td><code>game.js:2509-2526, 2371-2378</code></td></tr>
-                <tr><td>26</td><td><b>Logger de staking imprime "(+.1f% bonus)"</b> em vez do valor (format specifier fora do %).</td><td><code>main.py:4071</code></td></tr>
+                <tr><td>26</td><td><b>Logger de staking imprime "(+.1f% bonus)"</b> em vez do valor (format specifier fora do %). <b>✅ CORRIGIDO em H1</b> (<code>(+%.1f%% bonus)</code> correto; teste estático impede regressão).</td><td><code>main.py:4071</code></td></tr>
                 <tr><td>27</td><td><b><code>SEASON_DURATION_DAYS=28</code> e <code>PREMIUM_UNLOCK_DAYS=7</code> definidos e não usados</b>.</td><td><code>season_pass.py:10, 14</code></td></tr>
-                <tr><td>28</td><td><b><code>xp_progress=0</code> ao level-up</b> (UI) — em vez do resto real.</td><td><code>game.js:7346</code></td></tr>
-                <tr><td>29</td><td><b>Venda no mercado: frontend valida só <code>price &gt; 0</code></b>; backend impõe mínimo de 100 sats (erro 400).</td><td><code>game.js:6376</code>; <code>main.py:2463</code></td></tr>
+                <tr><td>28</td><td><b><code>xp_progress=0</code> ao level-up</b> (UI) — em vez do resto real. <b>✅ CORRIGIDO em H2</b> (backend devolve <code>xp_progress</code> = XP remanescente / novo nível; frontend usa o valor do backend).</td><td><code>game.js:7346</code></td></tr>
+                <tr><td>29</td><td><b>Venda no mercado: frontend valida só <code>price &gt; 0</code></b>; backend impõe mínimo de 100 sats (erro 400). <b>✅ CORRIGIDO</b> — o frontend agora valida <code>price &lt; 100</code> antes do envio (evita 422/400 desnecessário).</td><td><code>game.js:6899-6904</code>; <code>main.py:2740</code></td></tr>
                 <tr><td>30</td><td><b>Onboarding sem tutorial</b> — comentário "modal de tutorial" é enganoso; é apenas o modal de autenticação.</td><td><code>game.js:1364-1404</code></td></tr>
                 <tr><td>31</td><td><b>Mainnet opcional desativada por padrão</b> — sem heartbeat do profile mainnet, a rede aparece <code>disabled</code>.</td><td><code>main.py:624-625</code></td></tr>
-                <tr><td>32</td><td><b>PvP: <code>pvp_score_update</code> e <code>pvp_timer</code> têm handlers vazios</b> — jogador não vê placar/tempo ao vivo.</td><td><code>game.js:1757-1776</code></td></tr>
+                <tr><td>32</td><td><b>PvP: <code>pvp_score_update</code> e <code>pvp_timer</code> têm handlers vazios</b> — jogador não vê placar/tempo ao vivo. <b>✅ CORRIGIDO em H3</b> (painel de telemetria PvP em COMPETIR; handlers funcionais; eventos PvP usam <code>event_envelope</code> + canal público; validado E2E Redis → relay → WebSocket).</td><td><code>game.js:1757-1776</code></td></tr>
             </table></div>
         </section>
 
@@ -1007,8 +741,8 @@ currentRoundEarnings += floor(points)                # game.js:2867</code></pre>
                 <tr><td><code>POST /api/v1/networks/{realm}/sprint/submit</code></td><td>Envia resultado do sprint (valida time ≤ 35s).</td></tr>
                 <tr><td><code>POST /api/v1/networks/{realm}/decoder/start</code></td><td>Inicia decoder (TXID truncado + dica).</td></tr>
                 <tr><td><code>POST /api/v1/networks/{realm}/decoder/submit</code></td><td>Envia resposta do decoder (+5.000 sats + power-up).</td></tr>
-                <tr><td><code>POST /api/v1/networks/{realm}/staking/start</code></td><td>Inicia stake (1h/6h/24h).</td></tr>
-                <tr><td><code>POST /api/v1/networks/{realm}/staking/cancel</code></td><td>Cancela stake (penalty 10%).</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/staking/stake</code></td><td>Inicia stake (1h/6h/24h).</td></tr>
+                <tr><td><code>POST /api/v1/networks/{realm}/staking/unstake</code></td><td>Cancela stake (penalty 10%).</td></tr>
                 <tr><td><code>GET /api/v1/networks/{realm}/staking/status</code></td><td>Estado do stake atual.</td></tr>
                 <tr><td><code>POST /api/v1/networks/{realm}/skill/upgrade</code></td><td>Upgrade de skill tree (1 ponto/nó).</td></tr>
                 <tr><td><code>GET /api/v1/networks/{realm}/skill/tree</code></td><td>Estado da skill tree.</td></tr>
@@ -1020,86 +754,154 @@ currentRoundEarnings += floor(points)                # game.js:2867</code></pre>
             </table></div>
         </section>
 
+
+        <!-- ============ 10 · INSTALAÇÃO E EXECUÇÃO ============ -->
+        <section class="section-block" id="instalacao">
+            <h2 class="section-title"><span class="num">10.</span><span class="hl">Instalação e Execução</span></h2>
+            <h3>Pré-requisitos</h3>
+            <ul>
+                <li><b>Docker Engine</b> ou <b>Docker Desktop</b> com Compose 2.33.1+</li>
+                <li><b>4 GB de RAM</b> livres (Regtest + Signet)</li>
+                <li><b>Porta 8010</b> disponível (jogo + documentação)</li>
+            </ul>
+            <h3>Instalação rápida</h3>
+            <pre><code># 1. Clone o repositório
+git clone https://github.com/seu-usuario/mempool.miner.git
+cd mempool.miner
+
+# 2. Copie o arquivo de configuração
+cp .env.example .env
+
+# 3. Edite .env e substitua as senhas RPC de exemplo
+#    (IMPORTANTE: use senhas fortes e aleatórias)
+
+# 4. Valide a configuração
+docker compose config --quiet
+
+# 5. Inicie o sistema
+docker compose up -d --build
+
+# 6. Verifique os serviços
+docker compose ps</code></pre>
+            <h3>Acessando o jogo</h3>
+            <ul>
+                <li><b>Jogo:</b> http://localhost:8010</li>
+                <li><b>Documentação:</b> http://localhost:8010/docs/</li>
+                <li><b>API pública:</b> http://localhost:8010/docs/api/</li>
+            </ul>
+            <h3>Instalando como PWA</h3>
+            <p>No navegador, clique no botão <b>"Instalar app"</b> para instalar o jogo como Progressive Web App. O service worker mantém apenas o shell estático em cache; API, WebSocket, health e leaderboard nunca são armazenados offline.</p>
+        </section>
+
+        <!-- ============ 11 · CONFIGURAÇÃO AVANÇADA ============ -->
+        <section class="section-block" id="configuracao">
+            <h2 class="section-title"><span class="num">11.</span><span class="hl">Configuração Avançada</span></h2>
+            <h3>Variáveis de ambiente</h3>
+            <div class="table-wrap"><table>
+                <tr><th>Variável</th><th>Descrição</th><th>Padrão</th></tr>
+                <tr><td><code>DEFAULT_REALM_ID</code></td><td>Realm padrão para aliases legados</td><td><code>regtest</code></td></tr>
+                <tr><td><code>REDIS_PASSWORD</code></td><td>Senha do Redis (obrigatório)</td><td>—</td></tr>
+                <tr><td><code>RPC_USER</code></td><td>Usuário RPC do Bitcoin Core</td><td>—</td></tr>
+                <tr><td><code>RPC_PASSWORD</code></td><td>Senha RPC do Bitcoin Core</td><td>—</td></tr>
+                <tr><td><code>RPC_HOST</code></td><td>Host RPC do Bitcoin Core</td><td><code>bitcoin-{realm}</code></td></tr>
+                <tr><td><code>RPC_PORT</code></td><td>Porta RPC do Bitcoin Core</td><td><code>18443</code> (regtest)</td></tr>
+                <tr><td><code>ZMQ_HOST</code></td><td>Host ZMQ do Bitcoin Core</td><td><code>bitcoin-{realm}</code></td></tr>
+                <tr><td><code>ZMQ_PORT</code></td><td>Porta ZMQ do Bitcoin Core</td><td><code>28332</code></td></tr>
+                <tr><td><code>HIGH_FEE_RATE_SAT_VB</code></td><td>Limite para taxa alta</td><td><code>20</code></td></tr>
+                <tr><td><code>TX_QUEUE_MAX_SIZE</code></td><td>Tamanho máximo da fila</td><td><code>5000</code></td></tr>
+                <tr><td><code>TX_PROCESS_INTERVAL_SECONDS</code></td><td>Intervalo entre processamentos</td><td><code>1.0</code></td></tr>
+            </table></div>
+            <h3>Perfis Docker</h3>
+            <pre><code># Regtest + Signet (padrão)
+docker compose up -d --build
+
+# Com Mainnet (opcional)
+docker compose --profile mainnet up -d --build
+
+# Com documentação (opcional)
+docker compose --profile docs up -d --build docs</code></pre>
+            <h3>Pruning Mainnet</h3>
+            <p>Para reduzir o espaço em disco na Mainnet:</p>
+            <pre><code>MAINNET_PRUNE_MIB=10240  # 10 GiB de blocos</code></pre>
+        </section>
+
+        <!-- ============ 12 · COMANDOS OPERACIONAIS ============ -->
+        <section class="section-block" id="comandos">
+            <h2 class="section-title"><span class="num">12.</span><span class="hl">Comandos Operacionais</span></h2>
+            <h3>Verificar status</h3>
+            <pre><code>docker compose ps</code></pre>
+            <h3>Ver logs</h3>
+            <pre><code># Logs do ingestor Regtest
+docker compose logs -f ingestor-regtest
+
+# Logs da API
+docker compose logs -f api
+
+# Logs do Redis
+docker compose logs -f redis</code></pre>
+            <h3>Reiniciar serviços</h3>
+            <pre><code># Reiniciar tudo
+docker compose restart
+
+# Reiniciar apenas a API
+docker compose restart api
+
+# Reiniciar apenas o ingestor Regtest
+docker compose restart ingestor-regtest</code></pre>
+            <h3>Parar e remover</h3>
+            <pre><code># Parar todos os containers
+docker compose down
+
+# Parar e remover volumes (cuidado: perde dados)
+docker compose down -v</code></pre>
+            <h3>Healthcheck do ingestor</h3>
+            <pre><code># Executar healthcheck manualmente
+docker compose exec ingestor-regtest python -m app.ingestor_healthcheck</code></pre>
+        </section>
+
+        <!-- ============ 13 · FAQ ============ -->
+        <section class="section-block" id="faq">
+            <h2 class="section-title"><span class="num">13.</span><span class="hl">Perguntas Frequentes</span></h2>
+            <h3>O jogo minera Bitcoin real?</h3>
+            <p>Não. O Mempool Miner é um jogo educacional que simula mecânicas de mineração. Nenhuma transação real é enviada, nenhum hashrate é calculado e nenhum Bitcoin é minerado.</p>
+            <h3>Por que não há transações aparecendo?</h3>
+            <p>Verifique se:</p>
+            <ol>
+                <li>O Bitcoin Core está sincronizado (<code>playable: true</code>)</li>
+                <li>Transações estão sendo enviadas ao mempool (em Regtest, use <code>generatetoaddress</code> ou envie transações)</li>
+                <li>O ingestor está rodando (<code>docker compose ps</code>)</li>
+                <li>O WebSocket está conectado (console do navegador)</li>
+            </ol>
+            <h3>Como gerar transações em Regtest?</h3>
+            <pre><code># Obter endereço
+docker compose exec bitcoin-regtest bitcoin-cli getnewaddress
+
+# Enviar transação
+docker compose exec bitcoin-regtest bitcoin-cli sendtoaddress &lt;endereco&gt; 0.01
+
+# Gerar bloco (para minerar transações pendentes)
+docker compose exec bitcoin-regtest bitcoin-cli generatetoaddress 1 &lt;endereco&gt;</code></pre>
+            <h3>O leaderboard é persistente?</h3>
+            <p>Sim, os recordes são armazenados no Redis. Para resetar:</p>
+            <pre><code>docker compose exec redis redis-cli FLUSHALL</code></pre>
+            <h3>Como instalar como PWA?</h3>
+            <p>No navegador (Chrome, Edge, Firefox), clique no ícone de instalação na barra de endereço ou no botão <b>"Instalar app"</b> dentro do jogo.</p>
+            <h3>O jogo funciona offline?</h3>
+            <p>O shell do jogo (HTML, CSS, JS) é cacheado pelo service worker, mas as transações e eventos requerem conexão com a API. Offline, o jogo mostra uma mensagem indicando que a conexão é necessária.</p>
+            <h3>Posso usar minha própria carteira?</h3>
+            <p>Não. O jogo não se conecta a carteiras externas. Sats, hashrate e recompensas são simulados internamente.</p>
+            <h3>Como contribuir?</h3>
+            <p>Leia <code>CONTRIBUTING.md</code> para diretrizes de contribuição. O histórico de mudanças está em <code>CHANGELOG.md</code>.</p>
+        </section>
+
         <footer>
             <div class="foot-brand">MEMPOOL MINER // WIKI</div>
-            <p>Documentação gerada por auditoria completa do código (frontend + backend). Valores extraídos de <code>game.js</code>, <code>engine.py</code>, <code>ingestor.py</code>, <code>main.py</code>, <code>season_pass.py</code>, <code>global_events.py</code>, <code>config.py</code>, <code>storage.py</code>. Estado: pós-Fases 1–8 + auditoria final. Data: 2026-08-23.</p>
+            <p>Documentação gerada por auditoria completa do código (frontend + backend). Valores extraídos de <code>game.js</code>, <code>engine.py</code>, <code>ingestor.py</code>, <code>main.py</code>, <code>season_pass.py</code>, <code>global_events.py</code>, <code>config.py</code>, <code>storage.py</code>. Estado: pós-Fases 1–8 + auditoria final + fusão do guia operacional. Data: 2026-08-24.</p>
         </footer>
     </main>
 
-    <script>
-        // ===== MENU LATERAL =====
-        const btnMenu = document.getElementById('btn-menu');
-        const sideMenu = document.getElementById('side-menu');
-        const menuClose = document.getElementById('menu-close');
 
-        function toggleMenu(open) {
-            const isOpen = open !== undefined ? open : !sideMenu.classList.contains('open');
-            sideMenu.classList.toggle('open', isOpen);
-            document.body.classList.toggle('menu-open', isOpen);
-            btnMenu.classList.toggle('active', isOpen);
-            btnMenu.setAttribute('aria-expanded', String(isOpen));
-        }
-        btnMenu.addEventListener('click', () => toggleMenu());
-        menuClose.addEventListener('click', () => toggleMenu(false));
-        // Fecha o menu ao clicar em um link (mobile)
-        sideMenu.querySelectorAll('a').forEach(a => a.addEventListener('click', () => {
-            if (window.innerWidth <= 900) toggleMenu(false);
-        }));
-        // Abre por padrão em telas grandes
-        if (window.innerWidth > 900) toggleMenu(true);
-
-        // ===== SCROLL SPY (destaca a seção ativa no menu) =====
-        const menuLinks = Array.from(sideMenu.querySelectorAll('a[href^="#"]'));
-        const sections = menuLinks.map(a => document.querySelector(a.getAttribute('href'))).filter(Boolean);
-        function updateScrollSpy() {
-            const pos = window.scrollY + 100;
-            let active = sections[0];
-            for (const s of sections) {
-                if (s.offsetTop <= pos) active = s;
-            }
-            menuLinks.forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + active.id));
-        }
-        window.addEventListener('scroll', updateScrollSpy, { passive: true });
-        updateScrollSpy();
-
-        // ===== BUSCA =====
-        const searchInput = document.getElementById('wiki-search');
-        const noResults = document.getElementById('no-results');
-        const allBlocks = Array.from(document.querySelectorAll('.section-block'));
-        let searchTimer = null;
-
-        function doSearch() {
-            const q = searchInput.value.trim().toLowerCase();
-            if (!q) {
-                allBlocks.forEach(b => b.style.display = '');
-                noResults.classList.remove('show');
-                return;
-            }
-            let anyVisible = false;
-            allBlocks.forEach(b => {
-                const text = b.textContent.toLowerCase();
-                const match = text.includes(q);
-                b.style.display = match ? '' : 'none';
-                if (match) anyVisible = true;
-            });
-            noResults.classList.toggle('show', !anyVisible);
-        }
-        searchInput.addEventListener('input', () => {
-            clearTimeout(searchTimer);
-            searchTimer = setTimeout(doSearch, 150);
-        });
-        // Atalho: "/" foca a busca
-        document.addEventListener('keydown', (e) => {
-            if (e.key === '/' && document.activeElement !== searchInput) {
-                e.preventDefault();
-                searchInput.focus();
-            }
-            if (e.key === 'Escape' && document.activeElement === searchInput) {
-                searchInput.value = '';
-                doSearch();
-                searchInput.blur();
-            }
-        });
-    </script>
+    <button class="back-to-top" id="back-to-top" aria-label="Voltar ao início">↑</button>
+    <script src="/docs/wiki.js"></script>
 </body>
 </html>

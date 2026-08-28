@@ -19,7 +19,7 @@ Mempool Miner. Para o inventário completo, severidades e evidências, consulte 
 - `.env` ignorado pelo Git e exemplo sem credencial real;
 - RPC, ZMQ, Redis e FastAPI sem publicação direta no host;
 - Nginx do jogo como única origem de runtime em `127.0.0.1:8010`;
-- portal sanitizado em imagem/profile próprios, com bind opcional em `127.0.0.1:8020`;
+- documentação sanitizada em `/docs/` (mesma origem, allowlist de assets);
 - Swagger/OpenAPI bruto desabilitados e ausentes dos proxies públicos;
 - catálogo e eventos públicos sem identificador físico, topologia ou métricas operacionais;
 - CSP, políticas de browser e bloqueio de arquivos ocultos no Nginx;

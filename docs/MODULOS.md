@@ -72,7 +72,7 @@ API ou WebSocket.
 | ws_sender | coroutine | fila do relay → WebSocket |
 | ws_receiver | coroutine | detecta desconexão do cliente |
 | serve_websocket | função | handshake e canal namespaced |
-| ACHIEVEMENTS | dict | 28 conquistas em 5 categorias com bônus |
+| ACHIEVEMENTS | dict | 30 conquistas em 5 categorias com bônus |
 | _check_and_unlock_achievements | função | desbloqueia conquistas ao atualizar stats |
 | _calculate_achievement_bonuses | função | soma bônus ativos do jogador |
 | daily_mission_defs | lista | 6 missões diárias (3 rotativas por dia) |
@@ -82,7 +82,7 @@ API ou WebSocket.
 | STAKE_BONUS_TABLE / STAKE_PENALTY_PERCENT | constantes | bônus por duração (1/6/24 h) e penalidade 10% |
 | ENERGY_MAX / ENERGY_REFILL_INTERVAL / ENERGY_BUY_* | constantes | energia (máx 10, recarga 30 min, compra 3 por 2.000) |
 | SPRINT_TIME_LIMIT / SPRINT_WORD_COUNT / SPRINT_REWARD_MULTIPLIER | constantes | sprint (30 s, 4 palavras, 0,5×) |
-| RANK_DEFINITIONS / get_rank_for_level | função | 10 ranks temáticos por faixa de nível |
+| RANK_DEFINITIONS / get_rank_for_level | função | 11 ranks temáticos por faixa de nível |
 | xp_to_next_level / get_level_bonus | funções | curva de XP (nível×100) e bônus passivos |
 | PVP_DURATION | constante | duração do duelo PvP (60 s) |
 
@@ -134,10 +134,11 @@ friends, energy, decoder, season, sprint e global-events.
 
 | Função | Responsabilidade |
 |---|---|
-| updateStoreUI | habilita e rotula compras |
+| updateStoreUI / renderPowerupShop | habilita e rotula compras |
 | buyHint | destaca uma palavra pendente |
 | buyHardware | compra nível e adiciona tempo |
 | buyLightning | ativa o modo L2 simulado em transição atômica entre rodadas |
+| buyPowerup / activatePowerup | compra e ativa power-ups com inventário/limites |
 | prepareNextBlock | limpa estado e retorna à coleta |
 | buildPlayableBlock | escolhe dificuldade, monta grade e inicia timer |
 | injectWordInGrid | posiciona palavra sem sobreposição |

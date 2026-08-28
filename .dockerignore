@@ -1,13 +1,37 @@
-# O contexto raiz é exclusivo da imagem pública de documentação.
+# Contexto raiz: imagem do jogo (frontend) + documentação integrada em /docs/.
 # Tudo começa bloqueado; apenas a allowlist abaixo é enviada ao daemon.
 **
 
+# --- Frontend (shell PWA do jogo) ---
+!frontend/
+!frontend/Dockerfile
+!frontend/nginx.conf
+!frontend/index.html
+!frontend/pixel.css
+!frontend/game.js
+!frontend/manifest.webmanifest
+!frontend/service-worker.js
+!frontend/icons/
+!frontend/icons/*.svg
+!frontend/fonts/
+!frontend/fonts/*.woff2
+
+# --- Landing page e prints da apresentação ---
+!land_page.html
+!assets/
+!assets/guide/
+!assets/guide/*.jpg
+
+# --- Documentação (servida em /docs/ pelo mesmo nginx) ---
 !docs/
 !docs/Dockerfile
 !docs/nginx.conf
 !docs/index.html
 !docs/api.html
-!docs/site.css
+!docs/guia-apresentacao.html
+!docs/wiki.css
+!docs/wiki.js
 !docs/assets/
 !docs/assets/*.svg
-!guia-apresentacao.html
+!docs/assets/fonts/
+!docs/assets/fonts/*.woff2

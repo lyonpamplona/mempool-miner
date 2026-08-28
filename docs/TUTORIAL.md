@@ -100,13 +100,11 @@ Para simular um bloco real vencendo a rodada, gere um bloco enquanto joga:
 - ranking Regtest: http://localhost:8010/api/v1/networks/regtest/leaderboard
 - healthcheck: http://localhost:8010/api/v1/health/live
 
-Para abrir a documentação pública sem misturá-la à imagem do jogo:
+A documentação pública é servida pelo mesmo nginx do jogo, em `/docs/`:
 
-    docker compose --profile docs up -d --build docs
-
-- portal: http://localhost:8020/
-- API visual sanitizada: http://localhost:8020/api/
-- apresentação: http://localhost:8020/apresentacao/
+- portal: http://localhost:8010/docs/
+- API visual sanitizada: http://localhost:8010/docs/api/
+- apresentação: http://localhost:8010/docs/apresentacao/
 
 Swagger e OpenAPI bruto não são publicados pelos proxies e ficam desabilitados
 por padrão no backend.

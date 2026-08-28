@@ -147,8 +147,7 @@ Sats, hashrate, carteira, recompensas e modo L2 são **mecânicas simuladas** pa
 
 - **Docker Engine** ou **Docker Desktop** com Compose 2.33.1+
 - **4 GB de RAM** livres (Regtest + Signet)
-- **Porta 8010** disponível (jogo)
-- **Porta 8020** disponível (documentação, opcional)
+- **Porta 8010** disponível (jogo + documentação)
 
 ### Instalação rápida
 
@@ -176,8 +175,8 @@ docker compose ps
 ### Acessando o jogo
 
 - **Jogo:** http://localhost:8010
-- **Documentação:** http://localhost:8020/ (opcional)
-- **API pública:** http://localhost:8020/api/ (opcional)
+- **Documentação:** http://localhost:8010/docs/
+- **API pública:** http://localhost:8010/docs/api/
 
 ### Instalando como PWA
 
@@ -326,7 +325,7 @@ O `GlobalEventScheduler` dispara eventos aleatórios com aviso de 120 s:
 
 ### Conquistas, missões e progressão
 
-- **28 conquistas** em 5 categorias (volume, raridade, velocidade, exploração,
+- **30 conquistas** em 5 categorias (volume, raridade, velocidade, exploração,
   social) com bônus permanentes.
 - **Missões:** 3 diárias rotativas + 1 semanal, com recompensa em sats.
 - **Nível/XP/rank:** XP por palavra (`comprimento×10 + combo×5`), curva
@@ -341,6 +340,9 @@ O `GlobalEventScheduler` dispara eventos aleatórios com aviso de 120 s:
 - **Skill tree:** ramos mining/search/lightning.
 - **Social:** chat por realm, amigos (bônus de cooperação) e mercado P2P de
   power-ups.
+- **Loja de power-ups:** compra direta com preço server-side, limite de 3 por
+  item/dia e limite global de 10 por jogador/realm/dia UTC; retries usam
+  `tx_id` idempotente.
 
 ---
 
@@ -593,17 +595,17 @@ O shell do jogo (HTML, CSS, JS) é cacheado pelo service worker, mas as transaç
 Não. O jogo não se conecta a carteiras externas. Sats, hashrate e recompensas são simulados internamente.
 
 ### Como contribuir?
-Leia [CONTRIBUTING.md](CONTRIBUTING.md) para diretrizes de contribuição. O histórico de mudanças está em [CHANGELOG.md](CHANGELOG.md).
+Leia [CONTRIBUTING.md](../CONTRIBUTING.md) para diretrizes de contribuição. O histórico de mudanças está em [CHANGELOG.md](../CHANGELOG.md).
 
 ---
 
 ## Referências
 
-- [Documentação técnica](docs/README.md)
-- [Arquitetura](docs/ARQUITETURA.md)
-- [API](docs/API.md)
-- [Configuração](docs/CONFIGURACAO.md)
-- [Tutorial](docs/TUTORIAL.md)
-- [Comandos](docs/COMANDOS.md)
-- [Segurança](docs/SEGURANCA.md)
-- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Documentação técnica](README.md)
+- [Arquitetura](ARQUITETURA.md)
+- [API](API.md)
+- [Configuração](CONFIGURACAO.md)
+- [Tutorial](TUTORIAL.md)
+- [Comandos](COMANDOS.md)
+- [Segurança](SEGURANCA.md)
+- [Troubleshooting](TROUBLESHOOTING.md)

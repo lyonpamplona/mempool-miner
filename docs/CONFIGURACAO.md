@@ -64,15 +64,14 @@ rotas, healthchecks ou rankings.
 
 | Porta | Publicada | Uso |
 |---:|---|---|
-| 8010 | 127.0.0.1 | Nginx do jogo/PWA e proxy REST/WebSocket |
-| 8020 | 127.0.0.1 | portal sanitizado; somente com `--profile docs` |
+| 8010 | 127.0.0.1 | Nginx do jogo/PWA, proxy REST/WebSocket e documentação em `/docs/` |
 | 8000 | somente rede Docker | FastAPI |
 | 6379 | somente rede Docker | Redis |
 | 28332 | somente rede Docker | ZMQ |
 | RPC da rede | somente rede Docker | Bitcoin JSON-RPC |
 
 Para acesso remoto, coloque um proxy TLS confiável à frente e altere o bind da
-porta 8010 conscientemente. O portal 8020 é opcional e não encaminha a API.
+porta 8010 conscientemente. A documentação em `/docs/` não encaminha a API.
 Não publique Redis, RPC ou ZMQ.
 
 ## Redes Docker
@@ -82,8 +81,8 @@ Não publique Redis, RPC ou ZMQ.
 - btc_regtest, btc_signet e btc_mainnet: RPC/ZMQ exclusivos por nó;
 - signet_p2p e mainnet_p2p: saída dos nós públicos, sem portas no host.
 
-O serviço `docs` participa apenas da rede de borda, usa imagem e document root
-próprios e não é dependência do jogo.
+A documentação é servida pelo próprio nginx do jogo (mesma imagem, `/docs/`)
+e não exige serviço, perfil ou rede separada.
 
 Signet/Mainnet usam `gw_priority: 1` na rede P2P. Isso requer Docker Compose
 2.33.1 ou superior; versões anteriores devem ser atualizadas antes do `up`.
@@ -98,8 +97,8 @@ Consulte a referência oficial de
 | Signet | padrão | `bitcoin_signet_data` | 2048 MiB |
 | Mainnet | `--profile mainnet` | `bitcoin_mainnet_data` | 10240 MiB |
 
-O profile `docs` não cria volume nem altera qualquer realm; ele publica somente
-a allowlist estática do portal em `127.0.0.1:8020`.
+O profile `mainnet` não cria volume nem altera qualquer realm; ele publica
+somente o nó Mainnet podado e seu ingestor.
 
 Nunca monte o mesmo datadir em duas chains. `docker compose down --volumes`
 remove blockchain e ranking e só deve ser usado com intenção explícita.

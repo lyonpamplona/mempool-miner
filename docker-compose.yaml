@@ -303,8 +303,8 @@ services:
 
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend/Dockerfile
     restart: unless-stopped
     depends_on:
       backend:
@@ -332,34 +332,6 @@ services:
           cpus: "0.2"
           memory: 128M
 
-  docs:
-    profiles: ["docs"]
-    build:
-      context: .
-      dockerfile: docs/Dockerfile
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:8020:80"
-    networks:
-      - docs_publication
-    healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1/ > /dev/null 2>&1 || exit 1"]
-      interval: 10s
-      timeout: 3s
-      retries: 10
-    security_opt:
-      - no-new-privileges:true
-    read_only: true
-    tmpfs:
-      - /var/cache/nginx
-      - /var/run
-      - /tmp
-    deploy:
-      resources:
-        limits:
-          cpus: "0.1"
-          memory: 64M
-
 volumes:
   # A chave lógica legada preserva o volume físico mempool-miner_bitcoin_data.
   bitcoin_data:
@@ -379,4 +351,3 @@ networks:
     internal: true
   signet_p2p:
   mainnet_p2p:
-  docs_publication:

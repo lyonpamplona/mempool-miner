@@ -34,6 +34,7 @@
             --border-glow: rgba(0, 240, 255, 0.35);
             --glass-border: var(--border-dim);
             --page-max: 2560px;
+            --sidebar-width: clamp(320px, 22vw, 520px);
             
             --text-main: #f0f6fc;
             --text-dim: #8b949e;
@@ -170,7 +171,7 @@
 
         /* --- TOP HEADER (MECHA HUD STATS) --- */
         .hud-header {
-            height: 54px;
+            height: clamp(48px, 2.8vw, 64px);
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -203,7 +204,7 @@
         }
         .metric-unit { display: flex; flex-direction: column; gap: 1px; }
         .metric-lbl { font-family: var(--f-pixel); font-size: 6px; color: var(--text-dim); text-transform: uppercase; }
-        .metric-val { font-family: var(--f-data); font-size: 22px; font-weight: 700; line-height: 1; color: var(--text-main); }
+        .metric-val { font-family: var(--f-data); font-size: clamp(17px, 0.92vw, 22px); font-weight: 700; line-height: 1; color: var(--text-main); }
         .metric-val.amber { color: var(--neon-amber); text-shadow: 0 0 8px rgba(247,147,26,0.4); }
         .metric-val.green { color: var(--neon-green); }
         .metric-val.cyan { color: var(--neon-cyan); }
@@ -212,7 +213,7 @@
         .hud-body {
             flex: 1;
             display: grid;
-            grid-template-columns: minmax(0, 1fr) clamp(320px, 28vw, 520px);
+            grid-template-columns: minmax(0, 1fr) var(--sidebar-width);
             position: relative;
             overflow: hidden;
             background: rgba(15, 18, 24, 0.85);
@@ -220,14 +221,16 @@
 
         /* --- STAGE CENTRAL ESQUERDO (A MATRIZ E A CORRIDA) --- */
         .stage-center {
-            display: flex;
-            flex-direction: column;
+            display: grid;
+            grid-template-rows: auto minmax(0, 1fr) auto auto;
             align-items: center;
-            justify-content: center;
+            justify-items: center;
+            row-gap: clamp(4px, 0.6vh, 10px);
             padding: 12px;
             position: relative;
             overflow: hidden;
             border-right: 2px solid var(--border-dim);
+            container-type: size;
         }
 
         /* Marcadores Visuais da Imagem (+) */
@@ -244,9 +247,10 @@
 
         /* Barra de Corrida com Visual Industrial */
         .race-box {
-            width: 100%;
-            max-width: min(58dvh, 1040px);
-            margin-bottom: 8px;
+            grid-row: 1;
+            width: min(100%, calc(100cqh - 112px), 1040px);
+            max-width: 100%;
+            margin: 0;
             display: flex;
             flex-direction: column;
             gap: 4px;
@@ -277,8 +281,11 @@
 
         /* Matriz de Caça-Palavras com Moldura Mecha */
         .grid-hull {
+            grid-row: 2;
             position: relative;
-            width: min(58dvh, calc(100vw - clamp(320px, 28vw, 520px) - 64px), 1040px);
+            width: min(100%, calc(100cqh - 112px), 1040px);
+            max-width: 100%;
+            max-height: 100%;
             aspect-ratio: 1 / 1;
             padding: 6px;
             background: var(--hull-dark);
@@ -390,7 +397,7 @@
 
         .panel-code-tag {
             font-family: var(--f-data);
-            font-size: 24px;
+            font-size: clamp(19px, 1vw, 24px);
             font-weight: 700;
             color: var(--text-dim);
             letter-spacing: 2px;
@@ -411,7 +418,7 @@
         }
 
         .mecha-btn {
-            height: 44px;
+            height: clamp(40px, 2.2vw, 52px);
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -553,6 +560,26 @@
             border: 1px solid var(--border-dim);
         }
         .shop-row { display: flex; justify-content: space-between; align-items: center; }
+
+        .powerup-shop-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .powerup-shop-card { min-width: 0; }
+        .powerup-shop-name {
+            color: var(--neon-gold);
+            font-family: var(--f-pixel);
+            font-size: 7px;
+            letter-spacing: 0.04em;
+        }
+        .powerup-shop-meta { color: var(--neon-cyan); }
+        .powerup-buy-btn { flex: 0 0 auto; }
+
+        @media (max-width: 559px) {
+            .powerup-shop-grid { grid-template-columns: minmax(0, 1fr); }
+        }
         
         .btn-action-small {
             min-height: 28px;
@@ -574,7 +601,7 @@
 
         /* --- FOOTER INFERIOR (ESTILO 03/06 STATUS) --- */
         .hud-footer {
-            height: 38px;
+            height: clamp(34px, 2vw, 48px);
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -598,6 +625,12 @@
             display: flex;
         }
         .modal-wrap.hidden { display: none; }
+
+        /* A atualização precisa ser acionável mesmo quando o auth-modal está
+           aberto na primeira visita após um deploy. */
+        #pwa-update-banner {
+            z-index: 2200;
+        }
         
         .modal-mecha-box {
             width: 100%; max-width: 440px;
@@ -1270,16 +1303,17 @@
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px); }
 
-.global-event-banner { position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 1400;
+.global-event-banner { position: relative;
+    width: 100%;
+    flex: 0 0 auto;
+    z-index: 6;
     padding: 0;
     transition: transform 0.3s ease, opacity 0.3s ease; }
 
 .global-event-banner-inner { padding: 8px 12px;
-        gap: 8px; }
+        gap: 8px;
+        display: flex;
+        align-items: center; }
 
 .global-event-countdown { font-size: 16px;
         padding: 2px 8px; }
@@ -1333,6 +1367,10 @@
     font-weight: 600;
     color: var(--text-main);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+    /* B7: texto centralizado não excede a barra em 320px. */
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap; }
 
 .level-bar-track { position: relative;
@@ -1581,6 +1619,111 @@
 .pvp-match-info { margin-top: 16px; }
 
 .pvp-panel { padding: 16px; }
+
+.pvp-live-panel {
+    margin-top: 14px;
+    padding: 10px;
+    border: 1px solid var(--border-hi);
+    background:
+        linear-gradient(90deg,
+            color-mix(in srgb, var(--neon-cyan) 6%, transparent),
+            transparent 35%,
+            color-mix(in srgb, var(--neon-magenta) 5%, transparent)),
+        var(--hull-dark);
+    box-shadow: inset 0 0 0 1px var(--border-dim), 0 0 14px color-mix(in srgb, var(--neon-cyan) 8%, transparent);
+}
+
+.pvp-live-panel[hidden] { display: none; }
+
+.pvp-live-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+    color: var(--text-dim);
+    font-family: var(--f-pixel);
+    font-size: 7px;
+    letter-spacing: 0.06em;
+}
+
+.pvp-live-status {
+    padding: 3px 6px;
+    border: 1px solid var(--neon-green);
+    color: var(--neon-green);
+    background: rgba(0, 255, 136, 0.08);
+}
+
+.pvp-live-scoreboard {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    grid-template-areas: "challenger clock challenged";
+    align-items: stretch;
+    gap: 8px;
+}
+
+.pvp-live-scoreboard .pvp-challenger-card {
+    grid-area: challenger;
+    border-color: var(--neon-cyan);
+}
+
+.pvp-live-scoreboard .pvp-challenged-card {
+    grid-area: challenged;
+    border-color: var(--neon-magenta);
+}
+
+.pvp-player-role {
+    color: var(--text-dim);
+    font-family: var(--f-pixel);
+    font-size: 6px;
+    letter-spacing: 0.04em;
+}
+
+.pvp-player-card strong {
+    max-width: 100%;
+    margin-top: 6px;
+    overflow: hidden;
+    color: var(--text-main);
+    font-family: var(--f-tech);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pvp-live-score {
+    margin-top: 5px;
+    color: var(--neon-green);
+    font-family: var(--f-data);
+    /* M3: clamp para scores grandes (ex.: 12.345.678) não transbordarem o
+       card no scoreboard compacto de 320px. */
+    font-size: clamp(16px, 5vw, 24px);
+    line-height: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pvp-live-clock {
+    grid-area: clock;
+    display: flex;
+    min-width: 74px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 8px;
+    border-block: 1px solid var(--border-dim);
+    color: var(--text-dim);
+    font-family: var(--f-pixel);
+    font-size: 6px;
+}
+
+.pvp-live-clock strong {
+    margin-top: 7px;
+    color: var(--neon-amber);
+    font-family: var(--f-data);
+    font-size: 25px;
+    line-height: 1;
+}
 
 .pvp-player-card { display: flex;
     flex-direction: column;
@@ -2190,6 +2333,27 @@
     }
 
     .grid-hull { width: min(100%, 380px); }
+
+    .pvp-live-scoreboard {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        grid-template-areas:
+            "clock clock"
+            "challenger challenged";
+    }
+
+    .pvp-live-clock {
+        min-width: 0;
+        flex-direction: row;
+        gap: 10px;
+        border: 1px solid var(--border-dim);
+    }
+
+    .pvp-live-clock strong { margin-top: 0; }
+
+    .pvp-player-card {
+        min-width: 0;
+        padding: 9px 5px;
+    }
 }
 
 /* ============================================================
@@ -2203,15 +2367,16 @@
     }
 
     .hud-body {
-        grid-template-columns: minmax(0, 1fr) clamp(320px, 32vw, 400px);
+        grid-template-columns: minmax(0, 1fr) var(--sidebar-width);
     }
 
     .grid-hull {
-        width: min(50dvh, calc(100vw - clamp(320px, 32vw, 400px) - 48px), 720px);
+        width: min(100%, calc(100cqh - 112px), 720px);
     }
 
     .race-box {
-        max-width: min(50dvh, 720px);
+        width: min(100%, calc(100cqh - 112px), 720px);
+        max-width: 100%;
     }
 
     .sidebar-right {
@@ -2251,11 +2416,12 @@
     }
 
     .grid-hull {
-        width: min(calc(100vw - 48px), 64dvh, 640px);
+        width: min(100%, calc(100dvh - 112px), calc(100vw - 48px), 640px);
     }
 
     .race-box {
-        max-width: min(calc(100vw - 48px), 640px);
+        width: min(100%, calc(100dvh - 112px), calc(100vw - 48px), 640px);
+        max-width: 100%;
     }
 
     .sidebar-right {
@@ -2338,11 +2504,12 @@
     }
 
     .grid-hull {
-        width: min(calc(100vw - 16px), 58dvh, 520px);
+        width: min(100%, calc(100dvh - 112px), calc(100vw - 16px), 520px);
     }
 
     .race-box {
-        max-width: min(calc(100vw - 16px), 520px);
+        width: min(100%, calc(100dvh - 112px), calc(100vw - 16px), 520px);
+        max-width: 100%;
     }
 
     .sidebar-right {
@@ -2368,7 +2535,14 @@
     }
 }
 
-@media (min-width: 1920px) {
+/* FASE 1920 (25/08): o bloco era @media(min-width:1920px) e AUMENTAVA o chrome
+   (header 64, footer 48, btn 52, padding 24, fontes 8-9px) exatamente em 1920px —
+   tratando 1080p como "tela grande" e piorando o efeito "super zoom". 1920x1080
+   é resolução padrão/média, não grande. Movi para 2200px: em 1920px/1536px o
+   chrome usa os valores base (menores); só em telas realmente grandes (2200px+)
+   o chrome cresce. O grid-hull/race-box com altura fixa descontada também se move
+   (em 1920px passam a usar a regra base, mais conservadora em altura). */
+@media (min-width: 2200px) {
     .hud-header {
         min-height: 64px;
         padding-inline: 40px;
@@ -2432,13 +2606,6 @@
         font-size: 16px;
     }
 
-    .grid-hull {
-        width: min(70dvh, calc(100vw - clamp(320px, 28vw, 520px) - 64px), 1040px);
-    }
-
-    .race-box {
-        max-width: min(70dvh, 1040px);
-    }
 
     .mecha-btn {
         min-height: 52px;
@@ -2477,8 +2644,11 @@
     flex-direction: column;
     align-items: center;
     gap: 14px;
-    padding: 32px 40px;
-    min-width: 240px;
+    /* B1: em viewport de 320px, min-width 240 + padding 40*2 = 320px exatos
+       (sem margem). Limita a 100% e reduz o padding para caber com folga. */
+    padding: 24px;
+    min-width: min(240px, 100%);
+    max-width: 90vw;
     border-radius: 10px;
     background: var(--hull-panel);
     border: 2px solid var(--border-hi);
@@ -2578,9 +2748,9 @@
    bordas --border-hi, painéis --hull-surface, acentos neon.
    ========================================================================== */
 
-/* --- Texto flutuante de recompensa (anexado ao body, posicionado na célula) --- */
+/* --- Texto flutuante de recompensa (ancorado ao .grid-hull, posicionado na célula) --- */
 .floating-text {
-    position: fixed;
+    position: absolute;
     z-index: 600;
     pointer-events: none;
     font-family: var(--f-pixel);
@@ -2601,7 +2771,10 @@
     font-size: 12px;
 }
 .rank-item:last-child { border-bottom: none; }
-.rank-item span:first-child { color: var(--text-main); font-weight: 600; }
+.rank-item span:first-child { color: var(--text-main); font-weight: 600;
+    /* B2: nomes longos não estouram o container em 320px. */
+    min-width: 0;
+    overflow-wrap: anywhere; }
 .rank-item span:last-child { color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .rank-item.top-1 { background: rgba(255, 204, 0, 0.08); border-left: 2px solid var(--neon-gold); }
 .rank-item.top-1 span:first-child { color: var(--neon-gold); }
@@ -2697,6 +2870,8 @@
     font-size: 11px;
     font-weight: 700;
     color: var(--neon-cyan);
+    /* B3: usernames longos não estouram o container em 320px. */
+    overflow-wrap: anywhere;
 }
 .chat-message-time {
     font-size: 9px;

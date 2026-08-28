@@ -90,6 +90,21 @@
             </div>
         </header>
 
+        <!-- GLOBAL EVENT BANNER (Fase 8: Eventos Globais) -->
+        <div id="global-event-banner" class="global-event-banner hidden" aria-live="polite" role="alert">
+            <div class="global-event-banner-inner">
+                <span class="global-event-icon" id="global-event-icon"></span>
+                <div class="global-event-info">
+                    <span class="global-event-label" id="global-event-label"></span>
+                    <span class="global-event-description" id="global-event-description"></span>
+                </div>
+                <div class="global-event-timer">
+                    <span id="global-event-countdown" class="global-event-countdown"></span>
+                </div>
+                <button type="button" class="global-event-dismiss" id="btn-dismiss-event" aria-label="Fechar banner de evento"><svg class="ui-icon" aria-hidden="true"><use href="icons/ui-sprite.svg#icon-close"></use></svg></button>
+            </div>
+        </div>
+
         <!-- LEVEL BAR (Fase 2: Sistema de Níveis) -->
         <div class="level-bar-container" id="level-bar-container" hidden>
             <div class="level-info">
@@ -161,21 +176,6 @@
                             <div class="boss-hp-bar u-inline-011" id="boss-hp-bar"></div>
                             <span class="boss-hp-text" id="boss-hp-text">10 / 10</span>
                         </div>
-                    </div>
-                </div>
-
-                <!-- GLOBAL EVENT BANNER (Fase 8: Eventos Globais) -->
-                <div id="global-event-banner" class="global-event-banner hidden" aria-live="polite" role="alert">
-                    <div class="global-event-banner-inner">
-                        <span class="global-event-icon" id="global-event-icon"></span>
-                        <div class="global-event-info">
-                            <span class="global-event-label" id="global-event-label"></span>
-                            <span class="global-event-description" id="global-event-description"></span>
-                        </div>
-                        <div class="global-event-timer">
-                            <span id="global-event-countdown" class="global-event-countdown"></span>
-                        </div>
-                        <button type="button" class="global-event-dismiss" id="btn-dismiss-event" aria-label="Fechar banner de evento"><svg class="ui-icon" aria-hidden="true"><use href="icons/ui-sprite.svg#icon-close"></use></svg></button>
                     </div>
                 </div>
 
@@ -261,6 +261,53 @@
                         </div>
                         <span class="u-inline-016">Recarrega +3 energia.</span>
                     </div>
+
+                    <div class="powerup-shop-grid" id="powerup-shop-grid" aria-label="Loja de power-ups">
+                        <div class="shop-card-mecha powerup-shop-card" data-powerup-id="time_freeze">
+                            <div class="shop-row">
+                                <span class="powerup-shop-name" id="powerup-shop-name-time_freeze">TIME FREEZE</span>
+                                <button class="btn-action-small powerup-buy-btn" id="btn-buy-powerup-time_freeze" data-powerup-id="time_freeze" type="button">-- SATS</button>
+                            </div>
+                            <span class="u-inline-016 powerup-shop-meta" id="powerup-shop-meta-time_freeze">Limite: --/3 hoje</span>
+                            <span class="u-inline-016" id="powerup-shop-desc-time_freeze">Pausa o timer por 5 segundos.</span>
+                        </div>
+
+                        <div class="shop-card-mecha powerup-shop-card" data-powerup-id="scanner">
+                            <div class="shop-row">
+                                <span class="powerup-shop-name" id="powerup-shop-name-scanner">SCANNER</span>
+                                <button class="btn-action-small powerup-buy-btn" id="btn-buy-powerup-scanner" data-powerup-id="scanner" type="button">-- SATS</button>
+                            </div>
+                            <span class="u-inline-016 powerup-shop-meta" id="powerup-shop-meta-scanner">Limite: --/3 hoje</span>
+                            <span class="u-inline-016" id="powerup-shop-desc-scanner">Revela a direção de uma palavra por 1 rodada.</span>
+                        </div>
+
+                        <div class="shop-card-mecha powerup-shop-card" data-powerup-id="double_combo">
+                            <div class="shop-row">
+                                <span class="powerup-shop-name" id="powerup-shop-name-double_combo">DOUBLE COMBO</span>
+                                <button class="btn-action-small powerup-buy-btn" id="btn-buy-powerup-double_combo" data-powerup-id="double_combo" type="button">-- SATS</button>
+                            </div>
+                            <span class="u-inline-016 powerup-shop-meta" id="powerup-shop-meta-double_combo">Limite: --/3 hoje</span>
+                            <span class="u-inline-016" id="powerup-shop-desc-double_combo">Combo sobe até 6× por 1 rodada.</span>
+                        </div>
+
+                        <div class="shop-card-mecha powerup-shop-card" data-powerup-id="magnet">
+                            <div class="shop-row">
+                                <span class="powerup-shop-name" id="powerup-shop-name-magnet">MAGNET</span>
+                                <button class="btn-action-small powerup-buy-btn" id="btn-buy-powerup-magnet" data-powerup-id="magnet" type="button">-- SATS</button>
+                            </div>
+                            <span class="u-inline-016 powerup-shop-meta" id="powerup-shop-meta-magnet">Limite: --/3 hoje</span>
+                            <span class="u-inline-016" id="powerup-shop-desc-magnet">Palavras encontradas dão +50% sats por 1 rodada.</span>
+                        </div>
+
+                        <div class="shop-card-mecha powerup-shop-card" data-powerup-id="precision">
+                            <div class="shop-row">
+                                <span class="powerup-shop-name" id="powerup-shop-name-precision">PRECISION</span>
+                                <button class="btn-action-small powerup-buy-btn" id="btn-buy-powerup-precision" data-powerup-id="precision" type="button">-- SATS</button>
+                            </div>
+                            <span class="u-inline-016 powerup-shop-meta" id="powerup-shop-meta-precision">Limite: --/3 hoje</span>
+                            <span class="u-inline-016" id="powerup-shop-desc-precision">Sem slashing por 1 rodada.</span>
+                        </div>
+                    </div>
                     </section>
 
                     <!-- CRATES (Fase 9: Loot Boxes) -->
@@ -307,6 +354,29 @@
                     <!-- POOLS -->
                     <div class="u-inline-028">TOP POOLS:</div>
                     <div class="u-inline-027" id="pool-list"></div>
+
+                    <div class="pvp-live-panel" id="pvp-live-panel" hidden aria-live="polite">
+                        <div class="pvp-live-header">
+                            <span>P2P_DUEL_STREAM</span>
+                            <span class="pvp-live-status" id="pvp-status">STANDBY</span>
+                        </div>
+                        <div class="pvp-live-scoreboard">
+                            <div class="pvp-player-card pvp-challenger-card">
+                                <span class="pvp-player-role">CHALLENGER</span>
+                                <strong id="pvp-challenger-name">—</strong>
+                                <span class="pvp-live-score" id="pvp-challenger-score">0</span>
+                            </div>
+                            <div class="pvp-live-clock" aria-label="Tempo restante do duelo">
+                                <span>TIME_LEFT</span>
+                                <strong id="pvp-timer-value">00:00</strong>
+                            </div>
+                            <div class="pvp-player-card pvp-challenged-card">
+                                <span class="pvp-player-role">CHALLENGED</span>
+                                <strong id="pvp-challenged-name">—</strong>
+                                <span class="pvp-live-score" id="pvp-challenged-score">0</span>
+                            </div>
+                        </div>
+                    </div>
                     </section>
 
                     <!-- MISSIONS (Fase 3: Missões) -->

@@ -3,8 +3,8 @@
 ## Perfil atual
 
 O Compose entregue é um ambiente local endurecido, não uma topologia pronta
-para dinheiro real. O Nginx do jogo publica somente `127.0.0.1:8010`. O portal
-estático é outro serviço, opt-in pelo profile `docs`, em `127.0.0.1:8020`.
+para dinheiro real. O Nginx do jogo publica somente `127.0.0.1:8010` e serve a
+documentação sanitizada em `/docs/` (mesma origem).
 
 ## Checklist antes de expor
 

@@ -115,6 +115,92 @@ async def test_season_premium_purchase_uses_one_atomic_redis_script() -> None:
 
 
 @pytest.mark.asyncio
+async def test_powerup_buy_uses_server_price_and_atomic_script(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Compra direta deve debitar e creditar em um único EVAL."""
+    redis_client = AsyncMock()
+    redis_client.eval.return_value = [1, 95000, 1, 1]
+    redis_client.hgetall.return_value = {"scanner": "1"}
+    monkeypatch.setattr(main_module, "redis_client", redis_client)
+
+    request = main_module.PowerupBuyRequest(
+        username="Miner",
+        powerup_id="scanner",
+        quantity=1,
+        tx_id="buy-pu-scanner-001",
+    )
+    result = await main_module.buy_powerup("regtest", request)
+
+    assert result["status"] == "purchased"
+    assert result["price"] == 5000
+    assert result["total_cost"] == 5000
+    assert result["balance"] == 95000
+    assert result["inventory"]["scanner"] == 1
+    redis_client.eval.assert_awaited_once()
+    args = redis_client.eval.await_args.args
+    assert args[1] == 4
+    assert "5000" in args
+    assert "scanner" in args
+    assert any("buy-pu-scanner-001" in str(value) for value in args)
+    redis_client.hset.assert_not_awaited()
+    redis_client.hincrby.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_powerup_buy_rejects_daily_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Limite diário deve ser decidido pelo resultado atômico do Redis."""
+    redis_client = AsyncMock()
+    redis_client.eval.return_value = [-2, 10000, 3, 3]
+    monkeypatch.setattr(main_module, "redis_client", redis_client)
+
+    with pytest.raises(main_module.HTTPException) as error:
+        await main_module.buy_powerup(
+            "regtest",
+            main_module.PowerupBuyRequest(
+                username="Miner",
+                powerup_id="scanner",
+                tx_id="buy-pu-scanner-limit",
+            ),
+        )
+
+    assert error.value.status_code == 409
+    redis_client.eval.assert_awaited_once()
+
+
+def test_powerup_buy_payload_does_not_accept_client_price() -> None:
+    """O cliente não pode alterar o preço de uma compra."""
+    with pytest.raises(ValueError):
+        main_module.PowerupBuyRequest(
+            username="Miner",
+            powerup_id="scanner",
+            price=1,
+            tx_id="buy-pu-price",
+        )
+
+
+@pytest.mark.asyncio
+async def test_powerup_activation_uses_one_atomic_redis_script(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ativação deve decrementar inventário e timer no mesmo EVAL."""
+    redis_client = AsyncMock()
+    redis_client.eval.return_value = [1, 2]
+    redis_client.hgetall.return_value = {"scanner": "2"}
+    monkeypatch.setattr(main_module, "redis_client", redis_client)
+
+    result = await main_module._activate_powerup("regtest", "Miner", "scanner")
+
+    assert result["status"] == "activated"
+    assert result["powerup_id"] == "scanner"
+    redis_client.eval.assert_awaited_once()
+    redis_client.hget.assert_not_awaited()
+    redis_client.hset.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_market_list_uses_supported_zrange_signature(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -595,13 +681,13 @@ async def test_add_season_xp_blocked_when_season_ended() -> None:
 
 
 @pytest.mark.asyncio
-async def test_update_player_state_migrates_balance_only_when_stored_is_zero(
+async def test_update_player_state_migrates_balance_only_when_field_is_absent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Fase 5.3: o sync só migra o saldo local quando o armazenado é 0.
+    """Fase G: o sync migra saldo local apenas antes de o campo existir.
 
-    Um saldo local inflado/stale NÃO sobrescreve o saldo do backend
-    (auditoria Fase 5, ponta solta MÉDIO).
+    O valor zero pode ser resultado legítimo de uma compra; tratá-lo como
+    "não inicializado" ressuscitaria um saldo local stale.
     """
     redis_client = AsyncMock()
     monkeypatch.setattr(main_module, "redis_client", redis_client)
@@ -610,8 +696,8 @@ async def test_update_player_state_migrates_balance_only_when_stored_is_zero(
     monkeypatch.setattr(main_module, "matching_username", lambda a, b: "Miner")
     monkeypatch.setattr(main_module, "get_player_state", AsyncMock(return_value={}))
 
-    # Caso 1: armazenado = 0 → migra o saldo local.
-    redis_client.hget.return_value = "0"
+    # Caso 1: campo ausente → migração inicial permitida uma única vez.
+    redis_client.hget.return_value = None
     await main_module.update_player_state(
         "regtest", "Miner", main_module.PlayerStateUpdate(username="Miner", balance=500)
     )
@@ -619,15 +705,21 @@ async def test_update_player_state_migrates_balance_only_when_stored_is_zero(
     assert hset_mapping is not None
     assert hset_mapping.get("balance") == "500"
 
-    # Caso 2: armazenado > 0 → NÃO sobrescreve (mantém o do backend).
+    # Caso 2: armazenado = 0 → NÃO ressuscita saldo local stale.
+    redis_client.hget.return_value = "0"
+    redis_client.hset.reset_mock()
+    await main_module.update_player_state(
+        "regtest", "Miner", main_module.PlayerStateUpdate(username="Miner", balance=500)
+    )
+    redis_client.hset.assert_not_awaited()
+
+    # Caso 3: armazenado > 0 → também preserva a fonte de verdade.
     redis_client.hget.return_value = "1000"
     redis_client.hset.reset_mock()
     await main_module.update_player_state(
         "regtest", "Miner", main_module.PlayerStateUpdate(username="Miner", balance=500)
     )
-    hset_mapping = redis_client.hset.await_args.kwargs.get("mapping")
-    assert hset_mapping is not None
-    assert "balance" not in hset_mapping  # saldo do backend preservado
+    redis_client.hset.assert_not_awaited()
 
 
 @pytest.mark.asyncio

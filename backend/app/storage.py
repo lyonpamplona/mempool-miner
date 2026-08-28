@@ -128,6 +128,48 @@ return {1, new_current, new_balance}
 """
 
 
+STAKE_SETTLE_SCRIPT = """
+local stake_type = redis.call('type', KEYS[1])['ok']
+local player_type = redis.call('type', KEYS[2])['ok']
+local history_type = redis.call('type', KEYS[3])['ok']
+if (stake_type ~= 'none' and stake_type ~= 'hash')
+    or (player_type ~= 'none' and player_type ~= 'hash')
+    or (history_type ~= 'none' and history_type ~= 'list') then
+    return {-3, 0, 0, 0}
+end
+
+local amount = tonumber(redis.call('hget', KEYS[1], 'amount') or '0')
+if amount <= 0 then
+    -- Stake inválido/corrompido: remove a chave para não deixar hash órfão.
+    redis.call('del', KEYS[1])
+    return {0, 0, 0, tonumber(redis.call('hget', KEYS[2], 'balance') or '0')}
+end
+
+local now = tonumber(ARGV[1])
+local end_time = tonumber(redis.call('hget', KEYS[1], 'end_time') or '0')
+if end_time > now then
+    return {-1, amount, 0, tonumber(redis.call('hget', KEYS[2], 'balance') or '0')}
+end
+
+local bonus_percent = tonumber(redis.call('hget', KEYS[1], 'bonus_percent') or '0')
+local bonus_amount = math.floor((amount * bonus_percent) + 0.5)
+local new_balance = redis.call('hincrby', KEYS[2], 'balance', amount + bonus_amount)
+
+local history_entry = cjson.encode({
+    type = 'expired',
+    amount = amount,
+    bonus = bonus_amount,
+    timestamp = now
+})
+redis.call('rpush', KEYS[3], history_entry)
+redis.call('ltrim', KEYS[3], 0, 49)
+redis.call('expire', KEYS[3], tonumber(ARGV[2]))
+redis.call('del', KEYS[1])
+
+return {1, amount, bonus_amount, new_balance}
+"""
+
+
 def events_channel(realm_id: str) -> str:
     """Canal ao vivo de um realm."""
     return f"{PREFIX}:{{{validate_realm_id(realm_id)}}}:events"
@@ -244,6 +286,14 @@ def weekly_missions_key(realm_id: str, username: str, week: str) -> str:
 def powerups_key(realm_id: str, username: str) -> str:
     """Hash Redis com inventário de power-ups do jogador."""
     return f"{PREFIX}:{{{validate_realm_id(realm_id)}}}:powerups:{username}"
+
+
+def powerup_buy_daily_key(realm_id: str, username: str, date: str) -> str:
+    """Hash diário de compras de power-ups por jogador e realm."""
+    return (
+        f"{PREFIX}:{{{validate_realm_id(realm_id)}}}:"
+        f"powerup_buy_daily:{username}:{date}"
+    )
 
 
 # Fase 3: Chat em Tempo Real
@@ -449,6 +499,87 @@ balance = balance - amount
 redis.call('hset', KEYS[1], 'balance', balance)
 redis.call('set', KEYS[2], 'spent', 'EX', tonumber(ARGV[2]))
 return {1, balance}
+"""
+
+
+# Compra direta de power-up: débito, inventário, limite diário e idempotência
+# ocorrem no mesmo EVAL. KEYS[1]=player, KEYS[2]=tx, KEYS[3]=powerups,
+# KEYS[4]=daily. ARGV: total_cost, tx_ttl, powerup_id, quantity,
+# per_powerup_limit, global_limit, daily_ttl, inventory_ttl.
+# Retorna {code, balance, item_bought_today, total_bought_today}.
+# code: 1 comprado, 0 replay idempotente, -1 saldo insuficiente,
+# -2 limite diário, -3 tipo Redis inválido.
+POWERUP_BUY_SCRIPT = """
+local player_key = KEYS[1]
+local tx_key = KEYS[2]
+local powerups_key = KEYS[3]
+local daily_key = KEYS[4]
+local total_cost = tonumber(ARGV[1])
+local tx_ttl = tonumber(ARGV[2])
+local powerup_id = ARGV[3]
+local quantity = tonumber(ARGV[4])
+local per_limit = tonumber(ARGV[5])
+local global_limit = tonumber(ARGV[6])
+local daily_ttl = tonumber(ARGV[7])
+local inventory_ttl = tonumber(ARGV[8])
+
+local player_type = redis.call('type', player_key)['ok']
+local powerups_type = redis.call('type', powerups_key)['ok']
+local daily_type = redis.call('type', daily_key)['ok']
+if (player_type ~= 'none' and player_type ~= 'hash')
+    or (powerups_type ~= 'none' and powerups_type ~= 'hash')
+    or (daily_type ~= 'none' and daily_type ~= 'hash') then
+  return {-3, 0, 0, 0}
+end
+
+local balance = tonumber(redis.call('hget', player_key, 'balance') or '0')
+local item_bought = tonumber(redis.call('hget', daily_key, powerup_id) or '0')
+local total_bought = tonumber(redis.call('hget', daily_key, 'total') or '0')
+
+if redis.call('exists', tx_key) == 1 then
+  return {0, balance, item_bought, total_bought}
+end
+if balance < total_cost then
+  return {-1, balance, item_bought, total_bought}
+end
+if item_bought + quantity > per_limit or total_bought + quantity > global_limit then
+  return {-2, balance, item_bought, total_bought}
+end
+
+balance = balance - total_cost
+redis.call('hset', player_key, 'balance', tostring(balance))
+redis.call('hincrby', powerups_key, powerup_id, quantity)
+redis.call('expire', powerups_key, inventory_ttl)
+redis.call('hincrby', daily_key, powerup_id, quantity)
+redis.call('hincrby', daily_key, 'total', quantity)
+redis.call('expire', daily_key, daily_ttl)
+redis.call('set', tx_key, 'powerup_purchase', 'EX', tx_ttl)
+return {1, balance, item_bought + quantity, total_bought + quantity}
+"""
+
+
+# Ativação de power-up: valida e decrementa o inventário atomicamente.
+# Retorna {code, remaining}: 1 ativado, 0 sem unidade, -1 tipo inválido.
+POWERUP_ACTIVATE_SCRIPT = """
+local inventory_key = KEYS[1]
+local powerup_id = ARGV[1]
+local duration = tonumber(ARGV[2])
+local inventory_ttl = tonumber(ARGV[3])
+local storage_type = redis.call('type', inventory_key)['ok']
+if storage_type ~= 'none' and storage_type ~= 'hash' then
+  return {-1, 0}
+end
+local current = tonumber(redis.call('hget', inventory_key, powerup_id) or '0')
+if current <= 0 then
+  return {0, 0}
+end
+local remaining = current - 1
+redis.call('hset', inventory_key, powerup_id, tostring(remaining))
+if duration > 0 then
+  redis.call('hset', inventory_key, 'timer_' .. powerup_id, tostring(duration))
+end
+redis.call('expire', inventory_key, inventory_ttl)
+return {1, remaining}
 """
 
 

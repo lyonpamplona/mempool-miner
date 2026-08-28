@@ -23,7 +23,7 @@ IGNORED_PARTS = {
 PUBLIC_SITE_FILES = {
     (ROOT / "docs" / "index.html").resolve(),
     (ROOT / "docs" / "api.html").resolve(),
-    (ROOT / "guia-apresentacao.html").resolve(),
+    (ROOT / "docs" / "guia-apresentacao.html").resolve(),
 }
 
 
@@ -54,19 +54,20 @@ def is_external(reference: str) -> bool:
 
 
 def resolve_public_route(reference: str) -> Path:
-    """Mapeia as rotas absolutas do artefato público para seus fontes."""
+    """Mapeia as rotas absolutas do artefato público (/docs/) para seus fontes."""
     clean_path = unquote(urlsplit(reference).path)
     normalized = clean_path.rstrip("/") or "/"
     routes = {
-        "/": ROOT / "docs" / "index.html",
-        "/api": ROOT / "docs" / "api.html",
-        "/apresentacao": ROOT / "guia-apresentacao.html",
-        "/site.css": ROOT / "docs" / "site.css",
+        "/docs": ROOT / "docs" / "index.html",
+        "/docs/api": ROOT / "docs" / "api.html",
+        "/docs/apresentacao": ROOT / "docs" / "guia-apresentacao.html",
+        "/docs/wiki.css": ROOT / "docs" / "wiki.css",
+        "/docs/wiki.js": ROOT / "docs" / "wiki.js",
     }
     if normalized in routes:
         return routes[normalized].resolve()
-    if normalized.startswith("/assets/"):
-        return (ROOT / "docs" / normalized.removeprefix("/")).resolve()
+    if normalized.startswith("/docs/assets/"):
+        return (ROOT / "docs" / normalized.removeprefix("/docs/")).resolve()
     return (ROOT / "__rota_publica_inexistente__" / normalized.removeprefix("/")).resolve()
 
 

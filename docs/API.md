@@ -129,7 +129,7 @@ persistido no Redis por realm.
 | POST | `/level/{username}/add-xp` | adiciona XP e verifica level-up |
 | GET | `/achievements/{username}` | conquistas com status, progresso e bônus |
 | POST | `/stats/{username}` | atualiza estatísticas (dispara desbloqueio) |
-| GET | `/achievements/definitions` | catálogo das 28 conquistas |
+| GET | `/achievements/definitions` | catálogo das 30 conquistas |
 
 ### Missões
 
@@ -151,7 +151,13 @@ persistido no Redis por realm.
 | Método | Rota | Uso |
 |---|---|---|
 | GET | `/powerups/{username}` | inventário de power-ups |
+| POST | `/powerups/buy` | compra direta com limite diário e idempotência |
 | POST | `/powerups/activate` | ativa power-up na partida |
+
+`POST /powerups/buy` recebe `username`, `powerup_id`, `quantity` (1–3) e
+`tx_id`. O preço é resolvido exclusivamente pelo servidor. O limite é de 3
+unidades por item e 10 unidades totais por jogador/realm/dia UTC; saldo,
+inventário, contadores e idempotência são atualizados atomicamente.
 
 ### Chat
 

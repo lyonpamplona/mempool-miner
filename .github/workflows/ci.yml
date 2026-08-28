@@ -65,8 +65,6 @@ jobs:
           cp .env.example .env
           docker compose config --quiet
           docker compose --profile mainnet config --quiet
-          docker compose --profile docs config --quiet
-          docker compose --profile mainnet --profile docs config --quiet
           printf '%s\n' 'RPC_USER=legacy_ci' 'RPC_PASSWORD=legacy_ci_password' > "$RUNNER_TEMP/legacy.env"
           docker compose --env-file "$RUNNER_TEMP/legacy.env" --profile mainnet config --quiet
           printf '%s\n' \
@@ -79,7 +77,6 @@ jobs:
       - name: Construir imagens
         run: |
           docker compose build --pull
-          docker compose --profile docs build docs
 
       - name: Iniciar a stack
         run: |
@@ -90,7 +87,6 @@ jobs:
             bitcoin-cli -regtest -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASSWORD" generatetoaddress 101 "$address" >/dev/null
           '
           docker compose up -d --wait --wait-timeout 180 ingestor-regtest backend frontend
-          docker compose --profile docs up -d --wait --wait-timeout 60 docs
 
       - name: Executar smoke tests
         run: |
@@ -104,19 +100,23 @@ jobs:
           docker compose exec -T frontend sh -c '
             test -e /usr/share/nginx/html/manifest.webmanifest
             test -e /usr/share/nginx/html/service-worker.js
-            test ! -e /usr/share/nginx/html/docs
+            test -e /usr/share/nginx/html/docs/index.html
+            test -e /usr/share/nginx/html/docs/api/index.html
+            test -e /usr/share/nginx/html/docs/apresentacao/index.html
+            test -e /usr/share/nginx/html/docs/wiki.css
+            test -e /usr/share/nginx/html/docs/wiki.js
             test ! -e /usr/share/nginx/html/apresentacao.html
             test ! -e /usr/share/nginx/html/README.md
           '
-          curl --fail --silent --show-error http://127.0.0.1:8020/ > /dev/null
-          curl --fail --silent --show-error http://127.0.0.1:8020/api/ > /dev/null
-          curl --fail --silent --show-error http://127.0.0.1:8020/apresentacao/ > /dev/null
-          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8020/openapi.json)" = "404"
-          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8020/AUDITORIA.md)" = "404"
-          docker compose --profile docs exec -T docs sh -c '
-            test ! -e /usr/share/nginx/html/AUDITORIA.md
-            test ! -e /usr/share/nginx/html/ROADMAP.md
-            test ! -e /usr/share/nginx/html/prototipo-v2.html
+          curl --fail --silent --show-error http://127.0.0.1:8010/docs/ > /dev/null
+          curl --fail --silent --show-error http://127.0.0.1:8010/docs/api/ > /dev/null
+          curl --fail --silent --show-error http://127.0.0.1:8010/docs/apresentacao/ > /dev/null
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8010/docs/openapi.json)" = "404"
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8010/docs/AUDITORIA.md)" = "404"
+          docker compose exec -T frontend sh -c '
+            test ! -e /usr/share/nginx/html/docs/AUDITORIA.md
+            test ! -e /usr/share/nginx/html/docs/ROADMAP.md
+            test ! -e /usr/share/nginx/html/docs/prototipo-v2.html
           '
           test "$(docker compose exec -T redis redis-cli ping)" = "PONG"
           docker compose exec -T bitcoin-regtest sh -lc '
@@ -151,4 +151,4 @@ jobs:
 
       - name: Encerrar a stack efêmera
         if: always()
-        run: docker compose --profile docs down --volumes --remove-orphans
+        run: docker compose down --volumes --remove-orphans
