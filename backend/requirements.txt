@@ -4,6 +4,6 @@ websockets==12.0
 pyzmq==27.1.0
 python-dotenv==1.2.2
 mnemonic==0.20
-redis==5.0.1
+redis==8.1.0
 httpx==0.25.1
 pydantic==2.13.4
