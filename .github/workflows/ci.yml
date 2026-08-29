@@ -16,7 +16,7 @@ jobs:
       RPC_PASSWORD: test_password
     steps:
       - name: Obter o código
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Preparar Python
         uses: actions/setup-python@v5
@@ -58,7 +58,7 @@ jobs:
       BACKEND_IMAGE: mempool-miner-backend:ci-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Obter o código
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Preparar e validar o Compose
         run: |
