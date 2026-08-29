@@ -27,7 +27,7 @@ x-ingestor: &ingestor
 
 services:
   redis:
-    image: redis:7.4-alpine
+    image: redis:8.10-alpine
     command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD não definido}"]
     restart: unless-stopped
     volumes:
