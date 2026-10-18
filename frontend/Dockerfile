@@ -1,4 +1,4 @@
-FROM nginx:1.28-alpine
+FROM nginx:1.29-alpine
 
 # O contexto de build é a raiz do repositório: os assets do jogo estão em
 # frontend/ e a documentação integrada em /docs/ está em docs/.
